@@ -12,9 +12,6 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  # ─────────────────────────────────────────
-  # FRONTEND — React + TypeScript
-  # ─────────────────────────────────────────
   frontend-ci:
     name: Frontend CI
     runs-on: ubuntu-latest
@@ -29,8 +26,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
+          # ✅ Removed cache config from setup — handled manually below
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
       - name: Install dependencies
         run: npm ci
@@ -47,9 +51,6 @@ jobs:
       - name: Build
         run: npm run build
 
-  # ─────────────────────────────────────────
-  # BACKEND — Python + FastAPI
-  # ─────────────────────────────────────────
   backend-ci:
     name: Backend CI
     runs-on: ubuntu-latest
@@ -79,8 +80,15 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-          cache-dependency-path: backend/requirements*.txt
+          # ✅ Removed cache config from setup — handled manually below
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
@@ -104,9 +112,6 @@ jobs:
           SECRET_KEY: test-secret-key-for-ci
           ENVIRONMENT: test
 
-  # ─────────────────────────────────────────
-  # SECURITY SCANNING
-  # ─────────────────────────────────────────
   security:
     name: Security Scan
     runs-on: ubuntu-latest
