@@ -4,12 +4,16 @@ import { Upload, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react"
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { ValidationErrors } from "../components/shared/ValidationErrors";
+import { useAuth } from "../context/AuthContext";
+import { processUpload } from "../services/uploadService";
 
 export function UploadPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [validationErrors, setValidationErrors] = useState<Array<{field: string; message: string; severity: "error" | "warning"}>>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -26,6 +30,11 @@ export function UploadPage() {
     const droppedFile = e.dataTransfer.files[0];
     if (droppedFile && (droppedFile.name.endsWith(".xlsx") || droppedFile.name.endsWith(".csv"))) {
       setFile(droppedFile);
+      setValidationErrors([]);
+    } else if (droppedFile) {
+      setValidationErrors([
+        { field: "File Format", message: "Invalid file format. Please upload Excel (.xlsx) or CSV (.csv) files only.", severity: "error" },
+      ]);
     }
   };
 
@@ -45,7 +54,7 @@ export function UploadPage() {
     }
   };
 
-  const handleProcess = () => {
+  const handleProcess = async () => {
     if (!file) return;
 
     // Mock validation
@@ -55,8 +64,27 @@ export function UploadPage() {
       return;
     }
 
-    // Navigate to results page
-    navigate("/upload/result");
+    setIsProcessing(true);
+    setValidationErrors([]);
+
+    try {
+      const result = await processUpload(file, user);
+      if (!result.success) {
+        setValidationErrors(result.validation_errors);
+        return;
+      }
+      navigate("/upload/result", { state: { uploadResult: result } });
+    } catch (error) {
+      setValidationErrors([
+        {
+          field: "Upload",
+          message: error instanceof Error ? error.message : "Upload failed. Please try again.",
+          severity: "error",
+        },
+      ]);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -192,11 +220,11 @@ export function UploadPage() {
           <Button variant="outline">Cancel</Button>
           <Button
             className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
-            disabled={!file || validationErrors.length > 0}
+            disabled={!file || validationErrors.length > 0 || isProcessing}
             onClick={handleProcess}
           >
             <FileSpreadsheet className="h-4 w-4 mr-2" />
-            Validate & Process
+            {isProcessing ? "Processing..." : "Validate & Process"}
           </Button>
         </div>
       </div>

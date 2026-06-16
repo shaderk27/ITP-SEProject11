@@ -10,6 +10,16 @@ npm run dev
 
 Open the local URL printed by Vite, usually `http://localhost:5173/`.
 
+## Backend setup
+
+```bash
+python -m pip install -r backend/requirements.txt
+$env:PYTHONPATH="backend"
+python -m uvicorn app.main:app --reload --app-dir backend
+```
+
+The backend runs on `http://127.0.0.1:8000/`. The frontend dev server proxies `/api` requests to this backend.
+
 ## Dependency notes
 
 - Run frontend npm commands from `frontend`, not the repo root.
@@ -23,6 +33,11 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 ```bash
 cd frontend
 npm run build
+```
+
+```bash
+$env:PYTHONPATH="backend"
+python -m pytest backend/app/tests
 ```
 
 The current frontend uses a demo login role selector for Admin, Team Lead, and Lab IC.
