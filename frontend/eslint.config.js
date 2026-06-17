@@ -19,4 +19,7 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+  "ignorePatterns": ["src/app/components/ui/*"]
+  },
 ])
