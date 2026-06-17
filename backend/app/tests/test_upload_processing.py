@@ -2,7 +2,7 @@ from io import BytesIO
 from pathlib import Path
 import tempfile
 
-import pandas as pd
+import pandas as pd # type: ignore[import-untyped]
 
 from app.repositories.upload_repository import UploadRepository
 from app.services.upload_service import UploadService

@@ -5,3 +5,4 @@ httpx
 ruff
 black
 mypy
+pandas-stubs
