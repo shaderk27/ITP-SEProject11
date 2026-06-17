@@ -17,7 +17,9 @@ async def process_upload(
 ) -> dict:
     role = x_user_role.lower().strip()
     if role not in ALLOWED_UPLOAD_ROLES:
-        raise HTTPException(status_code=403, detail="Lab IC users cannot upload PR files.")
+        raise HTTPException(
+            status_code=403, detail="Lab IC users cannot upload PR files."
+        )
 
     payload = await file.read()
     service = UploadService(repository=UploadRepository())

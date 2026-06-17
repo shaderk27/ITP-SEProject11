@@ -50,7 +50,9 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
     errors: list[dict[str, str]] = []
     normalised_columns = {normalize_text(column): column for column in df.columns}
 
-    missing_columns = [column for column in REQUIRED_COLUMNS if column not in normalised_columns]
+    missing_columns = [
+        column for column in REQUIRED_COLUMNS if column not in normalised_columns
+    ]
     for column in missing_columns:
         errors.append(
             {
@@ -191,7 +193,9 @@ def generate_line_identity_key(
 
 
 def generate_content_hash(fields: dict[str, str]) -> str:
-    raw_content = "|".join(f"{key}={normalize_key_part(value)}" for key, value in sorted(fields.items()))
+    raw_content = "|".join(
+        f"{key}={normalize_key_part(value)}" for key, value in sorted(fields.items())
+    )
     return hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
 
 

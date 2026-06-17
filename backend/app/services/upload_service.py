@@ -3,13 +3,21 @@ from __future__ import annotations
 from uuid import uuid4
 
 from app.models.upload import UploadMetadata
-from app.processors.upload_parser import parse_line_items, read_upload_dataframe, validate_dataframe
+from app.processors.upload_parser import (
+    parse_line_items,
+    read_upload_dataframe,
+    validate_dataframe,
+)
 from app.repositories.upload_repository import UploadRepository
 from app.services.duplicate_service import DuplicateService
 
 
 class UploadService:
-    def __init__(self, repository: UploadRepository, duplicate_service: DuplicateService | None = None) -> None:
+    def __init__(
+        self,
+        repository: UploadRepository,
+        duplicate_service: DuplicateService | None = None,
+    ) -> None:
         self.repository = repository
         self.duplicate_service = duplicate_service or DuplicateService()
 
@@ -34,9 +42,21 @@ class UploadService:
         try:
             dataframe = read_upload_dataframe(filename, content)
         except ValueError as error:
-            return self._failed_result(metadata, [{"field": "File Format", "message": str(error), "severity": "error"}])
+            return self._failed_result(
+                metadata,
+                [{"field": "File Format", "message": str(error), "severity": "error"}],
+            )
         except Exception as error:
-            return self._failed_result(metadata, [{"field": "File", "message": f"Could not read upload: {error}", "severity": "error"}])
+            return self._failed_result(
+                metadata,
+                [
+                    {
+                        "field": "File",
+                        "message": f"Could not read upload: {error}",
+                        "severity": "error",
+                    }
+                ],
+            )
 
         validation_errors = validate_dataframe(dataframe)
         if any(error["severity"] == "error" for error in validation_errors):
@@ -55,7 +75,9 @@ class UploadService:
                     "status": decision.status,
                     "reason": decision.reason,
                     "line": item.to_dict(),
-                    "previous_batch_id": None if existing is None else existing.get("batch_id"),
+                    "previous_batch_id": (
+                        None if existing is None else existing.get("batch_id")
+                    ),
                 }
             )
             if decision.status in {"inserted", "updated"}:
@@ -78,7 +100,9 @@ class UploadService:
             "records": records,
         }
 
-    def _failed_result(self, metadata: UploadMetadata, errors: list[dict[str, str]]) -> dict:
+    def _failed_result(
+        self, metadata: UploadMetadata, errors: list[dict[str, str]]
+    ) -> dict:
         return {
             "success": False,
             "metadata": metadata.to_dict(),

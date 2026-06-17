@@ -23,13 +23,19 @@ class UploadRepository:
         with self.storage_path.open("w", encoding="utf-8") as file:
             json.dump(store, file, indent=2)
 
-    def save_batch_metadata(self, metadata: UploadMetadata, store: dict[str, Any]) -> None:
+    def save_batch_metadata(
+        self, metadata: UploadMetadata, store: dict[str, Any]
+    ) -> None:
         store.setdefault("batches", []).append(metadata.to_dict())
 
-    def get_line_record(self, identity_key: str, store: dict[str, Any]) -> dict[str, Any] | None:
+    def get_line_record(
+        self, identity_key: str, store: dict[str, Any]
+    ) -> dict[str, Any] | None:
         return store.setdefault("line_records", {}).get(identity_key)
 
-    def upsert_line_record(self, item: PRLineItem, metadata: UploadMetadata, store: dict[str, Any]) -> None:
+    def upsert_line_record(
+        self, item: PRLineItem, metadata: UploadMetadata, store: dict[str, Any]
+    ) -> None:
         store.setdefault("line_records", {})[item.line_identity_key] = {
             "batch_id": metadata.batch_id,
             "last_uploaded_at": metadata.uploaded_at,
