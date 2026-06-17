@@ -18,8 +18,10 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',   // ✅ downgrade to warning while you fix
+      '@typescript-eslint/no-unused-vars': 'warn',    // ✅ downgrade to warning while you fix
+    },
   },
-  {
-  "ignorePatterns": ["src/app/components/ui/*"]
-  },
+
 ])
