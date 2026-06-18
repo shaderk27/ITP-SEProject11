@@ -54,6 +54,8 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "reports:view",
     "alerts:view",
     "budget:view",
+    "hierarchy:view",
+    "category:view",
   ],
 
   labic: [
@@ -98,8 +100,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
 
     localStorage.removeItem("user");
-  };
 
+    localStorage.removeItem("token");
+  };
+  const hasRole = (roles: UserRole[]) => {
+    if (!user) {
+      return false;
+    }
+
+    return roles.includes(user.role);
+  };
   const hasAccess = (requiredRoles: UserRole[]) => {
     if (!user) return false;
     return requiredRoles.includes(user.role);
@@ -141,3 +151,4 @@ export function useAuth() {
   }
   return context;
 }
+
