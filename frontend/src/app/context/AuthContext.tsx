@@ -30,7 +30,7 @@ export type Permission =
   | "category:view"
   | "category:create"
   | "category:edit";
-const rolePermissions = {
+const rolePermissions: Record<UserRole, Permission[]> = {
   admin: [
     "dashboard:view",
     "upload:create",
@@ -44,12 +44,6 @@ const rolePermissions = {
     "config:edit",
     "budget:view",
     "budget:edit",
-    "hierarchy:view",
-    "hierarchy:create",
-    "hierarchy:edit",
-    "category:view",
-    "category:create",
-    "category:edit",
   ],
 
   teamlead: [
@@ -60,8 +54,6 @@ const rolePermissions = {
     "reports:view",
     "alerts:view",
     "budget:view",
-    "hierarchy:view",
-    "category:view",
   ],
 
   labic: [
@@ -75,18 +67,16 @@ const rolePermissions = {
 
 interface AuthContextType {
   user: User | null;
-  isAuthenticated: boolean;
-  isLoading: boolean;
 
-  login: (email: string, password: string) => Promise<void>;
+  login: (user: User) => void;
 
   logout: () => void;
 
-  hasRole: (roles: UserRole[]) => boolean;
+  hasAccess: (requiredRoles: UserRole[]) => boolean;
 
   hasPermission: (permission: Permission) => boolean;
 
-  canAccessLab: (labCode: string) => boolean;
+  isLoading:() => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -98,22 +88,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const login = async (email: string, password: string) => {
-    const response = await authApi.login(email, password);
+  const login = (userData: User) => {
+    setUser(userData);
 
-    setUser(response.user);
-
-    localStorage.setItem("user", JSON.stringify(response.user));
-
-    localStorage.setItem("token", response.token);
+    localStorage.setItem("user", JSON.stringify(userData));
   };
 
   const logout = () => {
     setUser(null);
 
     localStorage.removeItem("user");
-
-    localStorage.removeItem("token");
   };
   const hasRole = (roles: UserRole[]) => {
     if (!user) {
@@ -130,12 +114,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) {
       return false;
     }
-
     return rolePermissions[user.role].includes(permission);
   };
+  const isLoading=()=>{return false;}
   return (
     <AuthContext.Provider
-      value={{ user, login, logout, hasAccess, hasPermission }}
+      value={{ user, login, logout, hasAccess, hasPermission, isLoading }}
     >
       {children}
     </AuthContext.Provider>
@@ -150,4 +134,3 @@ export function useAuth() {
   }
   return context;
 }
-
