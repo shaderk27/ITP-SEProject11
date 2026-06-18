@@ -76,7 +76,8 @@ interface AuthContextType {
 
   hasPermission: (permission: Permission) => boolean;
 
-  isLoading:() => boolean;
+
+  canAccessLab: (labCode: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -99,13 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     localStorage.removeItem("user");
   };
-  const hasRole = (roles: UserRole[]) => {
-    if (!user) {
-      return false;
-    }
 
-    return roles.includes(user.role);
-  };
   const hasAccess = (requiredRoles: UserRole[]) => {
     if (!user) return false;
     return requiredRoles.includes(user.role);
@@ -116,10 +111,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return rolePermissions[user.role].includes(permission);
   };
-  const isLoading=()=>{return false;}
+
+  const canAccessLab = (labCode: string) => {
+    if (!user) {
+      return false;
+    }
+
+    if (user.role === "admin") {
+      return true;
+    }
+    if(user.assignedLabs==undefined||user.assignedLabs?.length==0){
+      return false;//assume if nothing then no allowed (may mess with admin)
+    }
+    return user.assignedLabs.includes(labCode);
+  };
   return (
     <AuthContext.Provider
-      value={{ user, login, logout, hasAccess, hasPermission, isLoading }}
+      value={{ user, login, logout, hasAccess, hasPermission, canAccessLab}}
     >
       {children}
     </AuthContext.Provider>
