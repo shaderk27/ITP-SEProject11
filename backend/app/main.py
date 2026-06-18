@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
+from app.api import config
 from app.api.upload import router as upload_router
 
 app = FastAPI(title="Lab Budget Monitoring API")
+
+app.include_router(config.router)
 
 app.add_middleware(
     CORSMiddleware,
