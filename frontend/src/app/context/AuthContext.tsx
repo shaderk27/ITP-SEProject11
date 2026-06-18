@@ -54,8 +54,6 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "reports:view",
     "alerts:view",
     "budget:view",
-    "hierarchy:view",
-    "category:view",
   ],
 
   labic: [
@@ -100,8 +98,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
 
     localStorage.removeItem("user");
-
-    localStorage.removeItem("token");
   };
   const hasRole = (roles: UserRole[]) => {
     if (!user) {
@@ -120,6 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     return rolePermissions[user.role].includes(permission);
   };
+<<<<<<< HEAD
 
   const canAccessLab = (labCode: string) => {
     if (!user) {
@@ -137,6 +134,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{ user, login, logout, hasAccess, hasPermission, canAccessLab}}
+=======
+  const isLoading=()=>{return false;}
+  return (
+    <AuthContext.Provider
+      value={{ user, login, logout, hasAccess, hasPermission, isLoading }}
+>>>>>>> cc29f9c (authpt2)
     >
       {children}
     </AuthContext.Provider>
@@ -151,4 +154,3 @@ export function useAuth() {
   }
   return context;
 }
-
