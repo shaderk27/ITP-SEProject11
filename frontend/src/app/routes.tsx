@@ -12,6 +12,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { AuditLogPage } from "./pages/AuditLogPage";
 import { SystemConfigPage } from "./pages/SystemConfigPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
+import { ProtectedRoute } from "./ProtectedRoute";
 
 export const router = createBrowserRouter([
   {
@@ -20,7 +21,11 @@ export const router = createBrowserRouter([
   },
   {
     path: "/",
-    Component: RootLayout,
+    element: (
+      <ProtectedRoute>
+        <RootLayout />
+      </ProtectedRoute>
+    ),
     children: [
       { index: true, Component: DashboardPage },
       { path: "upload", Component: UploadPage },
