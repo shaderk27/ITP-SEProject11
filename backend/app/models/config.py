@@ -4,6 +4,8 @@ from sqlalchemy.sql import func
 from app.database import Base
 from pydantic import BaseModel
 
+# --- SQLALCHEMY DATABASE MODELS ---
+
 class LabGroup(Base):
     __tablename__ = "lab_groups"
     
@@ -71,8 +73,8 @@ class Budget(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-# --- PYDANTIC SCHEMAS FOR API RESPONSES ---
- 
+# --- PYDANTIC API SCHEMAS ---
+
 class LabGroupOut(BaseModel):
     id: int
     name: str
@@ -87,8 +89,15 @@ class LabOut(BaseModel):
     budget: int
     ic: str
 
-# --- NEW: PYDANTIC SCHEMAS FOR CREATING/EDITING ---
 class LabGroupCreate(BaseModel):
     name: str
     wbs_code: str
     description: str | None = None
+
+class LabCreate(BaseModel):
+    lab_code: str
+    lab_name: str
+    lab_group_id: int
+    venue: str | None = None
+    ic_name: str | None = None
+    ic_email: str | None = None
