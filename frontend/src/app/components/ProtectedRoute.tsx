@@ -16,18 +16,18 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
   const {
     user,
-    isLoading,
+    //isLoading,
     hasPermission,
   } = useAuth();
 
   // Waiting for auth restoration
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        Loading...
-      </div>
-    );
-  }
+  // if (isLoading) {
+  //   return (
+  //     <div className="flex items-center justify-center h-screen">
+  //       Loading...
+  //     </div>
+  //   );
+  // }
 
   // Not authenticated
   if (!user) {
