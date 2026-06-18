@@ -32,8 +32,7 @@ def get_or_create_current_period(db: Session) -> int:
     new_period = BudgetPeriod(
         period_name=period_name,
         start_date=date(start_year, 4, 1),
-        end_date=date(start_year + 1, 3, 31),
-        is_active=True
+        end_date=date(start_year + 1, 3, 31)
     )
     db.add(new_period)
     db.commit()

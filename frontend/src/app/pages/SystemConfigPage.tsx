@@ -126,9 +126,9 @@ export function SystemConfigPage() {
                 <table className="w-full">
                   <thead className="bg-[#f8f9fa]">
                     <tr className="border-b border-border text-sm font-medium text-muted-foreground">
-                      <th className="text-left p-4">Name</th>
-                      <th className="text-left p-4">WBS Prefix</th>
-                      <th className="text-right p-4">Total Lab Budgets</th>
+                      <th className="text-left p-4">Lab Group Name</th>
+                      <th className="text-left p-4">Lab Group Code</th>
+                      <th className="text-right p-4">Total Allocated Budgets</th>
                       <th className="text-center p-4">Actions</th>
                     </tr>
                   </thead>
