@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Card } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
-import { Plus, Trash2, Edit, X } from "lucide-react";
+import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker } from "lucide-react";
 import { UserManagement } from "../components/config/UserManagement";
 
 export function SystemConfigPage() {
@@ -11,6 +11,9 @@ export function SystemConfigPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
+  // --- NEW: EXPANDING ROWS STATE ---
+  const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
+
   // --- EDITING STATES ---
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
   const [editingLabId, setEditingLabId] = useState<number | null>(null);
@@ -49,6 +52,15 @@ export function SystemConfigPage() {
   useEffect(() => {
     fetchConfigData();
   }, []);
+
+  // --- NEW: TOGGLE ROW HELPER ---
+  const toggleGroupExpand = (groupId: number) => {
+    if (expandedGroups.includes(groupId)) {
+      setExpandedGroups(expandedGroups.filter(id => id !== groupId));
+    } else {
+      setExpandedGroups([...expandedGroups, groupId]);
+    }
+  };
 
   // --- GENERIC CRUD HANDLERS ---
   const handleSave = async (endpoint: string, method: string, payload: any, onSuccess: () => void) => {
@@ -113,11 +125,11 @@ export function SystemConfigPage() {
             <TabsTrigger value="users">Users</TabsTrigger>
           </TabsList>
 
-          {/* LAB GROUPS TAB */}
+          {/* ======================= LAB GROUPS TAB ======================= */}
           <TabsContent value="labgroups">
             <Card className="bg-white border-border">
               <div className="p-6 border-b border-border flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-foreground">Lab Groups</h3>
+                <h3 className="text-lg font-semibold text-foreground">Lab Groups Overview</h3>
                 <Button onClick={() => { resetGroupModal(); setIsGroupModalOpen(true); }} className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white">
                   <Plus className="h-4 w-4 mr-2" /> Add Lab Group
                 </Button>
@@ -126,39 +138,103 @@ export function SystemConfigPage() {
                 <table className="w-full">
                   <thead className="bg-[#f8f9fa]">
                     <tr className="border-b border-border text-sm font-medium text-muted-foreground">
+                      <th className="w-12 p-4"></th> {/* Blank header for expand button */}
                       <th className="text-left p-4">Lab Group Name</th>
                       <th className="text-left p-4">Lab Group Code</th>
-                      <th className="text-right p-4">Total Allocated Budgets</th>
+                      <th className="text-right p-4">Allocated Budget</th>
+                      <th className="text-right p-4 text-[#16a34a]">Available Balance</th>
                       <th className="text-center p-4">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {labGroups.map((group) => (
-                      <tr key={group.id} className="border-b border-border hover:bg-[#f8f9fa]">
-                        <td className="p-4 text-sm font-medium text-foreground">{group.name}</td>
-                        <td className="p-4 text-sm text-muted-foreground">{group.wbs_code || "-"}</td>
-                        <td className="p-4 text-sm text-right font-bold text-[#1e3a8a]">
-                          ${group.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                        </td>
-                        <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEditGroup(group)}><Edit className="h-3 w-3" /></Button>
-                            <Button size="sm" variant="outline" onClick={() => handleDelete(`/api/config/labgroups/${group.id}`, group.name)} className="text-[#dc2626]"><Trash2 className="h-3 w-3" /></Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {labGroups.map((group) => {
+                      const isExpanded = expandedGroups.includes(group.id);
+                      // Dynamically find all labs that belong to this group
+                      const groupLabs = labs.filter(l => l.group_id === group.id);
+                      // Future-proofing: spent is mocked to 0 right now
+                      const spent = 0; 
+                      const availableBalance = group.budget - spent;
+
+                      return (
+                        <React.Fragment key={group.id}>
+                          <tr className={`border-b border-border hover:bg-[#f8f9fa] ${isExpanded ? 'bg-[#f8f9fa]' : ''}`}>
+                            <td className="p-4 text-center">
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => toggleGroupExpand(group.id)}>
+                                {isExpanded ? <ChevronDown className="h-4 w-4 text-gray-600" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
+                              </Button>
+                            </td>
+                            <td className="p-4 text-sm font-semibold text-foreground">{group.name}</td>
+                            <td className="p-4 text-sm text-muted-foreground">{group.wbs_code || "-"}</td>
+                            <td className="p-4 text-sm text-right text-gray-600">
+                              ${group.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-4 text-sm text-right font-bold text-[#16a34a]">
+                              ${availableBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <Button size="sm" variant="outline" onClick={() => openEditGroup(group)}><Edit className="h-3 w-3" /></Button>
+                                <Button size="sm" variant="outline" onClick={() => handleDelete(`/api/config/labgroups/${group.id}`, group.name)} className="text-[#dc2626]"><Trash2 className="h-3 w-3" /></Button>
+                              </div>
+                            </td>
+                          </tr>
+                          
+                          {/* THE EXPANDING NESTED LABS TABLE */}
+                          {isExpanded && (
+                            <tr className="bg-gray-50 border-b border-border shadow-inner">
+                              <td colSpan={6} className="p-0">
+                                <div className="p-4 pl-16 pr-8">
+                                  <div className="flex items-center mb-3">
+                                    <Beaker className="h-4 w-4 text-gray-400 mr-2" />
+                                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Assigned Labs</h4>
+                                  </div>
+                                  
+                                  {groupLabs.length === 0 ? (
+                                    <p className="text-sm text-gray-400 italic bg-white p-4 rounded-md border border-gray-200">No labs currently assigned to this group.</p>
+                                  ) : (
+                                    <table className="w-full bg-white rounded-md border border-gray-200 overflow-hidden shadow-sm">
+                                      <thead className="bg-gray-100 border-b border-gray-200">
+                                        <tr className="text-xs font-semibold text-gray-500">
+                                          <th className="text-left p-3">Lab Code</th>
+                                          <th className="text-left p-3">Lab Name</th>
+                                          <th className="text-right p-3">Allocated Budget</th>
+                                          <th className="text-right p-3 text-[#16a34a]">Available</th>
+                                          <th className="text-center p-3">Edit</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {groupLabs.map(lab => (
+                                          <tr key={lab.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                                            <td className="p-3 text-sm font-medium text-[#1e3a8a]">{lab.code}</td>
+                                            <td className="p-3 text-sm text-gray-700">{lab.name}</td>
+                                            <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                            <td className="p-3 text-center">
+                                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-400 hover:text-gray-700" /></Button>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </Card>
           </TabsContent>
 
-          {/* LABS TAB */}
+          {/* ======================= LABS TAB ======================= */}
           <TabsContent value="labs">
             <Card className="bg-white border-border">
               <div className="p-6 border-b border-border flex items-center justify-between">
-                <h3 className="text-lg font-semibold text-foreground">Labs</h3>
+                <h3 className="text-lg font-semibold text-foreground">Labs Overview</h3>
                 <Button onClick={() => { resetLabModal(); setIsLabModalOpen(true); }} className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white">
                   <Plus className="h-4 w-4 mr-2" /> Add Lab
                 </Button>
@@ -169,33 +245,38 @@ export function SystemConfigPage() {
                     <tr className="border-b border-border text-sm font-medium text-muted-foreground">
                       <th className="text-left p-4">Code</th>
                       <th className="text-left p-4">Name</th>
-                      <th className="text-left p-4">Lab Group</th>
+                      <th className="text-left p-4">Parent Group</th>
                       <th className="text-right p-4">Allocated Budget</th>
+                      <th className="text-right p-4 text-[#16a34a]">Available Balance</th>
                       <th className="text-center p-4">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {labs.map((lab) => (
-                      <tr key={lab.id} className="border-b border-border hover:bg-[#f8f9fa]">
-                        <td className="p-4 text-sm font-medium text-[#1e3a8a]">{lab.code}</td>
-                        <td className="p-4 text-sm font-medium text-foreground">{lab.name}</td>
-                        <td className="p-4 text-sm text-muted-foreground">{lab.group}</td>
-                        <td className="p-4 text-sm text-right text-foreground">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                        <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button size="sm" variant="outline" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3" /></Button>
-                            <Button size="sm" variant="outline" onClick={() => handleDelete(`/api/config/labs/${lab.id}`, lab.name)} className="text-[#dc2626]"><Trash2 className="h-3 w-3" /></Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {labs.map((lab) => {
+                      const labAvailable = lab.budget - 0; // Mocked until expenses are tracked
+                      return (
+                        <tr key={lab.id} className="border-b border-border hover:bg-[#f8f9fa]">
+                          <td className="p-4 text-sm font-bold text-[#1e3a8a]">{lab.code}</td>
+                          <td className="p-4 text-sm font-medium text-foreground">{lab.name}</td>
+                          <td className="p-4 text-sm text-muted-foreground">{lab.group}</td>
+                          <td className="p-4 text-sm text-right text-gray-600">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="p-4 text-sm text-right font-bold text-[#16a34a]">${labAvailable.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="p-4 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <Button size="sm" variant="outline" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3" /></Button>
+                              <Button size="sm" variant="outline" onClick={() => handleDelete(`/api/config/labs/${lab.id}`, lab.name)} className="text-[#dc2626]"><Trash2 className="h-3 w-3" /></Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </Card>
           </TabsContent>
 
-          {/* CATEGORIES TAB */}
+          {/* ======================= CATEGORIES TAB ======================= */}
           <TabsContent value="categories">
             <Card className="bg-white border-border">
               <div className="p-6 border-b border-border flex items-center justify-between">
