@@ -30,7 +30,7 @@ export type Permission =
   | "category:view"
   | "category:create"
   | "category:edit";
-const rolePermissions: Record<UserRole, Permission[]> = {
+const rolePermissions = {
   admin: [
     "dashboard:view",
     "upload:create",
@@ -44,6 +44,12 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "config:edit",
     "budget:view",
     "budget:edit",
+    "hierarchy:view",
+    "hierarchy:create",
+    "hierarchy:edit",
+    "category:view",
+    "category:create",
+    "category:edit",
   ],
 
   teamlead: [
@@ -54,6 +60,8 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "reports:view",
     "alerts:view",
     "budget:view",
+    "hierarchy:view",
+    "category:view",
   ],
 
   labic: [
@@ -67,15 +75,16 @@ const rolePermissions: Record<UserRole, Permission[]> = {
 
 interface AuthContextType {
   user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
 
-  login: (user: User) => void;
+  login: (email: string, password: string) => Promise<void>;
 
   logout: () => void;
 
-  hasAccess: (requiredRoles: UserRole[]) => boolean;
+  hasRole: (roles: UserRole[]) => boolean;
 
   hasPermission: (permission: Permission) => boolean;
-
 
   canAccessLab: (labCode: string) => boolean;
 }
@@ -89,18 +98,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return stored ? JSON.parse(stored) : null;
   });
 
-  const login = (userData: User) => {
-    setUser(userData);
+  const login = async (email: string, password: string) => {
+    const response = await authApi.login(email, password);
 
-    localStorage.setItem("user", JSON.stringify(userData));
+    setUser(response.user);
+
+    localStorage.setItem("user", JSON.stringify(response.user));
+
+    localStorage.setItem("token", response.token);
   };
 
   const logout = () => {
     setUser(null);
 
     localStorage.removeItem("user");
-  };
 
+    localStorage.removeItem("token");
+  };
+  const hasRole = (roles: UserRole[]) => {
+    if (!user) {
+      return false;
+    }
+
+    return roles.includes(user.role);
+  };
   const hasAccess = (requiredRoles: UserRole[]) => {
     if (!user) return false;
     return requiredRoles.includes(user.role);
@@ -109,25 +130,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) {
       return false;
     }
+
     return rolePermissions[user.role].includes(permission);
-  };
-
-  const canAccessLab = (labCode: string) => {
-    if (!user) {
-      return false;
-    }
-
-    if (user.role === "admin") {
-      return true;
-    }
-    if(user.assignedLabs==undefined||user.assignedLabs?.length==0){
-      return false;//assume if nothing then no allowed (may mess with admin)
-    }
-    return user.assignedLabs.includes(labCode);
   };
   return (
     <AuthContext.Provider
-      value={{ user, login, logout, hasAccess, hasPermission, canAccessLab}}
+      value={{ user, login, logout, hasAccess, hasPermission }}
     >
       {children}
     </AuthContext.Provider>
@@ -142,3 +150,4 @@ export function useAuth() {
   }
   return context;
 }
+

@@ -12,7 +12,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { AuditLogPage } from "./pages/AuditLogPage";
 import { SystemConfigPage } from "./pages/SystemConfigPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
-import { ProtectedRoute } from "./components/ProtectedRoute";
+import { ProtectedRoute } from "./ProtectedRoute";
 
 export const router = createBrowserRouter([
   {
