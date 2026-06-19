@@ -18,7 +18,7 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 ```bash
 python -m pip install -r backend/requirements.txt
 $env:PYTHONPATH="backend"
-python -m uvicorn app.main:app --reload --app-dir backend -- port 8080
+python -m uvicorn app.main:app --reload --app-dir backend --port 8080
 pip install psycopg2-binary  (if required)   
 ```
 
