@@ -1,5 +1,8 @@
 # Lab Budget Monitoring System
 
+## Database setup
+ - When connecting to the PostGresQL, change line 7 "<PASSWORD>" of database.py to the password created during setup
+
 ## Frontend setup
 
 ```bash
@@ -15,7 +18,8 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 ```bash
 python -m pip install -r backend/requirements.txt
 $env:PYTHONPATH="backend"
-python -m uvicorn app.main:app --reload --app-dir backend
+python -m uvicorn app.main:app --reload --app-dir backend -- port 8080
+pip install psycopg2-binary  (if required)   
 ```
 
 The backend runs on `http://127.0.0.1:8000/`. The frontend dev server proxies `/api` requests to this backend.
