@@ -90,6 +90,22 @@ export function ProcessingSummaryPage() {
         record.previous_batch_id ?? "Previous upload",
       ])
     : sampleLines.duplicates.map((line) => [line.pr, line.line, line.identity, line.uploadedBefore]);
+  const reviewRows = result
+    ? [...result.records.inserted, ...result.records.updated]
+        .filter((record) => {
+          const lab = record.line.lab || "";
+          const labGroup = record.line.lab_group || "";
+          return lab === "Unassigned Lab" || labGroup === "Pending Lab Group";
+        })
+        .map((record) => [
+          record.line.pr_number,
+          `Row ${record.line.row_number}`,
+          record.line.item_details,
+          record.line.wbs,
+          record.line.classification_reason ?? "Manual review required.",
+          record.line.amount_gst,
+        ])
+    : sampleLines.review.map((line) => [line.pr, line.line, line.item, line.wbs, line.issue, line.amount]);
   const rejectedRows = result
     ? result.validation_errors.map((error, index) => ({
         row: index + 1,
@@ -200,7 +216,7 @@ export function ProcessingSummaryPage() {
             <TabsContent value="review" className="p-6">
               <SummaryTable
                 columns={["PR", "Line", "Item", "WBS", "Review Issue", "Amount + GST"]}
-                rows={sampleLines.review.map((line) => [line.pr, line.line, line.item, line.wbs, line.issue, line.amount])}
+                rows={reviewRows}
               />
             </TabsContent>
 

@@ -1,17 +1,45 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { Upload, FileSpreadsheet, CheckCircle, AlertCircle } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, X } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { ValidationErrors } from "../components/shared/ValidationErrors";
 import { useAuth } from "../context/AuthContext";
-import { processUpload } from "../services/uploadService";
+import { processUploadBatch } from "../services/uploadService";
+
+const ACCEPTED_EXTENSIONS = ["xlsx", "csv"];
+
+function validateUploadFiles(files: File[]) {
+  return files.filter((file) => {
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    return !extension || !ACCEPTED_EXTENSIONS.includes(extension);
+  });
+}
+
+function mergeUploadFiles(currentFiles: File[], incomingFiles: File[]) {
+  const merged = [...currentFiles];
+  const existingKeys = new Set(currentFiles.map(getUploadFileKey));
+
+  incomingFiles.forEach((file) => {
+    const key = getUploadFileKey(file);
+    if (!existingKeys.has(key)) {
+      merged.push(file);
+      existingKeys.add(key);
+    }
+  });
+
+  return merged;
+}
+
+function getUploadFileKey(file: File) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
 
 export function UploadPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [validationErrors, setValidationErrors] = useState<Array<{field: string; message: string; severity: "error" | "warning"}>>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -27,39 +55,52 @@ export function UploadPage() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && (droppedFile.name.endsWith(".xlsx") || droppedFile.name.endsWith(".csv"))) {
-      setFile(droppedFile);
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    const invalidFiles = validateUploadFiles(droppedFiles);
+    if (droppedFiles.length > 0 && invalidFiles.length === 0) {
+      setFiles((currentFiles) => mergeUploadFiles(currentFiles, droppedFiles));
       setValidationErrors([]);
-    } else if (droppedFile) {
+    } else if (invalidFiles.length > 0) {
       setValidationErrors([
-        { field: "File Format", message: "Invalid file format. Please upload Excel (.xlsx) or CSV (.csv) files only.", severity: "error" },
+        {
+          field: "File Format",
+          message: `Invalid file format: ${invalidFiles.map((file) => file.name).join(", ")}. Upload Excel (.xlsx) or CSV (.csv) files only.`,
+          severity: "error",
+        },
       ]);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
-      setValidationErrors([]);
-
-      // Mock validation - in real app this would happen on backend
-      const fileExtension = selectedFile.name.split('.').pop()?.toLowerCase();
-      if (!fileExtension || !['xlsx', 'csv'].includes(fileExtension)) {
+    const selectedFiles = Array.from(e.target.files ?? []);
+    if (selectedFiles.length > 0) {
+      const invalidFiles = validateUploadFiles(selectedFiles);
+      if (invalidFiles.length > 0) {
         setValidationErrors([
-          { field: "File Format", message: "Invalid file format. Please upload Excel (.xlsx) or CSV (.csv) files only.", severity: "error" }
+          {
+            field: "File Format",
+            message: `Invalid file format: ${invalidFiles.map((file) => file.name).join(", ")}. Upload Excel (.xlsx) or CSV (.csv) files only.`,
+            severity: "error",
+          },
         ]);
+        return;
       }
+
+      setFiles((currentFiles) => mergeUploadFiles(currentFiles, selectedFiles));
+      setValidationErrors([]);
     }
   };
 
-  const handleProcess = async () => {
-    if (!file) return;
+  const handleRemoveFile = (fileToRemove: File) => {
+    setFiles((currentFiles) => currentFiles.filter((file) => getUploadFileKey(file) !== getUploadFileKey(fileToRemove)));
+    setValidationErrors([]);
+  };
 
-    // Mock validation
-    const fileExtension = file.name.split('.').pop()?.toLowerCase();
-    if (!fileExtension || !['xlsx', 'csv'].includes(fileExtension)) {
+  const handleProcess = async () => {
+    if (files.length === 0) return;
+
+    const invalidFiles = validateUploadFiles(files);
+    if (invalidFiles.length > 0) {
       alert("Invalid file format. Please upload Excel (.xlsx) or CSV (.csv) files only.");
       return;
     }
@@ -68,7 +109,7 @@ export function UploadPage() {
     setValidationErrors([]);
 
     try {
-      const result = await processUpload(file, user);
+      const result = await processUploadBatch(files, user);
       if (!result.success) {
         setValidationErrors(result.validation_errors);
         return;
@@ -116,7 +157,7 @@ export function UploadPage() {
             </div>
             <div>
               <p className="text-lg font-medium text-foreground mb-1">
-                {file ? file.name : "Drag and drop your file here"}
+                {files.length > 0 ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "Drag and drop your files here"}
               </p>
               <p className="text-sm text-muted-foreground">
                 or click to browse for Excel (.xlsx) or CSV files
@@ -125,6 +166,7 @@ export function UploadPage() {
             <input
               type="file"
               accept=".xlsx,.csv"
+              multiple
               onChange={handleFileSelect}
               className="hidden"
               id="file-upload"
@@ -134,10 +176,27 @@ export function UploadPage() {
                 <span className="cursor-pointer">Browse Files</span>
               </Button>
             </label>
-            {file && (
-              <div className="flex items-center gap-2 text-sm text-[#059669]">
-                <CheckCircle className="h-4 w-4" />
-                <span>File ready to process</span>
+            {files.length > 0 && (
+              <div className="w-full max-w-md space-y-2">
+                <div className="flex items-center justify-center gap-2 text-sm text-[#059669]">
+                  <CheckCircle className="h-4 w-4" />
+                  <span>Files ready to process</span>
+                </div>
+                <div className="max-h-32 overflow-auto rounded border border-border bg-[#f8f9fa] text-left">
+                  {files.map((selectedFile) => (
+                    <div key={getUploadFileKey(selectedFile)} className="flex items-center justify-between gap-2 px-3 py-2 text-xs text-muted-foreground border-b border-border last:border-0">
+                      <span className="min-w-0 flex-1 truncate">{selectedFile.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(selectedFile)}
+                        className="h-6 w-6 shrink-0 rounded border border-border bg-white text-muted-foreground hover:text-[#dc2626] hover:border-[#fecaca] inline-flex items-center justify-center"
+                        aria-label={`Remove ${selectedFile.name}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -220,11 +279,11 @@ export function UploadPage() {
           <Button variant="outline">Cancel</Button>
           <Button
             className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
-            disabled={!file || validationErrors.length > 0 || isProcessing}
+            disabled={files.length === 0 || validationErrors.length > 0 || isProcessing}
             onClick={handleProcess}
           >
             <FileSpreadsheet className="h-4 w-4 mr-2" />
-            {isProcessing ? "Processing..." : "Validate & Process"}
+            {isProcessing ? "Processing..." : `Validate & Process${files.length > 1 ? ` ${files.length} Files` : ""}`}
           </Button>
         </div>
       </div>
