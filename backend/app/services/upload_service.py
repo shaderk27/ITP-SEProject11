@@ -10,8 +10,9 @@ from app.processors.upload_parser import (
 )
 from app.repositories.upload_repository import UploadRepository
 from app.services.duplicate_service import DuplicateService
+from app.processors.classifier import classify_purchase_request  # Added W7-04 Import
 
-
+import dataclasses
 class UploadService:
     def __init__(
         self,
@@ -67,7 +68,27 @@ class UploadService:
         self.repository.save_batch_metadata(metadata, store)
 
         records = {"inserted": [], "updated": [], "duplicate": []}
+        
+        # --- W7-04 SETUP: Mock mappings until W7-01 DB logic is ready ---
+        db_wbs_map = {"W3-01-08": "FCB", "W4-02-15": "EPD"}
+        db_keyword_map = {"maintenance": "W3L1 Food PP", "chemical": "W4L2"}
+        db_requestor_map = {"Alice Johnson": "W3L1 Food PP"}
+        needs_review_count = 0
+        # ----------------------------------------------------------------
+
         for item in line_items:
+            # --- W7-04 EXECUTION: Classify each row ---
+            assigned_group, assigned_lab = classify_purchase_request(
+                item, db_wbs_map, db_keyword_map, db_requestor_map
+            )
+            
+            # Update the item object with the new classification
+            item = dataclasses.replace(item, lab=assigned_lab)
+            
+            if assigned_group == "Unassigned" or assigned_lab == "Unassigned Lab":
+                needs_review_count += 1
+            # ------------------------------------------
+
             existing = self.repository.get_line_record(item.line_identity_key, store)
             decision = self.duplicate_service.decide(item, existing)
             records[decision.status].append(
@@ -93,7 +114,7 @@ class UploadService:
                 "accepted": len(records["inserted"]),
                 "duplicate_skipped": len(records["duplicate"]),
                 "reupload_updated": len(records["updated"]),
-                "needs_review": 0,
+                "needs_review": needs_review_count,  # Updated to reflect W7-04 output
                 "rejected": 0,
             },
             "validation_errors": validation_errors,
