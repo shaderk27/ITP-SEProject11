@@ -18,6 +18,7 @@ export interface UploadLineItem {
   instruction_to_vendor: string;
   pr_category: string;
   lab: string;
+  lab_group?: string;
   amount_gst: string;
   line_identity_key: string;
   content_hash: string;

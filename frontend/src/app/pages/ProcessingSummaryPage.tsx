@@ -58,7 +58,7 @@ export function ProcessingSummaryPage() {
         `Row ${record.line.row_number}`,
         record.line.item_details,
         record.line.wbs,
-        "Pending Mapping",
+        record.line.lab_group || "Pending Mapping",
         record.line.lab || "General",
         record.line.pr_category || "General",
         record.line.amount_gst,
