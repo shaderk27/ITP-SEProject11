@@ -13,6 +13,7 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { StatusBadge } from "../components/shared/StatusBadge";
+import { useAuth } from "../context/AuthContext";
 
 const reviewLines = {
   "REV-001": {
@@ -128,7 +129,16 @@ export function ReviewDetailsPage() {
   const [notes, setNotes] = useState("");
   const [showRaw, setShowRaw] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
+  const { user } = useAuth();
 
+  const canReview =
+    user?.role === "admin" ||
+    user?.assignedLabs?.includes(
+      reviewLine.original.lab
+    );
+  if (!canReview) {
+    return (navigate("/403"));
+  }
   const handleSave = () => {
     navigate("/review");
   };
