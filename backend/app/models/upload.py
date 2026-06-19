@@ -2,7 +2,6 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
-
 @dataclass(frozen=True)
 class UploadMetadata:
     batch_id: str
@@ -34,7 +33,6 @@ class UploadMetadata:
     def to_dict(self) -> dict:
         return asdict(self)
 
-
 @dataclass(frozen=True)
 class PRLineItem:
     row_number: int
@@ -49,10 +47,12 @@ class PRLineItem:
     wbs: str
     instruction_to_vendor: str
     pr_category: str
-    lab: str
     amount_gst: Decimal
     line_identity_key: str
     content_hash: str
+    # Fields with default values MUST be at the end
+    lab: str = "Unassigned Lab"
+    lab_group: str = "Pending Lab Group"
 
     def to_dict(self) -> dict:
         data = asdict(self)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, Boolean, Numeric, DateTime, ForeignKey
+from sqlalchemy import Column, BigInteger, String, Text, Boolean, Numeric, DateTime, ForeignKey, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
@@ -60,6 +60,14 @@ class SpendingCategory(Base):
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class BudgetPeriod(Base):
+    __tablename__ = "budget_periods"
+    
+    period_id = Column(BigInteger, primary_key=True)
+    period_name = Column(String(50), nullable=False, unique=True)
+    start_date = Column(Date)
+    end_date = Column(Date)
+
 class Budget(Base):
     __tablename__ = "budgets"
     
@@ -78,7 +86,9 @@ class Budget(Base):
 class LabGroupOut(BaseModel):
     id: int
     name: str
-    budget: int
+    wbs_code: str | None = None
+    description: str | None = None
+    budget: float
     threshold: int
 
 class LabOut(BaseModel):
@@ -86,12 +96,25 @@ class LabOut(BaseModel):
     code: str
     name: str
     group: str
-    budget: int
-    ic: str
+    group_id: int
+    venue: str | None = None
+    budget: float
+    ic_name: str | None = None
+    ic_email: str | None = None
+    budgets: dict[str, float] = {}
+
+class CategoryOut(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
 
 class LabGroupCreate(BaseModel):
     name: str
     wbs_code: str
+    description: str | None = None
+
+class CategoryCreate(BaseModel):
+    name: str
     description: str | None = None
 
 class LabCreate(BaseModel):
@@ -101,3 +124,4 @@ class LabCreate(BaseModel):
     venue: str | None = None
     ic_name: str | None = None
     ic_email: str | None = None
+    budgets: dict[str, float] = {}
