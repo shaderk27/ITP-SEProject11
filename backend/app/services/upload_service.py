@@ -3,7 +3,6 @@ from __future__ import annotations
 from uuid import uuid4
 from sqlalchemy.orm import Session
 import dataclasses
-import inspect
 
 from app.models.upload import UploadMetadata
 from app.processors.upload_parser import (
@@ -17,14 +16,8 @@ from app.processors.classifier import classify_line_item
 
 import app.models.config as config_models
 
-# Dynamically hook into the exact class names Harry used
 Lab = getattr(config_models, "Lab", None)
 LabGroup = getattr(config_models, "LabGroup", None)
-if not LabGroup:
-    for name, cls in inspect.getmembers(config_models, inspect.isclass):
-        if "group" in name.lower() and name.lower() != "lab":
-            LabGroup = cls
-            break
 
 class UploadService:
     def __init__(
@@ -71,71 +64,69 @@ class UploadService:
         records = {"inserted": [], "updated": [], "duplicate": []}
         needs_review_count = 0
         
-        # =========================================================
-        # SCHEMA-PERFECT CACHE BUILDER 
-        # =========================================================
+        # Classification lookup cache for uploaded line enrichment.
         lab_cache = {}
+        group_cache = {}
         if self.db and Lab:
-            all_labs = self.db.query(Lab).all()
-            
-            group_dict = {}
-            if LabGroup:
-                try:
+            try:
+                all_labs = self.db.query(Lab).all()
+                
+                if LabGroup:
                     for g in self.db.query(LabGroup).all():
                         g_id = getattr(g, "lab_group_id", None)
                         g_name = getattr(g, "lab_group_name", "Pending Lab Group")
                         if g_id is not None:
-                            group_dict[g_id] = g_name
-                except Exception as e:
-                    pass
-            
-            for l in all_labs:
-                group_name = "Pending Lab Group"
-                fk_id = getattr(l, "lab_group_id", None)
-                if fk_id is not None and fk_id in group_dict:
-                    group_name = group_dict[fk_id]
+                            group_cache[g_id] = g_name
 
-                l_id = getattr(l, "lab_id", None)
-                if l_id is not None:
-                    lab_cache[l_id] = {
-                        "lab_name": getattr(l, "lab_name", "Unknown Lab"),
-                        "lab_group_name": group_name
-                    }
-        # =========================================================
+                for l in all_labs:
+                    group_name = "Pending Lab Group"
+                    fk_id = getattr(l, "lab_group_id", None)
+                    if fk_id is not None and fk_id in group_cache:
+                        group_name = group_cache[fk_id]
+
+                    l_id = getattr(l, "lab_id", None)
+                    if l_id is not None:
+                        lab_cache[l_id] = {
+                            "lab_name": getattr(l, "lab_name", "Unknown Lab"),
+                            "lab_group_name": group_name
+                        }
+            except Exception:
+                lab_cache = {}
+                group_cache = {}
 
         for item in line_items:
             assigned_lab = "Unassigned Lab"
             assigned_group = "Pending Lab Group"
+            classification_reason = "Manual review required."
             
             if self.db:
-                item_dict = item.to_dict() if hasattr(item, "to_dict") else getattr(item, "__dict__", {})
-                row_text = " ".join([str(v) for v in item_dict.values() if v is not None]).lower()
-                
-                req_name = ""
-                for key, val in item_dict.items():
-                    if str(key).lower() in ['requester', 'requestor', 'requester_name', 'requested_by', 'buyer']:
-                        if val and isinstance(val, str):
-                            req_name = val
-                            break
-
-                classification = classify_line_item(self.db, row_text, req_name)
-                lab_id = classification.get("lab_id")
-                
-                if lab_id and lab_id in lab_cache:
-                    assigned_lab = lab_cache[lab_id]["lab_name"]
-                    assigned_group = lab_cache[lab_id]["lab_group_name"]
+                try:
+                    item_dict = item.to_dict() if hasattr(item, "to_dict") else getattr(item, "__dict__", {})
+                    row_text = " ".join([str(v) for v in item_dict.values() if v is not None]).lower()
+                    
+                    req_name = item_dict.get("requestor", "")
+                    classification = classify_line_item(
+                        self.db,
+                        row_text,
+                        req_name,
+                        wbs=item_dict.get("wbs", ""),
+                        purpose=item_dict.get("purpose", ""),
+                        instruction_to_vendor=item_dict.get("instruction_to_vendor", ""),
+                    )
+                    lab_id = classification.get("lab_id")
+                    group_id = classification.get("lab_group_id")
+                    classification_reason = classification.get("reason", classification_reason)
+                    
+                    if lab_id and lab_id in lab_cache:
+                        assigned_lab = lab_cache[lab_id]["lab_name"]
+                        assigned_group = lab_cache[lab_id]["lab_group_name"]
+                    elif group_id and group_id in group_cache:
+                        assigned_group = group_cache[group_id]
+                except Exception:
+                    classification_reason = "Classification unavailable. Manual review required."
             
-            # 1. Update the internal dataclass safely
-            update_kwargs = {"lab": assigned_lab}
-            if hasattr(item, "lab_group"): update_kwargs["lab_group"] = assigned_group
-            if hasattr(item, "lab_group_name"): update_kwargs["lab_group_name"] = assigned_group
-
-            # ==========================================
-            # FORCE INJECTION (No more silent skipping)
-            # ==========================================
+            # Uploaded flow stores the resolved classification labels with each line.
             if dataclasses.is_dataclass(item):
-                # We are forcing Python to inject lab_group. 
-                # If PRLineItem in upload.py doesn't have it, this will intentionally crash!
                 item = dataclasses.replace(item, lab=assigned_lab, lab_group=assigned_group)
             else:
                 item.lab = assigned_lab
@@ -143,7 +134,6 @@ class UploadService:
             
             if assigned_lab == "Unassigned Lab" or not assigned_lab:
                 needs_review_count += 1
-            # ==========================================
 
             existing = self.repository.get_line_record(item.line_identity_key, store)
             decision = self.duplicate_service.decide(item, existing)
@@ -160,6 +150,7 @@ class UploadService:
             final_line_dict["lab_group"] = assigned_group
             final_line_dict["labGroup"] = assigned_group
             final_line_dict["lab_group_name"] = assigned_group
+            final_line_dict["classification_reason"] = classification_reason
             
             records[decision.status].append({
                 "status": decision.status,

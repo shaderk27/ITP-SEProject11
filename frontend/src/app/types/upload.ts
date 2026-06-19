@@ -19,6 +19,7 @@ export interface UploadLineItem {
   pr_category: string;
   lab: string;
   lab_group?: string;
+  classification_reason?: string;
   amount_gst: string;
   line_identity_key: string;
   content_hash: string;
@@ -40,6 +41,14 @@ export interface UploadProcessResult {
     uploader_name: string;
     uploader_role: string;
     uploaded_at: string;
+    files?: Array<{
+      batch_id: string;
+      filename: string;
+      uploader_email: string;
+      uploader_name: string;
+      uploader_role: string;
+      uploaded_at: string;
+    }>;
   };
   counts: {
     total_lines: number;

@@ -1,43 +1,79 @@
-# backend/app/tests/test_classifier.py
-import pytest
-from app.processors.classifier import classify_purchase_request
+from types import SimpleNamespace
 
-# We use a mock class to simulate Harry's PRLineItem
-class MockPRLineItem:
-    def __init__(self, wbs="", purpose="", instruction="", requestor=""):
-        self.wbs = wbs
-        self.purpose = purpose
-        self.instruction_to_vendor = instruction
-        self.requestor = requestor
+from app.models.config import Lab, LabGroup, RequesterLabMapping
+from app.processors.classifier import classify_line_item
 
-@pytest.fixture
-def mapping_data():
-    return {
-        "wbs_map": {"WBS-100": "Chemistry Group"},
-        "keyword_map": {"analytical": "Analytical Lab", "microscope": "Bio Lab"},
-        "requestor_map": {"Randy Kwok": "Software Lab"}
-    }
 
-def test_priority_1_purpose_match(mapping_data):
-    item = MockPRLineItem(wbs="WBS-100", purpose="Buying analytical tools", requestor="Randy Kwok")
-    group, lab = classify_purchase_request(
-        item, mapping_data["wbs_map"], mapping_data["keyword_map"], mapping_data["requestor_map"]
+class FakeQuery:
+    def __init__(self, rows: list[SimpleNamespace]) -> None:
+        self.rows = rows
+
+    def all(self) -> list[SimpleNamespace]:
+        return self.rows
+
+
+class FakeDb:
+    def __init__(self) -> None:
+        self.lab_groups = [
+            SimpleNamespace(lab_group_id=1, lab_group_name="Chemistry Group", wbs_code="WBS-100"),
+            SimpleNamespace(lab_group_id=2, lab_group_name="Biology Group", wbs_code="WBS-200"),
+        ]
+        self.labs = [
+            SimpleNamespace(lab_id=10, lab_group_id=1, lab_code="CHEM-A", lab_name="Analytical Lab"),
+            SimpleNamespace(lab_id=20, lab_group_id=2, lab_code="BIO-M", lab_name="Microscope Lab"),
+            SimpleNamespace(lab_id=30, lab_group_id=1, lab_code="SW-L", lab_name="Software Lab"),
+        ]
+        self.requester_mappings = [
+            SimpleNamespace(requester_name="Randy Kwok", default_lab_id=30),
+        ]
+
+    def query(self, model):
+        if model is LabGroup:
+            return FakeQuery(self.lab_groups)
+        if model is Lab:
+            return FakeQuery(self.labs)
+        if model is RequesterLabMapping:
+            return FakeQuery(self.requester_mappings)
+        return FakeQuery([])
+
+
+def test_wbs_scopes_lab_group_and_purpose_selects_lab() -> None:
+    result = classify_line_item(
+        FakeDb(),
+        row_text="buying analytical tools",
+        requestor_name="Randy Kwok",
+        wbs="WBS-100",
+        purpose="Buying analytical tools",
     )
-    assert group == "Chemistry Group"
-    assert lab == "Analytical Lab" # Matches purpose, ignores requestor
 
-def test_priority_3_requestor_match(mapping_data):
-    item = MockPRLineItem(wbs="WBS-100", purpose="General items", requestor="Randy Kwok")
-    group, lab = classify_purchase_request(
-        item, mapping_data["wbs_map"], mapping_data["keyword_map"], mapping_data["requestor_map"]
-    )
-    assert group == "Chemistry Group"
-    assert lab == "Software Lab" # Fallbacks to requestor since purpose/instruction have no keywords
+    assert result["lab_group_id"] == 1
+    assert result["lab_id"] == 10
+    assert "Purpose" in result["reason"]
 
-def test_fallback_unassigned(mapping_data):
-    item = MockPRLineItem(wbs="UNKNOWN", purpose="Random", instruction="None", requestor="Unknown Person")
-    group, lab = classify_purchase_request(
-        item, mapping_data["wbs_map"], mapping_data["keyword_map"], mapping_data["requestor_map"]
+
+def test_requestor_mapping_is_used_after_text_clues() -> None:
+    result = classify_line_item(
+        FakeDb(),
+        row_text="general items",
+        requestor_name="Randy Kwok",
+        wbs="WBS-100",
+        purpose="General items",
     )
-    assert group == "Unassigned"
-    assert lab == "Unassigned Lab"
+
+    assert result["lab_group_id"] == 1
+    assert result["lab_id"] == 30
+    assert "Requestor" in result["reason"]
+
+
+def test_unknown_row_is_left_for_review() -> None:
+    result = classify_line_item(
+        FakeDb(),
+        row_text="random item",
+        requestor_name="Unknown Person",
+        wbs="UNKNOWN",
+        purpose="Random",
+    )
+
+    assert result["lab_group_id"] is None
+    assert result["lab_id"] is None
+    assert "Manual review" in result["reason"]

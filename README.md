@@ -22,7 +22,7 @@ python -m uvicorn app.main:app --reload --app-dir backend --port 8080
 pip install psycopg2-binary  (if required)   
 ```
 
-The backend runs on `http://127.0.0.1:8000/`. The frontend dev server proxies `/api` requests to this backend.
+The backend runs on `http://127.0.0.1:8080/`. The frontend dev server proxies `/api` requests to this backend.
 
 ## Dependency notes
 
