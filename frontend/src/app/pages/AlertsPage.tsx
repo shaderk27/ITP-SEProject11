@@ -6,10 +6,14 @@ import { AlertCircle, TrendingUp, Mail, Info } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 
+// lab_group_id values match the lab_groups table in the DB.
+// The budget_alerts table links to budgets, which links to lab_group_id.
 const mockAlerts = [
   {
     id: "ALT-001",
     type: "exceeded",
+    labGroupId: 1,
+    labGroupName: "W3 - Food Processing",
     lab: "W3L1 - Food Pilot Plant",
     message: "Critical threshold exceeded (95%+)",
     budget: 65000,
@@ -22,6 +26,8 @@ const mockAlerts = [
   {
     id: "ALT-002",
     type: "warning",
+    labGroupId: 2,
+    labGroupName: "W4 - Materials Testing",
     lab: "W4L2 - Materials Analysis",
     message: "Alert threshold reached (80%)",
     budget: 50000,
@@ -34,6 +40,8 @@ const mockAlerts = [
   {
     id: "ALT-003",
     type: "warning",
+    labGroupId: 1,
+    labGroupName: "W3 - Food Processing",
     lab: "W3 - Food Processing (Lab Group)",
     message: "Alert threshold reached (80%)",
     budget: 180000,
@@ -46,6 +54,8 @@ const mockAlerts = [
   {
     id: "ALT-004",
     type: "info",
+    labGroupId: 2,
+    labGroupName: "W4 - Materials Testing",
     lab: "W4L1 - Tensile Testing",
     message: "Warning threshold reached (50%)",
     budget: 55000,
@@ -58,31 +68,23 @@ const mockAlerts = [
 ];
 
 export function AlertsPage() {
-  const { user, hasPermission } = useAuth();
+  const { user, hasPermission, canAccessLabGroup } = useAuth();
 
-  // Page-level permission guard — belt-and-suspenders alongside ProtectedRoute.
-  // Renders nothing dangerous while the redirect happens.
+  // Page-level guard — belt-and-suspenders alongside ProtectedRoute
   if (!hasPermission("alerts:view")) {
     return <Navigate to="/403" replace />;
   }
 
-  // Filter alerts to what this user is allowed to see:
-  //   admin    → all alerts
-  //   teamlead → alerts for their assigned labs
-  //   labic    → alerts for their assigned labs (same logic as teamlead;
-  //              previously this branch was missing so labic saw nothing)
-  const filteredAlerts = mockAlerts.filter((alert) => {
-    if (user?.role === "admin") return true;
-    return user?.assignedLabs?.some((lab) => alert.lab.includes(lab)) ?? false;
-  });
+  // Filter alerts by what this user's lab_group_id allows.
+  // canAccessLabGroup handles the admin (see all) vs scoped (own lab group) logic.
+  const filteredAlerts = mockAlerts.filter((alert) =>
+    canAccessLabGroup(alert.labGroupId)
+  );
 
-  // labic users and teamlead users both have assigned labs, so we show
-  // the contextual banner for either role.
-  const showLabBanner =
-    (user?.role === "teamlead" || user?.role === "labic") &&
-    !!user?.assignedLabs?.length;
+  // Show the scoped-view banner for non-admin users
+  const showLabBanner = user?.role !== "admin" && user?.labGroupId != null;
 
-  // Email recipient label differs by role.
+  // Email recipient label differs by role
   const emailRecipientLabel =
     user?.role === "admin" ? "Admin & Team Lead" : "Team Lead";
 
@@ -126,7 +128,7 @@ export function AlertsPage() {
           </p>
         </div>
 
-        {/* Contextual banner for non-admin users with assigned labs */}
+        {/* Scoped-view banner for teamlead and labic */}
         {showLabBanner && (
           <Card className="p-4 bg-[#f0f9ff] border-[#bfdbfe]">
             <div className="flex items-start gap-3">
@@ -136,8 +138,7 @@ export function AlertsPage() {
                   {user?.role === "teamlead" ? "Team Lead View" : "Lab IC View"}
                 </p>
                 <p className="text-xs text-[#1e3a8a] mt-1">
-                  Showing alerts only for your assigned labs:{" "}
-                  {user?.assignedLabs?.join(", ")}
+                  Showing alerts for your assigned lab group only.
                 </p>
               </div>
             </div>
@@ -164,7 +165,7 @@ export function AlertsPage() {
           </div>
         </Card>
 
-        {/* Alert Summary Cards */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <Card className="p-6 bg-white border-border">
             <div className="flex items-center gap-4">
@@ -209,7 +210,7 @@ export function AlertsPage() {
           </Card>
         </div>
 
-        {/* Active Alerts */}
+        {/* Active Alerts List */}
         <Card className="bg-white border-border">
           <div className="p-6 border-b border-border">
             <h3 className="text-lg font-semibold text-foreground">Active Alerts</h3>
@@ -217,7 +218,7 @@ export function AlertsPage() {
 
           {filteredAlerts.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground text-sm">
-              No alerts for your assigned labs.
+              No alerts for your assigned lab group.
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -277,17 +278,13 @@ export function AlertsPage() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-xs text-muted-foreground mb-1">
-                                Actual Spend
-                              </p>
+                              <p className="text-xs text-muted-foreground mb-1">Actual Spend</p>
                               <p className="text-sm font-medium text-foreground">
                                 ${alert.actual.toLocaleString()}
                               </p>
                             </div>
                             <div>
-                              <p className="text-xs text-muted-foreground mb-1">
-                                Utilization
-                              </p>
+                              <p className="text-xs text-muted-foreground mb-1">Utilization</p>
                               <p
                                 className={`text-sm font-medium ${
                                   alert.utilization > 100
@@ -301,16 +298,13 @@ export function AlertsPage() {
                               </p>
                             </div>
                             <div>
-                              <p className="text-xs text-muted-foreground mb-1">
-                                Threshold
-                              </p>
+                              <p className="text-xs text-muted-foreground mb-1">Threshold</p>
                               <p className="text-sm font-medium text-foreground">
                                 {alert.threshold}%
                               </p>
                             </div>
                           </div>
 
-                          {/* Progress bar */}
                           <div className="mb-4">
                             <div className="w-full h-2 bg-white rounded-full overflow-hidden">
                               <div
@@ -321,9 +315,7 @@ export function AlertsPage() {
                                     ? "bg-[#d97706]"
                                     : "bg-[#059669]"
                                 }`}
-                                style={{
-                                  width: `${Math.min(alert.utilization, 100)}%`,
-                                }}
+                                style={{ width: `${Math.min(alert.utilization, 100)}%` }}
                               />
                             </div>
                           </div>

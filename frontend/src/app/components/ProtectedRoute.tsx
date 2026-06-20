@@ -1,4 +1,4 @@
-import { Navigate } from "react-router";
+import { Navigate, useLocation } from "react-router";
 import { useAuth } from "../context/AuthContext";
 import type { UserRole, Permission } from "../context/AuthContext";
 
@@ -13,37 +13,34 @@ export function ProtectedRoute({
   allowedRoles,
   requiredPermissions,
 }: ProtectedRouteProps) {
-  const { user, hasPermission } = useAuth();
+  const { user, isLoading, hasPermission } = useAuth();
+  const location = useLocation();
 
-  // Not authenticated — send to login
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  // Disabled account — send to a dedicated page, not login,
-  // so the user understands why they can't get in.
-  if (user.status === "inactive") {
+  // Wait for the /me session restore before making any redirect decisions.
+  // Without this, every page refresh bounces to /login before the cookie
+  // check has a chance to complete.
+  if (isLoading) {
     return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ reason: "inactive" }}
-      />
+      <div className="flex items-center justify-center h-screen text-sm text-muted-foreground">
+        Loading…
+      </div>
     );
   }
 
-  // Role check — fails if the user's role isn't in the allowedRoles list.
-  // Only evaluated when allowedRoles is explicitly provided.
+  // Not authenticated — preserve the intended path so login can redirect back
+  if (!user) {
+    return (
+      <Navigate to="/login" replace state={{ from: location.pathname }} />
+    );
+  }
+
+  // Role check — only evaluated when allowedRoles is explicitly provided
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/403" replace />;
   }
 
-  // Permission check — all listed permissions must be satisfied (AND logic).
-  // Only evaluated when requiredPermissions is explicitly provided.
-  if (
-    requiredPermissions &&
-    !requiredPermissions.every(hasPermission)
-  ) {
+  // Permission check — all listed permissions must pass (AND logic)
+  if (requiredPermissions && !requiredPermissions.every(hasPermission)) {
     return <Navigate to="/403" replace />;
   }
 
