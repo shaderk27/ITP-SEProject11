@@ -1,6 +1,6 @@
 from typing import Optional, Sequence
-from sqlalchemy.orm import Session
-from app.models.auth import User, Role, LabGroup 
+from sqlalchemy.orm import Session, joinedload
+from app.models.auth import User, Role
 
 
 class AuthRepository:
@@ -12,6 +12,7 @@ class AuthRepository:
     ) -> Optional[User]:
         return (
             db.query(User)
+            .options(joinedload(User.lab_group))  
             .filter(User.email == email)
             .first()
         )
@@ -23,6 +24,7 @@ class AuthRepository:
     ) -> Optional[User]:
         return (
             db.query(User)
+            .options(joinedload(User.lab_group)) 
             .filter(User.user_id == user_id)
             .first()
         )

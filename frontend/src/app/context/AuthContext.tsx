@@ -8,7 +8,7 @@ export interface User {
   fullName: string;
   email: string;
   role: UserRole;
-  assignedLabs: string|null;
+  assignedLabs: string[]; 
   labGroupId: number | null; 
 }
 
@@ -61,6 +61,16 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
+// Helper function to safely parse backend lab strings/arrays into standard array structures
+function parseAssignedLabs(rawLabs: any): string[] {
+  if (!rawLabs) return [];
+  if (Array.isArray(rawLabs)) return rawLabs;
+  if (typeof rawLabs === "string") {
+    return rawLabs.split(",").map((l) => l.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -71,13 +81,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) {
-          // Normalize backend snake_case properties to frontend camelCase matches
+          const rawWbsCode = data.lab_group?.wbs_code || data.wbs_code;
+
+          // Normalize backend properties to frontend camelCase matches
           setUser({
             id: data.id,
             fullName: data.full_name,
             email: data.email,
             role: data.role,
             labGroupId: data.lab_group_id,
+            assignedLabs: parseAssignedLabs(rawWbsCode), //  FIXED: Parsed from the wbs_code column link
           });
         } else {
           setUser(null);
@@ -87,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false));
   }, []);
 
-  // 2. Login Handler
+  // Make sure to mirror this exact change inside your login function block too:
   const login = async (email: string, password: string) => {
     const res = await fetch(`${API}/api/auth/login`, {
       method: "POST",
@@ -102,7 +115,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const rawJson = await res.json();
-    const rawUser = rawJson.user; // Safely unpack user context from structured wrap
+    const rawUser = rawJson.user; 
+    
+    const rawWbsCode = rawUser.wbs_code || rawUser.lab_group?.wbs_code || rawUser.assigned_labs;
 
     setUser({
       id: rawUser.id,
@@ -110,13 +125,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: rawUser.email,
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
+      assignedLabs: parseAssignedLabs(rawWbsCode), //  FIXED: Sync with login endpoint
     });
   };
 
   // 3. Functional Logout Handler
   const logout = async () => {
     try {
-      // Invalidate the back-end cookie explicitly 
       await fetch(`${API}/api/auth/logout`, {
         method: "POST",
         credentials: "include", 
@@ -124,7 +139,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Backend logout handshaking encountered an issue:", error);
     } finally {
-      // Always safely strip frontend session state even if backend network request drops
       setUser(null);
     }
   };
