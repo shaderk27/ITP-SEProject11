@@ -18,13 +18,9 @@ async def login(
     response: Response,
     db: Session = Depends(get_db)
 ):
-    # We read the body safely first, then manually validate it to catch the 422 error
     raw_body = await request.body()
     
     try:
-        # Manually trigger validation against your Pydantic schema
-        # In Pydantic v2 use: LoginRequest.model_validate_json(raw_body)
-        # In Pydantic v1 use: LoginRequest.parse_raw(raw_body)
         payload = LoginRequest.model_validate_json(raw_body)
     except Exception as exc:
         print("\n--- 422 VALIDATION DEBUGGER LOG ---")
@@ -32,7 +28,6 @@ async def login(
         print(f"Validation details: {str(exc)}")
         print("-----------------------------------\n")
         
-        # Re-raise it so the frontend still gets its expected 422 structural breakdown
         raise RequestValidationError(errors=[{"loc": ["body"], "msg": str(exc), "type": "value_error"}])
 
     service = AuthService(

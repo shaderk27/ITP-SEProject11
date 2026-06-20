@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import jwt
 import bcrypt
 
@@ -9,7 +9,6 @@ from app.models.auth import User
 from app.repositories.auth_repository import AuthRepository
 
 # --- Configuration Constants ---
-# In production, move these to environment variables (e.g., pydantic-settings)
 SECRET_KEY = "SUPER_SECRET_DEVELOPMENT_KEY_CHANGE_ME_IN_PRODUCTION"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60

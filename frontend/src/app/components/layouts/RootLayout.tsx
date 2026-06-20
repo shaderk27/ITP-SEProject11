@@ -175,7 +175,7 @@ export function RootLayout() {
               </h2>
               {user?.assignedLabs && (
                 <p className="text-xs text-muted-foreground">
-                  Assigned Labs: {user.assignedLabs.join(", ")}
+                  {/* Assigned Labs: {user.assignedLabs.join(", ")} */}
                 </p>
               )}
             </div>
