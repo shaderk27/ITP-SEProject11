@@ -58,7 +58,6 @@ const rolePermissions: Record<UserRole, Permission[]> = {
 
   labic: [
     "dashboard:view",
-    "upload:create",
     "records:view",
     "reports:view",
     "budget:view",
