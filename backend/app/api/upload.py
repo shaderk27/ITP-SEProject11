@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies.auth import get_current_user
+from app.models.user import User
 from app.repositories.upload_repository import UploadRepository
 from app.services.upload_service import UploadService
 
@@ -18,20 +20,22 @@ async def process_upload(
     x_user_name: str = Header(default="Demo Team Lead"),
     x_user_role: str = Header(default="teamlead"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     role = x_user_role.lower().strip()
     _ensure_upload_role(role)
 
     payload = await file.read()
-    
-    service = UploadService(repository=UploadRepository(), db=db) 
-    
+
+    service = UploadService(repository=UploadRepository(), db=db)
+
     return service.process_upload(
         filename=file.filename or "upload",
         content=payload,
         uploader_email=x_user_email,
         uploader_name=x_user_name,
         uploader_role=role,
+        current_user=current_user,
     )
 
 
@@ -42,6 +46,7 @@ async def process_upload_batch(
     x_user_name: str = Header(default="Demo Team Lead"),
     x_user_role: str = Header(default="teamlead"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     role = x_user_role.lower().strip()
     _ensure_upload_role(role)
@@ -71,6 +76,7 @@ async def process_upload_batch(
                 uploader_email=x_user_email,
                 uploader_name=x_user_name,
                 uploader_role=role,
+                current_user=current_user,
             )
         )
 

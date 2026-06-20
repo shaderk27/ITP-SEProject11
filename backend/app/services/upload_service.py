@@ -5,12 +5,14 @@ from sqlalchemy.orm import Session
 import dataclasses
 
 from app.models.upload import UploadMetadata
+from app.models.user import User
 from app.processors.upload_parser import (
     parse_line_items,
     read_upload_dataframe,
     validate_dataframe,
 )
 from app.repositories.upload_repository import UploadRepository
+from app.repositories.persistence_repository import persist_upload_to_db
 from app.services.duplicate_service import DuplicateService
 from app.processors.classifier import classify_line_item
 
@@ -38,6 +40,9 @@ class UploadService:
         uploader_email: str,
         uploader_name: str,
         uploader_role: str,
+        # Optional so existing tests/callers without a real user keep working.
+        # When provided, the parsed upload is persisted to the DB pipeline (W9-01).
+        current_user: User | None = None,
     ) -> dict:
         batch_id = f"UP-{uuid4().hex[:8].upper()}"
         metadata = UploadMetadata.create(
@@ -94,16 +99,27 @@ class UploadService:
                 lab_cache = {}
                 group_cache = {}
 
+        # Each entry: {"item": PRLineItem (post-replace), "classification": dict}
+        # Built up during the loop and handed to persist_upload_to_db at the end.
+        classified_items: list[dict] = []
+
         for item in line_items:
             assigned_lab = "Unassigned Lab"
             assigned_group = "Pending Lab Group"
             classification_reason = "Manual review required."
-            
+            # Always have a classification dict to hand to persistence, even if
+            # the classifier never ran (no db) or threw.
+            classification: dict = {
+                "lab_id": None,
+                "lab_group_id": None,
+                "reason": classification_reason,
+            }
+
             if self.db:
                 try:
                     item_dict = item.to_dict() if hasattr(item, "to_dict") else getattr(item, "__dict__", {})
                     row_text = " ".join([str(v) for v in item_dict.values() if v is not None]).lower()
-                    
+
                     req_name = item_dict.get("requestor", "")
                     classification = classify_line_item(
                         self.db,
@@ -116,7 +132,7 @@ class UploadService:
                     lab_id = classification.get("lab_id")
                     group_id = classification.get("lab_group_id")
                     classification_reason = classification.get("reason", classification_reason)
-                    
+
                     if lab_id and lab_id in lab_cache:
                         assigned_lab = lab_cache[lab_id]["lab_name"]
                         assigned_group = lab_cache[lab_id]["lab_group_name"]
@@ -124,6 +140,11 @@ class UploadService:
                         assigned_group = group_cache[group_id]
                 except Exception:
                     classification_reason = "Classification unavailable. Manual review required."
+                    classification = {
+                        "lab_id": None,
+                        "lab_group_id": None,
+                        "reason": classification_reason,
+                    }
             
             # Uploaded flow stores the resolved classification labels with each line.
             if dataclasses.is_dataclass(item):
@@ -131,6 +152,9 @@ class UploadService:
             else:
                 item.lab = assigned_lab
                 item.lab_group = assigned_group
+
+            # Snapshot for the DB persistence step (post-replace so .lab / .lab_group are final).
+            classified_items.append({"item": item, "classification": classification})
             
             if assigned_lab == "Unassigned Lab" or not assigned_lab:
                 needs_review_count += 1
@@ -164,9 +188,21 @@ class UploadService:
 
         self.repository.save_store(store)
 
+        # ─── W9-01: persist the parsed batch to the DB pipeline ───────────
+        # Skipped when no user/db is available (e.g. legacy/test callers).
+        persistence_counts: dict = {}
+        if self.db and current_user:
+            persistence_counts = persist_upload_to_db(
+                db=self.db,
+                metadata=metadata,
+                classified_items=classified_items,
+                current_user=current_user,
+            )
+
         return {
             "success": True,
             "metadata": metadata.to_dict(),
+            "persistence": persistence_counts,
             "counts": {
                 "total_lines": len(line_items),
                 "accepted": len(records["inserted"]),
