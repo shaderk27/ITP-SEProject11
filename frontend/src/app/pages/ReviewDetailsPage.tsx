@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useParams, useNavigate, Navigate } from "react-router";
 import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -137,7 +137,7 @@ export function ReviewDetailsPage() {
       reviewLine.original.lab
     );
   if (!canReview) {
-    return (navigate("/403"));
+    return <Navigate to="/403" replace />;
   }
   const handleSave = () => {
     navigate("/review");

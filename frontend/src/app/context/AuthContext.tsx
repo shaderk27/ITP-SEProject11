@@ -8,6 +8,7 @@ export interface User {
   fullName: string;
   email: string;
   role: UserRole;
+  assignedLabs: string|null;
   labGroupId: number | null; 
 }
 
