@@ -4,13 +4,11 @@ import type { ReactNode } from "react";
 export type UserRole = "admin" | "teamlead" | "labic";
 
 export interface User {
-  // Field names match what the backend returns from the DB:
-  // users.user_id, users.full_name, users.email, roles.role_name, users.lab_group_id
   id: number;
   fullName: string;
   email: string;
   role: UserRole;
-  labGroupId: number | null; // null for admin — no lab group restriction
+  labGroupId: number | null; 
 }
 
 export type Permission =
@@ -50,8 +48,6 @@ const rolePermissions: Record<UserRole, Permission[]> = {
 
 interface AuthContextType {
   user: User | null;
-  // isLoading is true until the /me session restore resolves on mount.
-  // ProtectedRoute must check this before making any redirect decisions.
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -68,21 +64,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // On mount, call /me to restore session from the httpOnly cookie.
-  // localStorage is intentionally not used — the cookie is the source of truth.
+  // 1. Session Restore on Mount
   useEffect(() => {
     fetch(`${API}/api/auth/me`, { credentials: "include" })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setUser(data))
+      .then((data) => {
+        if (data) {
+          // Normalize backend snake_case properties to frontend camelCase matches
+          setUser({
+            id: data.id,
+            fullName: data.full_name,
+            email: data.email,
+            role: data.role,
+            labGroupId: data.lab_group_id,
+          });
+        } else {
+          setUser(null);
+        }
+      })
       .catch(() => setUser(null))
       .finally(() => setIsLoading(false));
   }, []);
 
+  // 2. Login Handler
   const login = async (email: string, password: string) => {
     const res = await fetch(`${API}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include", // allows Set-Cookie from the backend to be stored
+      credentials: "include", 
       body: JSON.stringify({ email, password }),
     });
 
@@ -91,17 +100,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(err.detail ?? "Login failed");
     }
 
-    const userData: User = await res.json();
-    setUser(userData);
+    const rawJson = await res.json();
+    const rawUser = rawJson.user; // Safely unpack user context from structured wrap
+
+    setUser({
+      id: rawUser.id,
+      fullName: rawUser.full_name,
+      email: rawUser.email,
+      role: rawUser.role,
+      labGroupId: rawUser.lab_group_id,
+    });
   };
 
+  // 3. Functional Logout Handler
   const logout = async () => {
-    // Tell the backend to invalidate the session before clearing local state
-    await fetch(`${API}/api/auth/logout`, {
-      method: "POST",
-      credentials: "include",
-    });
-    setUser(null);
+    try {
+      // Invalidate the back-end cookie explicitly 
+      await fetch(`${API}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include", 
+      });
+    } catch (error) {
+      console.error("Backend logout handshaking encountered an issue:", error);
+    } finally {
+      // Always safely strip frontend session state even if backend network request drops
+      setUser(null);
+    }
   };
 
   const hasAccess = (requiredRoles: UserRole[]) => {
@@ -114,9 +138,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return rolePermissions[user.role].includes(permission);
   };
 
-  // Lab group access: admins see everything; others are scoped to their lab_group_id.
-  // canAccessLabGroup replaces the old canAccessLab(labCode) — the schema uses
-  // lab_group_id as the foreign key on users, not an array of lab code strings.
   const canAccessLabGroup = (labGroupId: number) => {
     if (!user) return false;
     if (user.role === "admin") return true;
