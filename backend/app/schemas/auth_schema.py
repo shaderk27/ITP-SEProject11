@@ -6,18 +6,22 @@ from pydantic import BaseModel, EmailStr, Field
 # REQUEST SCHEMAS
 # ==========================================
 
+from pydantic import BaseModel, EmailStr, Field
+
 class LoginRequest(BaseModel):
     """Validates the incoming login credentials."""
     email: EmailStr = Field(..., description="The user's registered institutional email address")
     password: str = Field(..., min_length=1, description="Plaintext password")
 
-    class Config:
-        json_schema_extra = {
+    # In Pydantic v2, 'Config' becomes 'model_config'
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "email": "admin@test.local",
                 "password": "your_secure_password"
             }
         }
+    }
 
 
 # ==========================================

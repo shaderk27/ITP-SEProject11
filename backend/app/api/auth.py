@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, Response, Cookie
+from fastapi import APIRouter, Depends, Response, Cookie, Request, HTTPException, status
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -13,10 +14,27 @@ router = APIRouter(
 
 @router.post("/login")
 async def login(
-    payload: LoginRequest,
+    request: Request,  # Brought in the request object to read the raw body if it fails
     response: Response,
     db: Session = Depends(get_db)
 ):
+    # We read the body safely first, then manually validate it to catch the 422 error
+    raw_body = await request.body()
+    
+    try:
+        # Manually trigger validation against your Pydantic schema
+        # In Pydantic v2 use: LoginRequest.model_validate_json(raw_body)
+        # In Pydantic v1 use: LoginRequest.parse_raw(raw_body)
+        payload = LoginRequest.model_validate_json(raw_body)
+    except Exception as exc:
+        print("\n--- 422 VALIDATION DEBUGGER LOG ---")
+        print(f"Raw body string received from React: {raw_body.decode('utf-8', errors='ignore')}")
+        print(f"Validation details: {str(exc)}")
+        print("-----------------------------------\n")
+        
+        # Re-raise it so the frontend still gets its expected 422 structural breakdown
+        raise RequestValidationError(errors=[{"loc": ["body"], "msg": str(exc), "type": "value_error"}])
+
     service = AuthService(
         repository=AuthRepository(),
         db=db
@@ -46,8 +64,8 @@ async def logout(
 ):
     response.delete_cookie(
         "access_token",
-        path="/",          # Explicit path ensures it clears reliably across sub-routes
-        httponly=True,     # Matches secure cookie standards
+        path="/",
+        httponly=True,
         samesite="lax"
     )
     return {
