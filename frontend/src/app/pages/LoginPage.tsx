@@ -1,39 +1,41 @@
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useLocation } from "react-router";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select";
+import { AlertCircle } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
-import type { UserRole } from "../context/AuthContext";
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("admin");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // ProtectedRoute sends inactive users here with state.reason = "inactive"
+  const inactiveRedirect = (location.state as any)?.reason === "inactive";
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
 
-    // Mock user data based on role
-    const userData = {
-      name: role === "admin" ? "John Doe" : role === "teamlead" ? "Sarah Chen" : "Alice Johnson",
-      email: email,
-      role: role,
-      assignedLabs: role === "teamlead" ? ["W3L1", "W3L2", "W3L3"] : role === "labic" ? ["W3L1"] : undefined,
-    };
-
-    login(userData);
-    navigate("/");
+    try {
+      await login(email, password);
+      // Redirect back to the page they were trying to reach, or home
+      const from = (location.state as any)?.from ?? "/";
+      navigate(from, { replace: true });
+    } catch (err: any) {
+      // The backend returns plain detail strings — map them to user-facing copy
+      setError("Invalid email or password. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -48,6 +50,16 @@ export function LoginPage() {
           </p>
         </div>
 
+        {/* Shown when ProtectedRoute redirects a deactivated user here */}
+        {inactiveRedirect && !error && (
+          <div className="mb-6 flex items-start gap-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-4">
+            <AlertCircle className="h-5 w-5 text-[#dc2626] flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-[#dc2626]">
+              Your account has been deactivated. Please contact your administrator.
+            </p>
+          </div>
+        )}
+
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="email">SIT Email</Label>
@@ -58,6 +70,7 @@ export function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              disabled={isSubmitting}
             />
           </div>
 
@@ -70,25 +83,16 @@ export function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              disabled={isSubmitting}
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="role">Role (Demo)</Label>
-            <Select value={role} onValueChange={(val) => setRole(val as UserRole)}>
-              <SelectTrigger id="role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="admin">Admin</SelectItem>
-                <SelectItem value="teamlead">Team Lead</SelectItem>
-                <SelectItem value="labic">Lab IC</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Select role for demonstration purposes
-            </p>
-          </div>
+          {error && (
+            <div className="flex items-start gap-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-3">
+              <AlertCircle className="h-4 w-4 text-[#dc2626] flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-[#dc2626]">{error}</p>
+            </div>
+          )}
 
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-sm">
@@ -98,10 +102,7 @@ export function LoginPage() {
               />
               <span className="text-muted-foreground">Remember me</span>
             </label>
-            <a
-              href="#"
-              className="text-sm text-[#1e3a8a] hover:underline"
-            >
+            <a href="#" className="text-sm text-[#1e3a8a] hover:underline">
               Forgot password?
             </a>
           </div>
@@ -109,14 +110,14 @@ export function LoginPage() {
           <Button
             type="submit"
             className="w-full bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
+            disabled={isSubmitting}
           >
-            Sign In
+            {isSubmitting ? "Signing in…" : "Sign In"}
           </Button>
         </form>
 
         <div className="mt-6 text-center text-xs text-muted-foreground">
-          <p>Demo login for frontend integration</p>
-          <p className="mt-1">© 2026 SIT. All rights reserved.</p>
+          <p>© 2026 SIT. All rights reserved.</p>
         </div>
       </Card>
     </div>
