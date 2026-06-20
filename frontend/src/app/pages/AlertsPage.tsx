@@ -1,3 +1,4 @@
+import { Navigate } from "react-router";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -57,16 +58,33 @@ const mockAlerts = [
 ];
 
 export function AlertsPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
 
-  // Filter alerts based on user's assigned labs
+  // Page-level permission guard — belt-and-suspenders alongside ProtectedRoute.
+  // Renders nothing dangerous while the redirect happens.
+  if (!hasPermission("alerts:view")) {
+    return <Navigate to="/403" replace />;
+  }
+
+  // Filter alerts to what this user is allowed to see:
+  //   admin    → all alerts
+  //   teamlead → alerts for their assigned labs
+  //   labic    → alerts for their assigned labs (same logic as teamlead;
+  //              previously this branch was missing so labic saw nothing)
   const filteredAlerts = mockAlerts.filter((alert) => {
     if (user?.role === "admin") return true;
-    if (user?.role === "teamlead") {
-      return user.assignedLabs?.some((lab) => alert.lab.includes(lab));
-    }
-    return false;
+    return user?.assignedLabs?.some((lab) => alert.lab.includes(lab)) ?? false;
   });
+
+  // labic users and teamlead users both have assigned labs, so we show
+  // the contextual banner for either role.
+  const showLabBanner =
+    (user?.role === "teamlead" || user?.role === "labic") &&
+    !!user?.assignedLabs?.length;
+
+  // Email recipient label differs by role.
+  const emailRecipientLabel =
+    user?.role === "admin" ? "Admin & Team Lead" : "Team Lead";
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
@@ -108,14 +126,18 @@ export function AlertsPage() {
           </p>
         </div>
 
-        {user?.role === "teamlead" && (
+        {/* Contextual banner for non-admin users with assigned labs */}
+        {showLabBanner && (
           <Card className="p-4 bg-[#f0f9ff] border-[#bfdbfe]">
             <div className="flex items-start gap-3">
               <Info className="h-5 w-5 text-[#2563eb] flex-shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm text-[#1e40af] font-medium">Team Lead View</p>
+                <p className="text-sm text-[#1e40af] font-medium">
+                  {user?.role === "teamlead" ? "Team Lead View" : "Lab IC View"}
+                </p>
                 <p className="text-xs text-[#1e3a8a] mt-1">
-                  Showing alerts only for your assigned labs: {user.assignedLabs?.join(", ")}
+                  Showing alerts only for your assigned labs:{" "}
+                  {user?.assignedLabs?.join(", ")}
                 </p>
               </div>
             </div>
@@ -151,7 +173,7 @@ export function AlertsPage() {
               </div>
               <div>
                 <p className="text-2xl font-semibold text-foreground">
-                  {filteredAlerts.filter(a => a.type === "exceeded").length}
+                  {filteredAlerts.filter((a) => a.type === "exceeded").length}
                 </p>
                 <p className="text-sm text-muted-foreground">Budget Exceeded</p>
               </div>
@@ -165,7 +187,7 @@ export function AlertsPage() {
               </div>
               <div>
                 <p className="text-2xl font-semibold text-foreground">
-                  {filteredAlerts.filter(a => a.type === "warning").length}
+                  {filteredAlerts.filter((a) => a.type === "warning").length}
                 </p>
                 <p className="text-sm text-muted-foreground">Warnings</p>
               </div>
@@ -179,7 +201,7 @@ export function AlertsPage() {
               </div>
               <div>
                 <p className="text-2xl font-semibold text-foreground">
-                  {filteredAlerts.filter(a => a.emailSent).length}
+                  {filteredAlerts.filter((a) => a.emailSent).length}
                 </p>
                 <p className="text-sm text-muted-foreground">Emails Sent</p>
               </div>
@@ -192,137 +214,142 @@ export function AlertsPage() {
           <div className="p-6 border-b border-border">
             <h3 className="text-lg font-semibold text-foreground">Active Alerts</h3>
           </div>
-          <div className="divide-y divide-border">
-            {filteredAlerts.map((alert) => {
-              const alertConfig =
-                alert.type === "exceeded"
-                  ? {
-                      bgColor: "bg-[#fef2f2]",
-                      borderColor: "border-[#fecaca]",
-                      iconColor: "text-[#dc2626]",
-                    }
-                  : alert.type === "warning"
-                  ? {
-                      bgColor: "bg-[#fef3c7]",
-                      borderColor: "border-[#fde68a]",
-                      iconColor: "text-[#d97706]",
-                    }
-                  : {
-                      bgColor: "bg-[#f0f9ff]",
-                      borderColor: "border-[#bfdbfe]",
-                      iconColor: "text-[#2563eb]",
-                    };
 
-              return (
-                <div key={alert.id} className="p-6">
-                  <div
-                    className={`${alertConfig.bgColor} ${alertConfig.borderColor} border rounded-lg p-4`}
-                  >
-                    <div className="flex items-start gap-4">
-                      <AlertCircle
-                        className={`h-6 w-6 ${alertConfig.iconColor} flex-shrink-0 mt-1`}
-                      />
-                      <div className="flex-1">
-                        <div className="flex items-start justify-between mb-3">
-                          <div>
-                            <h4 className="font-semibold text-foreground mb-1">
-                              {alert.lab}
-                            </h4>
-                            <p className="text-sm text-muted-foreground">
-                              {alert.message}
-                            </p>
-                          </div>
-                          <StatusBadge status={alert.type as any}>
-                            {alert.type === "exceeded"
-                              ? "Exceeded"
-                              : alert.type === "warning"
-                              ? "Warning"
-                              : "Info"}
-                          </StatusBadge>
-                        </div>
+          {filteredAlerts.length === 0 ? (
+            <div className="p-12 text-center text-muted-foreground text-sm">
+              No alerts for your assigned labs.
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {filteredAlerts.map((alert) => {
+                const alertConfig =
+                  alert.type === "exceeded"
+                    ? {
+                        bgColor: "bg-[#fef2f2]",
+                        borderColor: "border-[#fecaca]",
+                        iconColor: "text-[#dc2626]",
+                      }
+                    : alert.type === "warning"
+                    ? {
+                        bgColor: "bg-[#fef3c7]",
+                        borderColor: "border-[#fde68a]",
+                        iconColor: "text-[#d97706]",
+                      }
+                    : {
+                        bgColor: "bg-[#f0f9ff]",
+                        borderColor: "border-[#bfdbfe]",
+                        iconColor: "text-[#2563eb]",
+                      };
 
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              Budget
-                            </p>
-                            <p className="text-sm font-medium text-foreground">
-                              ${alert.budget.toLocaleString()}
-                            </p>
+                return (
+                  <div key={alert.id} className="p-6">
+                    <div
+                      className={`${alertConfig.bgColor} ${alertConfig.borderColor} border rounded-lg p-4`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <AlertCircle
+                          className={`h-6 w-6 ${alertConfig.iconColor} flex-shrink-0 mt-1`}
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-start justify-between mb-3">
+                            <div>
+                              <h4 className="font-semibold text-foreground mb-1">
+                                {alert.lab}
+                              </h4>
+                              <p className="text-sm text-muted-foreground">
+                                {alert.message}
+                              </p>
+                            </div>
+                            <StatusBadge status={alert.type as any}>
+                              {alert.type === "exceeded"
+                                ? "Exceeded"
+                                : alert.type === "warning"
+                                ? "Warning"
+                                : "Info"}
+                            </StatusBadge>
                           </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              Actual Spend
-                            </p>
-                            <p className="text-sm font-medium text-foreground">
-                              ${alert.actual.toLocaleString()}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              Utilization
-                            </p>
-                            <p
-                              className={`text-sm font-medium ${
-                                alert.utilization > 100
-                                  ? "text-[#dc2626]"
-                                  : alert.utilization > 85
-                                  ? "text-[#d97706]"
-                                  : "text-[#059669]"
-                              }`}
-                            >
-                              {alert.utilization}%
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">
-                              Threshold
-                            </p>
-                            <p className="text-sm font-medium text-foreground">
-                              {alert.threshold}%
-                            </p>
-                          </div>
-                        </div>
 
-                        {/* Progress bar */}
-                        <div className="mb-4">
-                          <div className="w-full h-2 bg-white rounded-full overflow-hidden">
-                            <div
-                              className={`h-full ${
-                                alert.utilization > 100
-                                  ? "bg-[#dc2626]"
-                                  : alert.utilization > 85
-                                  ? "bg-[#d97706]"
-                                  : "bg-[#059669]"
-                              }`}
-                              style={{
-                                width: `${Math.min(alert.utilization, 100)}%`,
-                              }}
-                            />
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">Budget</p>
+                              <p className="text-sm font-medium text-foreground">
+                                ${alert.budget.toLocaleString()}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">
+                                Actual Spend
+                              </p>
+                              <p className="text-sm font-medium text-foreground">
+                                ${alert.actual.toLocaleString()}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">
+                                Utilization
+                              </p>
+                              <p
+                                className={`text-sm font-medium ${
+                                  alert.utilization > 100
+                                    ? "text-[#dc2626]"
+                                    : alert.utilization > 85
+                                    ? "text-[#d97706]"
+                                    : "text-[#059669]"
+                                }`}
+                              >
+                                {alert.utilization}%
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground mb-1">
+                                Threshold
+                              </p>
+                              <p className="text-sm font-medium text-foreground">
+                                {alert.threshold}%
+                              </p>
+                            </div>
                           </div>
-                        </div>
 
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                            <span>Triggered: {alert.triggeredDate}</span>
-                            <span className="flex items-center gap-1">
-                              <Mail className="h-3 w-3" />
-                              {alert.emailSent
-                                ? `Email sent to ${user?.role === "admin" ? "Admin & Team Lead" : "Team Lead"}`
-                                : "No email sent"}
-                            </span>
+                          {/* Progress bar */}
+                          <div className="mb-4">
+                            <div className="w-full h-2 bg-white rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${
+                                  alert.utilization > 100
+                                    ? "bg-[#dc2626]"
+                                    : alert.utilization > 85
+                                    ? "bg-[#d97706]"
+                                    : "bg-[#059669]"
+                                }`}
+                                style={{
+                                  width: `${Math.min(alert.utilization, 100)}%`,
+                                }}
+                              />
+                            </div>
                           </div>
-                          <Button variant="outline" size="sm">
-                            View Details
-                          </Button>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                              <span>Triggered: {alert.triggeredDate}</span>
+                              <span className="flex items-center gap-1">
+                                <Mail className="h-3 w-3" />
+                                {alert.emailSent
+                                  ? `Email sent to ${emailRecipientLabel}`
+                                  : "No email sent"}
+                              </span>
+                            </div>
+                            <Button variant="outline" size="sm">
+                              View Details
+                            </Button>
+                          </div>
                         </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
     </div>
