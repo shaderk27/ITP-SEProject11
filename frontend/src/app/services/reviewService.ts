@@ -1,5 +1,5 @@
 import type { User } from "../context/AuthContext";
-import type { ReviewBatchSummary } from "../types/review";
+import type { ReviewBatchDetail, ReviewBatchSummary } from "../types/review";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -24,6 +24,19 @@ export async function listReviewBatches(user: User | null): Promise<ReviewBatchS
   if (!response.ok) {
     const detail = await readErrorDetail(response);
     throw new Error(detail || `Failed to load review batches (${response.status}).`);
+  }
+
+  return response.json();
+}
+
+export async function getBatchDetail(batchId: number, user: User | null): Promise<ReviewBatchDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/review/batches/${batchId}`, {
+    headers: userHeaders(user),
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail || `Failed to load batch detail (${response.status}).`);
   }
 
   return response.json();

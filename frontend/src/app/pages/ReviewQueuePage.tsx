@@ -1,17 +1,31 @@
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Lock, RefreshCw } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
+import { Link } from "react-router";
+import { ChevronDown, ChevronRight, Eye, Lock, RefreshCw } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
-import { listReviewBatches } from "../services/reviewService";
-import type { ReviewBatchSummary } from "../types/review";
+import { getBatchDetail, listReviewBatches } from "../services/reviewService";
+import type {
+  ReviewBatchDetail,
+  ReviewBatchSummary,
+  ReviewPRGroup,
+  ReviewQueueLine,
+} from "../types/review";
+
+type DetailState =
+  | { kind: "loading" }
+  | { kind: "ready"; data: ReviewBatchDetail }
+  | { kind: "error"; message: string };
 
 export function ReviewQueuePage() {
   const { user } = useAuth();
+
   const [batches, setBatches] = useState<ReviewBatchSummary[]>([]);
   const [expandedBatch, setExpandedBatch] = useState<number | null>(null);
+  const [expandedPr, setExpandedPr] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<number, DetailState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,8 +35,12 @@ export function ReviewQueuePage() {
     try {
       const data = await listReviewBatches(user);
       setBatches(data);
-      if (data.length > 0 && expandedBatch === null) {
+      // Reset detail cache when batch list refreshes; otherwise stale data lingers.
+      setDetails({});
+      if (data.length > 0) {
         setExpandedBatch(data[0].batch_id);
+      } else {
+        setExpandedBatch(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load review queue.");
@@ -36,6 +54,31 @@ export function ReviewQueuePage() {
     fetchBatches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
+
+  // Lazy-fetch per-batch detail when expanded for the first time.
+  useEffect(() => {
+    if (expandedBatch === null) return;
+    if (details[expandedBatch]) return;
+    setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "loading" } }));
+    getBatchDetail(expandedBatch, user)
+      .then((data) => {
+        setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "ready", data } }));
+        // Auto-expand the first PR for convenience.
+        if (data.prs.length > 0) {
+          setExpandedPr(data.prs[0].source_pr_number);
+        }
+      })
+      .catch((err) =>
+        setDetails((prev) => ({
+          ...prev,
+          [expandedBatch]: {
+            kind: "error",
+            message: err instanceof Error ? err.message : "Failed to load batch detail.",
+          },
+        })),
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedBatch]);
 
   const totalOpen = batches.reduce((sum, b) => sum + b.open_queue_count, 0);
 
@@ -85,10 +128,10 @@ export function ReviewQueuePage() {
             <Lock className="h-5 w-5 text-[#c2410c] mt-0.5" />
             <div>
               <p className="text-sm font-medium text-[#9a3412]">
-                Expand a batch to see its review summary.
+                Expand a batch, then expand a PR to see its individual error lines.
               </p>
               <p className="text-sm text-[#9a3412] mt-1">
-                Per-line correction UI ships in the next step. A batch can only be committed after every listed line error in that batch is resolved.
+                A batch can only be committed after every listed line error in that batch is resolved.
               </p>
             </div>
           </div>
@@ -109,6 +152,8 @@ export function ReviewQueuePage() {
         <div className="space-y-4">
           {batches.map((batch) => {
             const isBatchExpanded = expandedBatch === batch.batch_id;
+            const detail = details[batch.batch_id];
+
             return (
               <Card key={batch.batch_id} className="bg-white border-border overflow-hidden">
                 <button
@@ -132,12 +177,27 @@ export function ReviewQueuePage() {
                 </button>
 
                 {isBatchExpanded && (
-                  <div className="border-t border-border bg-[#f8f9fa] p-6">
-                    <p className="text-sm text-muted-foreground">
-                      <strong className="text-foreground">{batch.open_queue_count}</strong> line error
-                      {batch.open_queue_count === 1 ? "" : "s"} in this batch are waiting for review. The
-                      per-line correction interface will appear here in the next step.
-                    </p>
+                  <div className="border-t border-border bg-[#f8f9fa] p-4 space-y-3">
+                    {!detail || detail.kind === "loading" ? (
+                      <p className="text-sm text-muted-foreground py-2 px-1">Loading line errors…</p>
+                    ) : detail.kind === "error" ? (
+                      <p className="text-sm text-[#b91c1c] py-2 px-1">{detail.message}</p>
+                    ) : detail.data.prs.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2 px-1">
+                        No line errors visible to you in this batch.
+                      </p>
+                    ) : (
+                      detail.data.prs.map((pr) => (
+                        <PRGroupCard
+                          key={pr.source_pr_number}
+                          pr={pr}
+                          isExpanded={expandedPr === pr.source_pr_number}
+                          onToggle={() =>
+                            setExpandedPr(expandedPr === pr.source_pr_number ? null : pr.source_pr_number)
+                          }
+                        />
+                      ))
+                    )}
                   </div>
                 )}
               </Card>
@@ -149,6 +209,103 @@ export function ReviewQueuePage() {
   );
 }
 
+// ─── PR-level row ────────────────────────────────────────────────────────
+function PRGroupCard({
+  pr,
+  isExpanded,
+  onToggle,
+}: {
+  pr: ReviewPRGroup;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-white overflow-hidden">
+      <button
+        type="button"
+        className="w-full p-4 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-3">
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <div>
+            <p className="text-sm font-semibold text-foreground">{pr.source_pr_number}</p>
+            <p className="text-xs text-muted-foreground">
+              {pr.lines.length} line error{pr.lines.length === 1 ? "" : "s"}
+              {pr.requestor_name ? ` · ${pr.requestor_name}` : ""}
+            </p>
+          </div>
+        </div>
+        <StatusBadge status="warning">Needs line edits</StatusBadge>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-border overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-[#f8f9fa]">
+              <tr className="border-b border-border">
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Line</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">WBS</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Current Classification</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Issue</th>
+                <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
+                <th className="text-center p-3 text-xs font-medium text-muted-foreground">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pr.lines.map((line) => (
+                <LineRow key={line.review_queue_id} line={line} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Line-level row ──────────────────────────────────────────────────────
+function LineRow({ line }: { line: ReviewQueueLine }) {
+  return (
+    <Fragment>
+      <tr className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
+        <td className="p-3 text-sm font-medium text-foreground">
+          Line {line.source_line_no ?? "—"}
+        </td>
+        <td className="p-3 text-sm text-foreground">{line.item_details}</td>
+        <td className="p-3 text-sm text-muted-foreground">{line.wbs_code || "—"}</td>
+        <td className="p-3">
+          <div className="flex flex-wrap gap-2">
+            <StatusBadge status={line.is_lab_group_general ? "general" : "info"}>
+              {line.current_lab_group}
+            </StatusBadge>
+            <StatusBadge status={line.is_lab_general ? "general" : "info"}>
+              {line.current_lab}
+            </StatusBadge>
+            <StatusBadge status={line.is_category_general ? "general" : "info"}>
+              {line.current_category}
+            </StatusBadge>
+          </div>
+        </td>
+        <td className="p-3 text-xs text-muted-foreground max-w-sm">{line.review_reason}</td>
+        <td className="p-3 text-sm text-right font-medium text-foreground">
+          ${formatAmount(line.amount_gst)}
+        </td>
+        <td className="p-3 text-center">
+          <Link to={`/review/${line.review_queue_id}`}>
+            <Button size="sm" variant="outline">
+              <Eye className="h-4 w-4 mr-1" />
+              Edit Line
+            </Button>
+          </Link>
+        </td>
+      </tr>
+    </Fragment>
+  );
+}
+
+// ─── Tiny helpers ────────────────────────────────────────────────────────
 function formatDate(iso: string): string {
   try {
     const d = new Date(iso);
@@ -166,4 +323,10 @@ function formatDate(iso: string): string {
 
 function prettyStatus(raw: string): string {
   return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatAmount(raw: string): string {
+  const num = Number(raw);
+  if (Number.isNaN(num)) return raw;
+  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
