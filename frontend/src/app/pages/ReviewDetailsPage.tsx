@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useNavigate, Navigate } from "react-router";
 import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { Card } from "../components/ui/card";
@@ -122,23 +122,39 @@ const reviewLines = {
 export function ReviewDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user, isLoading } = useAuth();
+
   const reviewLine = reviewLines[id as keyof typeof reviewLines] ?? reviewLines["REV-001"];
+
+  // Form State
   const [labGroup, setLabGroup] = useState(reviewLine.original.labGroup);
   const [lab, setLab] = useState(reviewLine.original.lab);
   const [category, setCategory] = useState(reviewLine.original.category);
   const [notes, setNotes] = useState("");
   const [showRaw, setShowRaw] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
-  const { user } = useAuth();
 
+
+
+  // 1. Guard against initial auth mounting state to prevent false 403 bouncers
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-screen text-sm text-muted-foreground">
+        Checking access permissions…
+      </div>
+    );
+  }
+
+  // 2. Evaluate RBAC authorizations
   const canReview =
     user?.role === "admin" ||
-    user?.assignedLabs?.includes(
-      reviewLine.original.lab
-    );
+    user?.assignedLabs?.includes(reviewLine.original.lab);
+
+  // 3. Declarative redirect element if unauthorized (Resolves your previous TypeScript signature error)
   if (!canReview) {
     return <Navigate to="/403" replace />;
   }
+
   const handleSave = () => {
     navigate("/review");
   };

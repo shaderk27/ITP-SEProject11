@@ -20,6 +20,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+// Mock Data Definitions
 const labGroupData = [
   { name: "W3 - Food Processing", budget: 180000, actual: 98500, utilization: 54.7 },
   { name: "W4 - Materials Testing", budget: 150000, actual: 76200, utilization: 50.8 },
@@ -29,11 +30,11 @@ const labGroupData = [
 ];
 
 const labData = [
-  { name: "W3L1 - Food Pilot Plant", budget: 65000, actual: 72800, status: "exceeded" },
-  { name: "W3L2 - Food Chemistry", budget: 45000, actual: 18200, status: "healthy" },
-  { name: "W3L3 - Food Microbiology", budget: 40000, actual: 7500, status: "healthy" },
-  { name: "W4L1 - Tensile Testing", budget: 55000, actual: 38100, status: "healthy" },
-  { name: "W4L2 - Materials Analysis", budget: 50000, actual: 38100, status: "warning" },
+  { name: "W3L1 - Food Pilot Plant", code: "W3L1", budget: 65000, actual: 72800, status: "exceeded" },
+  { name: "W3L2 - Food Chemistry", code: "W3L2", budget: 45000, actual: 18200, status: "healthy" },
+  { name: "W3L3 - Food Microbiology", code: "W3L3", budget: 40000, actual: 7500, status: "healthy" },
+  { name: "W4L1 - Tensile Testing", code: "W4L1", budget: 55000, actual: 38100, status: "healthy" },
+  { name: "W4L2 - Materials Analysis", code: "W4L2", budget: 50000, actual: 38100, status: "warning" },
 ];
 
 const categoryData = [
@@ -55,39 +56,46 @@ const trendData = [
 export function ReportsPage() {
   const { user } = useAuth();
 
-  // Filter data based on role and assigned labs
+  // Filter lab group data based on user authorization bounds
   const getFilteredLabGroupData = () => {
     if (user?.role === "admin") {
       return labGroupData;
-    } else if (user?.role === "teamlead") {
-      // Team Lead sees only their assigned lab groups
+    } 
+    
+    if (user?.role === "teamlead") {
+      // Team Lead sees only their assigned lab groups (e.g. matching "W3")
       return labGroupData.filter(group =>
-        user.assignedLabs?.some(lab => group.name.includes(lab.substring(0, 2)))
+        user.assignedLabs?.some(assignedLab => 
+          group.name.toLowerCase().startsWith(assignedLab.substring(0, 2).toLowerCase())
+        )
       );
-    } else if (user?.role === "labic") {
-      // Lab IC sees only their specific lab's group
-      const labCode = user.assignedLabs?.[0];
+    } 
+    
+    if (user?.role === "labic") {
+      // Lab IC sees only their specific target lab's overarching cluster
+      const firstLabCode = user.assignedLabs?.[0];
+      if (!firstLabCode) return [];
       return labGroupData.filter(group =>
-        labCode && group.name.includes(labCode.substring(0, 2))
+        group.name.toLowerCase().startsWith(firstLabCode.substring(0, 2).toLowerCase())
       );
     }
+    
     return [];
   };
 
+  // Filter specific sub-labs based on user assignment parameters
   const getFilteredLabData = () => {
     if (user?.role === "admin") {
       return labData;
-    } else if (user?.role === "teamlead") {
-      // Team Lead sees only their assigned labs
+    } 
+    
+    if (user?.role === "teamlead" || user?.role === "labic") {
+      // Matches clean array strings against user tracking identifiers 
       return labData.filter(lab =>
         user.assignedLabs?.some(assignedLab => lab.code === assignedLab)
       );
-    } else if (user?.role === "labic") {
-      // Lab IC sees only their specific lab
-      return labData.filter(lab =>
-        user.assignedLabs?.includes(lab.code)
-      );
     }
+    
     return [];
   };
 
