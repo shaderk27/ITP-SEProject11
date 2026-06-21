@@ -1,12 +1,6 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate, Navigate } from "react-router";
-import {
-  AlertCircle,
-  CheckCircle,
-  ChevronDown,
-  ChevronRight,
-  Info,
-} from "lucide-react";
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router";
+import { AlertCircle, CheckCircle, ChevronDown, ChevronRight, Info } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
@@ -19,7 +13,6 @@ import {
 } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { StatusBadge } from "../components/shared/StatusBadge";
-import { useAuth } from "../context/AuthContext";
 
 const reviewLines = {
   "REV-001": {
@@ -128,37 +121,13 @@ const reviewLines = {
 export function ReviewDetailsPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, isLoading } = useAuth();
-
-  const reviewLine =
-    reviewLines[id as keyof typeof reviewLines] ?? reviewLines["REV-001"];
-
-  // Form State
+  const reviewLine = reviewLines[id as keyof typeof reviewLines] ?? reviewLines["REV-001"];
   const [labGroup, setLabGroup] = useState(reviewLine.original.labGroup);
   const [lab, setLab] = useState(reviewLine.original.lab);
   const [category, setCategory] = useState(reviewLine.original.category);
   const [notes, setNotes] = useState("");
   const [showRaw, setShowRaw] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
-
-  // 1. Guard against initial auth mounting state to prevent false 403 bouncers
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-screen text-sm text-muted-foreground">
-        Checking access permissions…
-      </div>
-    );
-  }
-
-  // 2. Evaluate RBAC authorizations
-  const canReview =
-    user?.role === "admin" ||
-    user?.assignedLabs?.includes(reviewLine.original.lab);
-
-  // 3. Declarative redirect element if unauthorized (Resolves your previous TypeScript signature error)
-  if (!canReview) {
-    return <Navigate to="/403" replace />;
-  }
 
   const handleSave = () => {
     navigate("/review");
@@ -169,17 +138,13 @@ export function ReviewDetailsPage() {
       <div className="p-6 max-w-6xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-semibold text-foreground">
-              Resolve Review Line
-            </h2>
+            <h2 className="text-2xl font-semibold text-foreground">Resolve Review Line</h2>
             <p className="text-sm text-muted-foreground mt-1">
-              {reviewLine.pr} - {reviewLine.lineNo} from{" "}
-              {reviewLine.uploadBatchId}
+              {reviewLine.pr} - {reviewLine.lineNo} from {reviewLine.uploadBatchId}
               {id ? ` (${id})` : ""}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              Saving this page resolves only this line. The upload batch can be
-              approved after every line in the batch is resolved.
+              Saving this page resolves only this line. The upload batch can be approved after every line in the batch is resolved.
             </p>
           </div>
           <Button variant="outline" onClick={() => navigate("/review")}>
@@ -191,13 +156,10 @@ export function ReviewDetailsPage() {
           <div className="flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-[#c2410c] mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-[#9a3412]">
-                Line-item edit required
-              </p>
+              <p className="text-sm font-medium text-[#9a3412]">Line-item edit required</p>
               <p className="text-sm text-[#9a3412] mt-1">
-                This line is not blocked because the whole PR is invalid. Only
-                this PR line needs classification review. Keep Lab Group, Lab,
-                and Category decisions separate.
+                This line is not blocked because the whole PR is invalid. Only this PR line needs classification review.
+                Keep Lab Group, Lab, and Category decisions separate.
               </p>
             </div>
           </div>
@@ -215,73 +177,45 @@ export function ReviewDetailsPage() {
                   <Info className="h-5 w-5 text-[#2563eb]" />
                   Uploaded Line Data
                 </span>
-                {showRaw ? (
-                  <ChevronDown className="h-5 w-5" />
-                ) : (
-                  <ChevronRight className="h-5 w-5" />
-                )}
+                {showRaw ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
               </button>
               {showRaw && (
                 <div className="border-t border-border p-5 grid grid-cols-1 md:grid-cols-3 gap-5">
                   <div>
-                    <Label className="text-muted-foreground">
-                      Item Details
-                    </Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.itemDetails}
-                    </p>
+                    <Label className="text-muted-foreground">Item Details</Label>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.itemDetails}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Purpose</Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.purpose}
-                    </p>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.purpose}</p>
                   </div>
                   <div>
-                    <Label className="text-muted-foreground">
-                      Instruction to Vendor
-                    </Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.instructionToVendor}
-                    </p>
+                    <Label className="text-muted-foreground">Instruction to Vendor</Label>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.instructionToVendor}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">WBS</Label>
-                    <p className="text-sm font-medium text-foreground mt-1">
-                      {reviewLine.wbs}
-                    </p>
+                    <p className="text-sm font-medium text-foreground mt-1">{reviewLine.wbs}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Requestor</Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.requestor}
-                    </p>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.requestor}</p>
                   </div>
                   <div>
-                    <Label className="text-muted-foreground">
-                      Amount + GST
-                    </Label>
-                    <p className="text-sm font-medium text-foreground mt-1">
-                      {reviewLine.amount}
-                    </p>
+                    <Label className="text-muted-foreground">Amount + GST</Label>
+                    <p className="text-sm font-medium text-foreground mt-1">{reviewLine.amount}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Qty</Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.quantity}
-                    </p>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.quantity}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Unit Rate</Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.unitRate}
-                    </p>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.unitRate}</p>
                   </div>
                   <div>
                     <Label className="text-muted-foreground">Last Update</Label>
-                    <p className="text-sm text-foreground mt-1">
-                      {reviewLine.lastUpdate}
-                    </p>
+                    <p className="text-sm text-foreground mt-1">{reviewLine.lastUpdate}</p>
                   </div>
                 </div>
               )}
@@ -297,19 +231,12 @@ export function ReviewDetailsPage() {
                   <AlertCircle className="h-5 w-5 text-[#d97706]" />
                   Review Reason
                 </span>
-                {showTrace ? (
-                  <ChevronDown className="h-5 w-5" />
-                ) : (
-                  <ChevronRight className="h-5 w-5" />
-                )}
+                {showTrace ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
               </button>
               {showTrace && (
                 <div className="border-t border-border p-5 space-y-3">
                   {reviewLine.reasons.map((reason, index) => (
-                    <div
-                      key={reason}
-                      className="flex items-start gap-3 rounded-md bg-[#f8f9fa] p-3"
-                    >
+                    <div key={reason} className="flex items-start gap-3 rounded-md bg-[#f8f9fa] p-3">
                       <span className="h-6 w-6 rounded-full bg-[#1e3a8a] text-white text-xs flex items-center justify-center">
                         {index + 1}
                       </span>
@@ -351,12 +278,8 @@ export function ReviewDetailsPage() {
                     <SelectContent>
                       <SelectItem value="General">General</SelectItem>
                       <SelectItem value="W3L1 Food PP">W3L1 Food PP</SelectItem>
-                      <SelectItem value="W3L2 Food Chemistry">
-                        W3L2 Food Chemistry
-                      </SelectItem>
-                      <SelectItem value="W3L3 Food Microbiology">
-                        W3L3 Food Microbiology
-                      </SelectItem>
+                      <SelectItem value="W3L2 Food Chemistry">W3L2 Food Chemistry</SelectItem>
+                      <SelectItem value="W3L3 Food Microbiology">W3L3 Food Microbiology</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -391,43 +314,24 @@ export function ReviewDetailsPage() {
             </Card>
 
             <Card className="p-5 bg-[#f0f9ff] border-[#bfdbfe]">
-              <h4 className="text-sm font-semibold text-[#1e40af] mb-3">
-                Line Resolution Preview
-              </h4>
+              <h4 className="text-sm font-semibold text-[#1e40af] mb-3">Line Resolution Preview</h4>
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-muted-foreground">
-                    Lab Group
-                  </span>
-                  <StatusBadge
-                    status={labGroup === "General" ? "general" : "info"}
-                  >
-                    {labGroup}
-                  </StatusBadge>
+                  <span className="text-sm text-muted-foreground">Lab Group</span>
+                  <StatusBadge status={labGroup === "General" ? "general" : "info"}>{labGroup}</StatusBadge>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm text-muted-foreground">Lab</span>
-                  <StatusBadge status={lab === "General" ? "general" : "info"}>
-                    {lab}
-                  </StatusBadge>
+                  <StatusBadge status={lab === "General" ? "general" : "info"}>{lab}</StatusBadge>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-muted-foreground">
-                    Category
-                  </span>
-                  <StatusBadge
-                    status={category === "General" ? "general" : "info"}
-                  >
-                    {category}
-                  </StatusBadge>
+                  <span className="text-sm text-muted-foreground">Category</span>
+                  <StatusBadge status={category === "General" ? "general" : "info"}>{category}</StatusBadge>
                 </div>
               </div>
             </Card>
 
-            <Button
-              className="w-full bg-[#059669] hover:bg-[#047857] text-white"
-              onClick={handleSave}
-            >
+            <Button className="w-full bg-[#059669] hover:bg-[#047857] text-white" onClick={handleSave}>
               Save Line Resolution
             </Button>
           </div>
