@@ -59,7 +59,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 // Helper function to safely parse backend lab strings/arrays into standard array structures
 function parseAssignedLabs(rawLabs: any): string[] {
