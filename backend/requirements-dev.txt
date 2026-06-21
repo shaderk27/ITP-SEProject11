@@ -1,8 +1,0 @@
-pytest
-pytest-asyncio
-pytest-cov
-httpx
-ruff
-black
-mypy
-pandas-stubs

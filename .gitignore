@@ -203,14 +203,6 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
-# Node / frontend dependencies and build output
-node_modules/
-frontend/node_modules/
-frontend/dist/
-
-# Personal working notes
-instructions/
-
 # Ruff stuff:
 .ruff_cache/
 
@@ -224,4 +216,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-backend/app/database.py
