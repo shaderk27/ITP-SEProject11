@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { ChevronDown, ChevronRight, Eye, Lock, RefreshCw } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronRight, Eye, Lock, RefreshCw, Upload } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
-import { getBatchDetail, listReviewBatches } from "../services/reviewService";
+import { commitBatch, getBatchDetail, listReviewBatches } from "../services/reviewService";
 import type {
   ReviewBatchDetail,
   ReviewBatchSummary,
@@ -28,6 +28,8 @@ export function ReviewQueuePage() {
   const [details, setDetails] = useState<Record<number, DetailState>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [committingBatch, setCommittingBatch] = useState<number | null>(null);
+  const [commitSuccess, setCommitSuccess] = useState<string | null>(null);
 
   const fetchBatches = async () => {
     setLoading(true);
@@ -81,6 +83,29 @@ export function ReviewQueuePage() {
   }, [expandedBatch]);
 
   const totalOpen = batches.reduce((sum, b) => sum + b.open_queue_count, 0);
+
+  const handleCommit = async (batch: ReviewBatchSummary) => {
+    const ok = window.confirm(
+      `Commit batch #${batch.batch_id} (${batch.filename})?\n\n` +
+        `This will move ${batch.total_lines} reviewed line${batch.total_lines === 1 ? "" : "s"} ` +
+        `from staging into the finalized purchase records. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setCommittingBatch(batch.batch_id);
+    setCommitSuccess(null);
+    try {
+      const result = await commitBatch(batch.batch_id, user);
+      setCommitSuccess(
+        `Batch #${result.batch_id} committed: ${result.prs_created} PR${result.prs_created === 1 ? "" : "s"}` +
+          ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.`,
+      );
+      await fetchBatches();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to commit batch.");
+    } finally {
+      setCommittingBatch(null);
+    }
+  };
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
@@ -143,6 +168,15 @@ export function ReviewQueuePage() {
           </Card>
         )}
 
+        {commitSuccess && (
+          <Card className="p-4 mb-4 bg-[#f0fdf4] border-[#bbf7d0]">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="h-5 w-5 text-[#15803d] mt-0.5" />
+              <p className="text-sm text-[#14532d]">{commitSuccess}</p>
+            </div>
+          </Card>
+        )}
+
         {!loading && !error && batches.length === 0 && (
           <Card className="p-8 text-center text-muted-foreground">
             <p className="text-sm">No upload batches need review right now. Upload a file to get started.</p>
@@ -153,15 +187,17 @@ export function ReviewQueuePage() {
           {batches.map((batch) => {
             const isBatchExpanded = expandedBatch === batch.batch_id;
             const detail = details[batch.batch_id];
+            const canCommit = batch.upload_status === "ready_to_commit" && batch.open_queue_count === 0;
+            const isCommittingThis = committingBatch === batch.batch_id;
 
             return (
               <Card key={batch.batch_id} className="bg-white border-border overflow-hidden">
-                <button
-                  type="button"
-                  className="w-full p-5 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
-                  onClick={() => setExpandedBatch(isBatchExpanded ? null : batch.batch_id)}
-                >
-                  <div className="flex items-center gap-3">
+                <div className="w-full p-5 flex items-center justify-between gap-4 hover:bg-[#f8f9fa]">
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 text-left flex-1"
+                    onClick={() => setExpandedBatch(isBatchExpanded ? null : batch.batch_id)}
+                  >
                     {isBatchExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
                     <div>
                       <p className="text-lg font-semibold text-foreground">
@@ -172,9 +208,25 @@ export function ReviewQueuePage() {
                         {batch.uploader_name} · {formatDate(batch.uploaded_at)}
                       </p>
                     </div>
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status="pending">{prettyStatus(batch.upload_status)}</StatusBadge>
+                    {canCommit && (
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCommit(batch);
+                        }}
+                        disabled={isCommittingThis}
+                        className="bg-[#15803d] hover:bg-[#166534] text-white"
+                      >
+                        <Upload className="h-4 w-4 mr-1" />
+                        {isCommittingThis ? "Committing…" : "Commit Batch"}
+                      </Button>
+                    )}
                   </div>
-                  <StatusBadge status="pending">{prettyStatus(batch.upload_status)}</StatusBadge>
-                </button>
+                </div>
 
                 {isBatchExpanded && (
                   <div className="border-t border-border bg-[#f8f9fa] p-4 space-y-3">

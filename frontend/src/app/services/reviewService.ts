@@ -1,5 +1,12 @@
 import type { User } from "../context/AuthContext";
-import type { ReviewBatchDetail, ReviewBatchSummary } from "../types/review";
+import type {
+  CommitResponse,
+  CorrectionRequest,
+  CorrectionResponse,
+  QueueItemDetail,
+  ReviewBatchDetail,
+  ReviewBatchSummary,
+} from "../types/review";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -37,6 +44,55 @@ export async function getBatchDetail(batchId: number, user: User | null): Promis
   if (!response.ok) {
     const detail = await readErrorDetail(response);
     throw new Error(detail || `Failed to load batch detail (${response.status}).`);
+  }
+
+  return response.json();
+}
+
+export async function getQueueItem(itemId: number, user: User | null): Promise<QueueItemDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/review/queue/${itemId}`, {
+    headers: userHeaders(user),
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail || `Failed to load queue item (${response.status}).`);
+  }
+
+  return response.json();
+}
+
+export async function saveCorrection(
+  itemId: number,
+  body: CorrectionRequest,
+  user: User | null,
+): Promise<CorrectionResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/review/queue/${itemId}/correct`, {
+    method: "POST",
+    headers: {
+      ...userHeaders(user),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail || `Failed to save correction (${response.status}).`);
+  }
+
+  return response.json();
+}
+
+export async function commitBatch(batchId: number, user: User | null): Promise<CommitResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/review/batches/${batchId}/commit`, {
+    method: "POST",
+    headers: userHeaders(user),
+  });
+
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail || `Failed to commit batch (${response.status}).`);
   }
 
   return response.json();

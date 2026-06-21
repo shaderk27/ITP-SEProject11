@@ -171,12 +171,13 @@ def list_batches(
     current_user: User = Depends(get_current_user),
 ) -> list[BatchSummary]:
     """
-    Return batches that still have open review queue items.
+    Return batches relevant to the Review Queue page:
+      - batches that still have at least one OPEN queue item, OR
+      - batches in 'ready_to_commit' status (waiting for the commit click).
 
     Role scoping:
-      - Admin     → sees every batch with open items.
-      - Team Lead → sees only batches that have at least one line tied
-                    to their lab_group_id.
+      - Admin     → sees every relevant batch.
+      - Team Lead → only batches that have at least one line in their lab_group.
       - Lab IC    → 403.
     """
     role_name = _role_name(current_user)
@@ -186,8 +187,10 @@ def list_batches(
             detail="Only Admin or Team Lead can view the review queue.",
         )
 
-    # Find which batches still have at least one open queue item
-    # (and, for Team Lead, at least one line in their lab_group).
+    if role_name == "teamlead" and not current_user.lab_group_id:
+        return []
+
+    # 1. Batches with at least one open queue item (active review work).
     open_batches_query = (
         db.query(UploadBatch.batch_id)
         .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
@@ -195,23 +198,34 @@ def list_batches(
         .join(ReviewQueueItem, ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id)
         .filter(ReviewQueueItem.queue_status == "open")
     )
-
     if role_name == "teamlead":
-        if not current_user.lab_group_id:
-            # Team Lead with no assigned group sees nothing — return empty list.
-            return []
         open_batches_query = open_batches_query.filter(
             StagingPRLine.suggested_lab_group_id == current_user.lab_group_id
         )
 
-    open_batch_ids = {row[0] for row in open_batches_query.distinct().all()}
-    if not open_batch_ids:
+    # 2. Batches in 'ready_to_commit' status (zero open items, awaiting Commit click).
+    ready_batches_query = (
+        db.query(UploadBatch.batch_id)
+        .filter(UploadBatch.upload_status == "ready_to_commit")
+    )
+    if role_name == "teamlead":
+        ready_batches_query = (
+            ready_batches_query
+            .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
+            .join(StagingPRLine, StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id)
+            .filter(StagingPRLine.suggested_lab_group_id == current_user.lab_group_id)
+        )
+
+    relevant_ids = (
+        {row[0] for row in open_batches_query.distinct().all()}
+        | {row[0] for row in ready_batches_query.distinct().all()}
+    )
+    if not relevant_ids:
         return []
 
-    # Hydrate the full batch rows, newest first.
     batches = (
         db.query(UploadBatch)
-        .filter(UploadBatch.batch_id.in_(open_batch_ids))
+        .filter(UploadBatch.batch_id.in_(relevant_ids))
         .order_by(UploadBatch.uploaded_at.desc())
         .all()
     )
