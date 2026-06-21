@@ -15,7 +15,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -102,3 +102,103 @@ class ReviewQueueItem(Base):
 
     line = relationship("StagingPRLine", back_populates="queue_item")
     assignee = relationship("User")
+    actions = relationship("ReviewAction", back_populates="queue_item", cascade="all, delete-orphan")
+
+
+class ReviewAction(Base):
+    """One row per correction/action a reviewer takes on a queue item."""
+    __tablename__ = "review_actions"
+
+    review_action_id = Column(BigInteger, primary_key=True)
+    review_queue_id = Column(BigInteger, ForeignKey("review_queue_items.review_queue_id"), nullable=False)
+    reviewed_by = Column(BigInteger, ForeignKey("users.user_id"), nullable=False)
+    final_lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id"))
+    final_lab_id = Column(BigInteger, ForeignKey("labs.lab_id"))
+    final_category_id = Column(BigInteger, ForeignKey("spending_categories.category_id"))
+    # action_type examples: 'corrected', 'approved', 'rejected'
+    action_type = Column(String(30), nullable=False)
+    review_comment = Column(Text)
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    queue_item = relationship("ReviewQueueItem", back_populates="actions")
+    reviewer = relationship("User")
+
+
+class AuditLog(Base):
+    """System-wide audit trail (W11-04 plumbing)."""
+    __tablename__ = "audit_logs"
+
+    audit_id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.user_id"))
+    action_type = Column(String(50), nullable=False)
+    entity_name = Column(String(100), nullable=False)
+    record_id = Column(String(100), nullable=False)
+    old_value = Column(JSONB)
+    new_value = Column(JSONB)
+    ip_address = Column(INET)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user = relationship("User")
+
+
+# ─── Final tables (post-commit) ───────────────────────────────────────────
+class PurchaseRequest(Base):
+    """Finalized PR header. Populated when a batch is committed (W9-02)."""
+    __tablename__ = "purchase_requests"
+
+    pr_id = Column(BigInteger, primary_key=True)
+    source_pr_number = Column(String(50), nullable=False)
+    latest_batch_id = Column(BigInteger, ForeignKey("upload_batches.batch_id"))
+    requestor_name = Column(String(150))
+    req_type = Column(String(150))
+    request_date = Column(Date)
+    purpose = Column(Text)
+    wbs_code = Column(String(100))
+    instruction_to_vendor = Column(Text)
+    grand_total_sgd = Column(Numeric(14, 2))
+    lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    lines = relationship("PurchaseRequestLine", back_populates="purchase_request", cascade="all, delete-orphan")
+    versions = relationship("PRVersion", back_populates="purchase_request", cascade="all, delete-orphan")
+
+
+class PurchaseRequestLine(Base):
+    """Finalized PR line. One per committed staging_pr_line."""
+    __tablename__ = "purchase_request_lines"
+
+    pr_line_id = Column(BigInteger, primary_key=True)
+    pr_id = Column(BigInteger, ForeignKey("purchase_requests.pr_id"), nullable=False)
+    line_no = Column(Integer)
+    item_description = Column(Text)
+    qty = Column(Numeric(14, 2))
+    unit_rate = Column(Numeric(14, 2))
+    amount_gst = Column(Numeric(14, 2), nullable=False)
+    currency_code = Column(String(10), nullable=False, default="SGD")
+    lab_id = Column(BigInteger, ForeignKey("labs.lab_id"))
+    category_id = Column(BigInteger, ForeignKey("spending_categories.category_id"))
+    # Traceability back to the staging row this was promoted from.
+    source_staging_line_id = Column(BigInteger, ForeignKey("staging_pr_lines.staging_line_id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    purchase_request = relationship("PurchaseRequest", back_populates="lines")
+
+
+class PRVersion(Base):
+    """Per-PR change history. Written on commit and on subsequent updates."""
+    __tablename__ = "pr_versions"
+
+    version_id = Column(BigInteger, primary_key=True)
+    pr_id = Column(BigInteger, ForeignKey("purchase_requests.pr_id"), nullable=False)
+    batch_id = Column(BigInteger, ForeignKey("upload_batches.batch_id"))
+    # change_type examples: 'created', 'updated', 'recommitted'
+    change_type = Column(String(30), nullable=False)
+    old_data = Column(JSONB)
+    new_data = Column(JSONB)
+    changed_by = Column(BigInteger, ForeignKey("users.user_id"))
+    change_reason = Column(Text)
+    changed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    purchase_request = relationship("PurchaseRequest", back_populates="versions")
+    user = relationship("User")
