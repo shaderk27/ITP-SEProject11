@@ -107,4 +107,4 @@ class AuthRepository:
         db: Session
     ) -> Sequence[Role]:
         """Retrieve all defined roles in the system."""
-        return db.query(Role).all()
+        return db.query(Role).all() 

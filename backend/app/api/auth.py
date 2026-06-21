@@ -10,7 +10,10 @@ from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
 
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(
+    prefix="/api/auth",
+    tags=["auth"]
+)
 
 @router.post("/login")
 async def login(

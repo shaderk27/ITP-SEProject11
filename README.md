@@ -45,3 +45,7 @@ python -m pytest backend/app/tests
 ```
 
 The current frontend uses a demo login role selector for Admin, Team Lead, and Lab IC.
+
+## Api endpoints
+You can check api documentation at:
+http://localhost:8080/docs
