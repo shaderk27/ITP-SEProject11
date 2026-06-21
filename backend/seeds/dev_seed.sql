@@ -20,7 +20,6 @@ INSERT INTO budget_periods (period_name, year_no, start_date, end_date, is_close
 SELECT 'FY2026', 2026, DATE '2026-04-01', DATE '2027-03-31', false
 WHERE NOT EXISTS (SELECT 1 FROM budget_periods WHERE period_name = 'FY2026');
 
-
 -- ----- 3. Spending categories -----
 -- "General" is the fallback bucket per team spec.
 INSERT INTO spending_categories (category_name, description)
@@ -80,28 +79,28 @@ INSERT INTO users (role_id, full_name, email, staff_id, password_hash, lab_group
 SELECT
   (SELECT role_id FROM roles WHERE role_name = 'admin'),
   'Test Admin',
-  'admin@test.local',
+  'admin@test.com',
   'TEST-ADMIN',
   'placeholder_no_auth_yet',
   NULL
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@test.local');
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'admin@test.com');
 
 INSERT INTO users (role_id, full_name, email, staff_id, password_hash, lab_group_id)
 SELECT
   (SELECT role_id FROM roles WHERE role_name = 'teamlead'),
   'Test Team Lead (FCB)',
-  'teamlead.fcb@test.local',
+  'teamlead.fcb@test.com',
   'TEST-TL-FCB',
   'placeholder_no_auth_yet',
   (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'FCB')
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'teamlead.fcb@test.local');
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'teamlead.fcb@test.com');
 
 INSERT INTO users (role_id, full_name, email, staff_id, password_hash, lab_group_id)
 SELECT
   (SELECT role_id FROM roles WHERE role_name = 'labic'),
   'Test Lab IC',
-  'labic@test.local',
+  'labic@test.com',
   'TEST-LABIC',
   'placeholder_no_auth_yet',
   NULL
-WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'labic@test.local');
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'labic@test.com');
