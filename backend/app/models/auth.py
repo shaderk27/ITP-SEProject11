@@ -20,20 +20,6 @@ class Role(Base):
         return f"<Role(role_name={self.role_name!r})>"
 
 
-# class LabGroup(Base):
-#     __tablename__ = "lab_groups"
-
-#     lab_group_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-#     lab_group_name: Mapped[str] = mapped_column(String(120), nullable=False)
-#     wbs_code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-#     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-#     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
-
-#     # Relationship back to users
-#     users: Mapped[List["User"]] = relationship("User", back_populates="lab_group")
-
-#     def __repr__(self) -> str:
-#         return f"<LabGroup(lab_group_name={self.lab_group_name!r}, wbs_code={self.wbs_code!r})>"
 class LabGroup(Base):
     __tablename__ = "lab_groups"
 

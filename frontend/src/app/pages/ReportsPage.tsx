@@ -64,7 +64,7 @@ export function ReportsPage() {
     
     if (user?.role === "teamlead") {
       // Team Lead sees only their assigned lab groups (e.g. matching "W3")
-      console.log("Current User Object:", user);
+      console.log("Full user object:", JSON.stringify(user));
       console.log("Assigned Labs Array:", user?.assignedLabs);
       console.log("Is array check:", Array.isArray(user?.assignedLabs));
       return labGroupData.filter(group =>

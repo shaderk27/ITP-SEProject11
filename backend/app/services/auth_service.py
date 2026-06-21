@@ -136,5 +136,6 @@ class AuthService:
             "email": user.email,
             "staff_id": user.staff_id,
             "role": user.role.role_name if user.role else None,
-            "lab_group_id": user.lab_group_id
+            "lab_group_id": user.lab_group_id,
+            "assignedLabs": [user.lab_group.wbs_code] if user.lab_group else []
         }

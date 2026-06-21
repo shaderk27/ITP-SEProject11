@@ -15,24 +15,26 @@ import { ChatbotPage } from "./pages/ChatbotPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 
 // Minimal 403 fallback component for unauthorized users
-//  function AccessDenied() {
-//    return (
-//      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-2">
-//        <h1 className="text-2xl font-bold text-red-600">403 - Forbidden</h1>
-//        <p className="text-muted-foreground text-sm">You do not have permission to view this resource.</p>
-//      </div>
-//    );
-//  }
+function AccessDenied() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-2">
+      <h1 className="text-2xl font-bold text-red-600">403 - Forbidden</h1>
+      <p className="text-muted-foreground text-sm">
+        You do not have permission to view this resource.
+      </p>
+    </div>
+  );
+}
 
 export const router = createBrowserRouter([
   {
     path: "/login",
     Component: LoginPage,
   },
-  // {
-  //   path: "/403",
-  //   element: <AccessDenied />,
-  // },
+  {
+    path: "/403",
+    element: <AccessDenied />,
+  },
   {
     path: "/",
     element: (
@@ -42,86 +44,92 @@ export const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { 
-        index: true, 
-        Component: DashboardPage 
+      {
+        index: true,
+        Component: DashboardPage,
       },
-      { 
-        path: "upload", 
+      {
+        path: "upload",
         element: (
           <ProtectedRoute requiredPermissions={["upload:create"]}>
             <UploadPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "upload/result", 
+      {
+        path: "upload/result",
         element: (
           <ProtectedRoute requiredPermissions={["upload:create"]}>
             <ProcessingSummaryPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "review", 
+      {
+        path: "review",
         element: (
           <ProtectedRoute requiredPermissions={["review:view"]}>
             <ReviewQueuePage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "review/:id", 
+      {
+        path: "review/:id",
         element: (
           <ProtectedRoute requiredPermissions={["review:view"]}>
             <ReviewDetailsPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "records", 
+      {
+        path: "records",
         element: (
           <ProtectedRoute requiredPermissions={["records:view"]}>
             <RecordsPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "reports", 
+      {
+        path: "reports",
         element: (
           <ProtectedRoute requiredPermissions={["reports:view"]}>
             <ReportsPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "alerts", 
+      {
+        path: "alerts",
         element: (
           <ProtectedRoute requiredPermissions={["alerts:view"]}>
             <AlertsPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "audit", 
+      {
+        path: "audit",
         element: (
           // Strictly locked to Admins using your allowedRoles logic
-          <ProtectedRoute allowedRoles={["admin"]} requiredPermissions={["audit:view"]}>
+          <ProtectedRoute
+            allowedRoles={["admin"]}
+            requiredPermissions={["audit:view"]}
+          >
             <AuditLogPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "config", 
+      {
+        path: "config",
         element: (
-          <ProtectedRoute allowedRoles={["admin"]} requiredPermissions={["config:view"]}>
+          <ProtectedRoute
+            allowedRoles={["admin"]}
+            requiredPermissions={["config:view"]}
+          >
             <SystemConfigPage />
           </ProtectedRoute>
-        )
+        ),
       },
-      { 
-        path: "chatbot", 
-        Component: ChatbotPage // Open to all logged-in roles
+      {
+        path: "chatbot",
+        Component: ChatbotPage, // Open to all logged-in roles
       },
     ],
   },

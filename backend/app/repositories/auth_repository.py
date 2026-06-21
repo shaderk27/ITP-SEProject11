@@ -1,4 +1,5 @@
 from typing import Optional, Sequence
+from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 from app.models.auth import User, Role
 
@@ -17,17 +18,12 @@ class AuthRepository:
             .first()
         )
 
-    def get_user_by_id(
-        self,
-        db: Session,
-        user_id: int
-    ) -> Optional[User]:
-        return (
-            db.query(User)
-            .options(joinedload(User.lab_group)) 
-            .filter(User.user_id == user_id)
-            .first()
-        )
+    def get_user_by_id(self, db: Session, user_id: int) -> Optional[User]:
+        return db.execute(
+            select(User)
+            .options(joinedload(User.role), joinedload(User.lab_group))
+            .where(User.user_id == user_id)
+        ).scalar_one_or_none()
 
     def get_user_by_staff_id(
         self,
