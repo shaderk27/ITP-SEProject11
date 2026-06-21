@@ -55,7 +55,8 @@ export function LoginPage() {
           <div className="mb-6 flex items-start gap-3 rounded-lg border border-[#fecaca] bg-[#fef2f2] p-4">
             <AlertCircle className="h-5 w-5 text-[#dc2626] flex-shrink-0 mt-0.5" />
             <p className="text-sm text-[#dc2626]">
-              Your account has been deactivated. Please contact your administrator.
+              Your account has been deactivated. Please contact your
+              administrator.
             </p>
           </div>
         )}

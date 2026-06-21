@@ -8,11 +8,12 @@ export interface User {
   fullName: string;
   email: string;
   role: UserRole;
-  assignedLabs: string[]; 
-  labGroupId: number | null; 
+  assignedLabs: string[];
+  labGroupId: number | null;
 }
 
 export type Permission =
+  | "user:create"
   | "dashboard:view"
   | "upload:create"
   | "review:view"
@@ -34,17 +35,30 @@ export type Permission =
 
 const rolePermissions: Record<UserRole, Permission[]> = {
   admin: [
-    "dashboard:view", "upload:create", "review:view", "review:approve",
-    "records:view", "reports:view", "alerts:view", "audit:view",
-    "config:view", "config:edit", "budget:view", "budget:edit",
+    "user:create",
+    "dashboard:view",
+    "upload:create",
+    "review:view",
+    "review:approve",
+    "records:view",
+    "reports:view",
+    "alerts:view",
+    "audit:view",
+    "config:view",
+    "config:edit",
+    "budget:view",
+    "budget:edit",
   ],
   teamlead: [
-    "dashboard:view", "upload:create", "review:view", "records:view",
-    "reports:view", "alerts:view", "budget:view",
+    "dashboard:view",
+    "upload:create",
+    "review:view",
+    "records:view",
+    "reports:view",
+    "alerts:view",
+    "budget:view",
   ],
-  labic: [
-    "dashboard:view", "records:view", "reports:view", "budget:view",
-  ],
+  labic: ["dashboard:view", "records:view", "reports:view", "budget:view"],
 };
 
 interface AuthContextType {
@@ -64,9 +78,12 @@ const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 // Helper function to safely parse backend lab strings/arrays into standard array structures
 function parseAssignedLabs(rawLabs: any): string[] {
   if (!rawLabs) return [];
-  if (Array.isArray(rawLabs)) return rawLabs;
+
+  const normalize = (lab: string) => lab.trim().replace(/^WBS-/i, "");
+
+  if (Array.isArray(rawLabs)) return rawLabs.map(normalize).filter(Boolean);
   if (typeof rawLabs === "string") {
-    return rawLabs.split(",").map((l) => l.trim()).filter(Boolean);
+    return rawLabs.split(",").map(normalize).filter(Boolean);
   }
   return [];
 }
@@ -81,16 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) {
-          const rawWbsCode = data.lab_group?.wbs_code || data.wbs_code;
-
-          // Normalize backend properties to frontend camelCase matches
           setUser({
             id: data.id,
             fullName: data.full_name,
             email: data.email,
             role: data.role,
             labGroupId: data.lab_group_id,
-            assignedLabs: parseAssignedLabs(rawWbsCode), //  FIXED: Parsed from the wbs_code column link
+            assignedLabs: parseAssignedLabs(data.assignedLabs), 
           });
         } else {
           setUser(null);
@@ -100,12 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setIsLoading(false));
   }, []);
 
-  // Make sure to mirror this exact change inside your login function block too:
   const login = async (email: string, password: string) => {
     const res = await fetch(`${API}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include", 
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
 
@@ -115,9 +128,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const rawJson = await res.json();
-    const rawUser = rawJson.user; 
-    
-    const rawWbsCode = rawUser.wbs_code || rawUser.lab_group?.wbs_code || rawUser.assigned_labs;
+    const rawUser = rawJson.user;
+
+    const rawWbsCode =
+      rawUser.wbs_code || rawUser.lab_group?.wbs_code || rawUser.assigned_labs;
 
     setUser({
       id: rawUser.id,
@@ -125,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: rawUser.email,
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
-      assignedLabs: parseAssignedLabs(rawWbsCode), //  FIXED: Sync with login endpoint
+      assignedLabs: parseAssignedLabs(rawWbsCode), 
     });
   };
 
@@ -134,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await fetch(`${API}/api/auth/logout`, {
         method: "POST",
-        credentials: "include", 
+        credentials: "include",
       });
     } catch (error) {
       console.error("Backend logout handshaking encountered an issue:", error);
@@ -161,7 +175,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, login, logout, hasAccess, hasPermission, canAccessLabGroup }}
+      value={{
+        user,
+        isLoading,
+        login,
+        logout,
+        hasAccess,
+        hasPermission,
+        canAccessLabGroup,
+      }}
     >
       {children}
     </AuthContext.Provider>

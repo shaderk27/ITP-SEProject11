@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 from fastapi import HTTPException, Response, status
 from sqlalchemy.orm import Session, joinedload
 import jwt
@@ -34,7 +34,16 @@ class AuthService:
             )
         except Exception:
             return False
-
+    def get_all_roles(self) -> List[Dict[str, Any]]:
+        """Retrieve all roles available in the system."""
+        roles = self.repository.get_all_roles(self.db)
+        return [
+            {
+                "role_id": role.role_id,
+                "role_name": role.role_name
+            }
+            for role in roles
+        ]
     def _create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """Generate a signed JWT token containing user metadata."""
         to_encode = data.copy()
@@ -138,4 +147,45 @@ class AuthService:
             "role": user.role.role_name if user.role else None,
             "lab_group_id": user.lab_group_id,
             "assignedLabs": [user.lab_group.wbs_code] if user.lab_group else []
+        }
+    def create_user(
+        self,
+        full_name: str,
+        email: str,
+        password: str,
+        role_id: int,
+        staff_id: Optional[str] = None,
+        lab_group_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Create a new user account with a hashed password."""
+
+        # 1. Check for duplicate email
+        existing = self.repository.get_user_by_email(self.db, email)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email already exists."
+            )
+
+        # 2. Hash the plaintext password using the shared bcrypt helper
+        password_hash = self._hash_password(password)
+
+        # 3. Persist via repository
+        user = self.repository.create_user(
+            db=self.db,
+            role_id=role_id,
+            full_name=full_name,
+            email=email,
+            password_hash=password_hash,
+            staff_id=staff_id,
+            lab_group_id=lab_group_id
+        )
+
+        return {
+            "id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "staff_id": user.staff_id,
+            "role_id": user.role_id,
+            "lab_group_id": user.lab_group_id
         }

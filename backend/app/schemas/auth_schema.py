@@ -1,5 +1,6 @@
+from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 # ==========================================
@@ -50,3 +51,18 @@ class CurrentUserResponse(UserBaseResponse):
     class Config:
         # Allows Pydantic to read data seamlessly if you pass a raw SQLAlchemy model instance 
         from_attributes = True
+    
+class CreateUserRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    role_id: int
+    staff_id: Optional[str] = None
+    lab_group_id: Optional[int] = None
+
+class RoleResponse(BaseModel):
+    role_id: int
+    role_name: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -59,3 +59,4 @@ class User(Base):
     lab_group: Mapped[Optional["LabGroup"]] = relationship("LabGroup", back_populates="users")
     def __repr__(self) -> str:
         return f"<User(email={self.email!r}, full_name={self.full_name!r})>"
+

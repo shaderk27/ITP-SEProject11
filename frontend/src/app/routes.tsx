@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Link } from "react-router";
 import { RootLayout } from "./components/layouts/RootLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -13,6 +13,8 @@ import { AuditLogPage } from "./pages/AuditLogPage";
 import { SystemConfigPage } from "./pages/SystemConfigPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { CreateUserPage } from "./pages/CreateUserPage";
+import { Button } from "./components/ui/button";
 
 // Minimal 403 fallback component for unauthorized users
 function AccessDenied() {
@@ -22,6 +24,21 @@ function AccessDenied() {
       <p className="text-muted-foreground text-sm">
         You do not have permission to view this resource.
       </p>
+    </div>
+  );
+}
+
+// Minimal 404 fallback component for unknown page
+function NotFound() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-2">
+      <h1 className="text-2xl font-bold text-foreground">404 - Not Found</h1>
+      <p className="text-muted-foreground text-sm">
+        The page you're looking for doesn't exist.
+      </p>
+      <Button variant="outline" className="mt-2" asChild>
+        <Link to="/">Go Home</Link>
+      </Button>
     </div>
   );
 }
@@ -36,9 +53,12 @@ export const router = createBrowserRouter([
     element: <AccessDenied />,
   },
   {
+    path: "/404",
+    element: <NotFound />,
+  },
+  {
     path: "/",
     element: (
-      // Base authorization: Ensures a user is logged in to access the application layouts
       <ProtectedRoute>
         <RootLayout />
       </ProtectedRoute>
@@ -130,6 +150,19 @@ export const router = createBrowserRouter([
       {
         path: "chatbot",
         Component: ChatbotPage, // Open to all logged-in roles
+      },
+      {
+        
+        path: "users/create",
+        element: (
+          <ProtectedRoute
+            allowedRoles={["admin"]}
+            requiredPermissions={["user:create"]}
+          >
+            <CreateUserPage />
+          </ProtectedRoute>
+        ),
+        
       },
     ],
   },

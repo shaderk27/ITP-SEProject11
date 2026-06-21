@@ -1,16 +1,16 @@
+from typing import List
+
 from fastapi import APIRouter, Depends, Response, Cookie, Request, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.auth_schema import LoginRequest
+from app.schemas.auth_schema import LoginRequest,CreateUserRequest, RoleResponse
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
 
-router = APIRouter(
-    prefix="/api/auth",
-    tags=["auth"]
-)
+
+router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login")
 async def login(
@@ -66,3 +66,30 @@ async def logout(
     return {
         "message": "Logged out"
     }
+    
+@router.post("/users", status_code=status.HTTP_201_CREATED)
+async def create_user(
+    payload: CreateUserRequest,
+    db: Session = Depends(get_db)
+):
+    service = AuthService(
+        repository=AuthRepository(),
+        db=db
+    )
+    return service.create_user(
+        full_name=payload.full_name,
+        email=payload.email,
+        password=payload.password,
+        role_id=payload.role_id,
+        staff_id=payload.staff_id,
+        lab_group_id=payload.lab_group_id
+    )
+@router.get("/roles", response_model=List[RoleResponse])
+async def get_all_roles(
+    db: Session = Depends(get_db)
+):
+    service = AuthService(
+        repository=AuthRepository(),
+        db=db
+    )
+    return service.get_all_roles()
