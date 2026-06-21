@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
-from datetime import date # NEW IMPORT
+from datetime import date
 
 from app.models.config import LabGroup, Lab, SpendingCategory, Budget, BudgetPeriod, LabGroupOut, LabOut, CategoryOut, LabGroupCreate, LabCreate, CategoryCreate
 from app.database import get_db 
@@ -14,8 +14,6 @@ router = APIRouter(prefix="/api/config", tags=["Configuration"])
 # ==============================
 def get_or_create_current_period(db: Session) -> int:
     today = date.today()
-    
-    # Calculate FY (Assuming April 1st to March 31st cycle)
     if today.month < 4:
         start_year = today.year - 1
     else:
@@ -23,12 +21,10 @@ def get_or_create_current_period(db: Session) -> int:
         
     period_name = f"FY{start_year}"
     
-    # 1. Check if this FY already exists in the database
     existing_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_name == period_name).first()
     if existing_period:
         return existing_period.period_id
         
-    # 2. If it doesn't exist, automatically generate it!
     new_period = BudgetPeriod(
         period_name=period_name,
         start_date=date(start_year, 4, 1),
@@ -59,22 +55,71 @@ def get_lab_groups(db: Session = Depends(get_db)):
 @router.post("/labgroups", response_model=LabGroupOut)
 def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     new_group = LabGroup(lab_group_name=group.name, wbs_code=group.wbs_code, description=group.description)
-    db.add(new_group); db.commit(); db.refresh(new_group)
+    db.add(new_group)
+    db.flush() # Flush to generate the new ID without committing yet
+    
+    # NEW: Bulk Claim Orphaned Labs
+    if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
+        db.query(Lab).filter(
+            Lab.lab_id.in_(group.assigned_lab_ids)
+        ).update(
+            {"lab_group_id": new_group.lab_group_id},
+            synchronize_session=False
+        )
+
+    db.commit()
+    db.refresh(new_group)
     return {"id": new_group.lab_group_id, "name": new_group.lab_group_name, "wbs_code": new_group.wbs_code, "description": new_group.description, "budget": 0, "threshold": 80}
 
 @router.put("/labgroups/{group_id}", response_model=LabGroupOut)
 def update_lab_group(group_id: int, group: LabGroupCreate, db: Session = Depends(get_db)):
     db_group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not db_group: raise HTTPException(status_code=404)
-    db_group.lab_group_name = group.name; db_group.wbs_code = group.wbs_code; db_group.description = group.description
+    
+    db_group.lab_group_name = group.name
+    db_group.wbs_code = group.wbs_code
+    db_group.description = group.description
+    
+    # NEW: Bulk Claim Orphaned Labs during Edit
+    if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
+        db.query(Lab).filter(
+            Lab.lab_id.in_(group.assigned_lab_ids)
+        ).update(
+            {"lab_group_id": group_id},
+            synchronize_session=False
+        )
+
     db.commit()
     return {"id": db_group.lab_group_id, "name": db_group.lab_group_name, "wbs_code": db_group.wbs_code, "description": db_group.description, "budget": 0, "threshold": 80}
 
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
+    
+    # 1. Unassign the group from all Budgets first
+    db.query(Budget).filter(
+        Budget.lab_group_id == group_id
+    ).update(
+        {"lab_group_id": None}, 
+        synchronize_session=False
+    )
+
+    # 2. Unassign the group from all Labs
+    db.query(Lab).filter(
+        Lab.lab_group_id == group_id
+    ).update(
+        {"lab_group_id": None}, 
+        synchronize_session=False
+    )
+    
+    # 3. Safely delete the Lab Group
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
-    if group: db.delete(group); db.commit()
-    return {"success": True}
+    if not group:
+        raise HTTPException(status_code=404, detail="Lab Group not found")
+        
+    db.delete(group)
+    db.commit()
+    
+    return {"success": True, "message": "Lab group deleted and all associated labs and budgets unassigned."}
 
 # ==============================
 # CATEGORIES API
@@ -107,6 +152,11 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
 # ==============================
 # LABS API
 # ==============================
+@router.get("/labs/orphaned") # NEW ENDPOINT
+def get_orphaned_labs(db: Session = Depends(get_db)):
+    orphaned_labs = db.query(Lab).filter(Lab.lab_group_id == None).all()
+    return [{"lab_id": lab.lab_id, "lab_name": lab.lab_name, "lab_code": lab.lab_code or ""} for lab in orphaned_labs]
+
 @router.get("/labs", response_model=List[LabOut])
 def get_labs(db: Session = Depends(get_db)):
     labs = db.query(Lab).all()
@@ -115,7 +165,6 @@ def get_labs(db: Session = Depends(get_db)):
         budgets = db.query(Budget).filter(Budget.lab_id == l.lab_id).all()
         total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
-        
         result.append({
             "id": l.lab_id, "code": l.lab_code or "", "name": l.lab_name,
             "group": l.group.lab_group_name if l.group else "Unassigned",
@@ -127,26 +176,15 @@ def get_labs(db: Session = Depends(get_db)):
 
 @router.post("/labs", response_model=LabOut)
 def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
-    # 1. Get the dynamic time-based Period ID!
     current_period_id = get_or_create_current_period(db)
-    
     new_lab = Lab(lab_code=lab_in.lab_code, lab_name=lab_in.lab_name, lab_group_id=lab_in.lab_group_id, venue=lab_in.venue)
     db.add(new_lab); db.flush() 
-    
     total_assigned = 0
     for cat_id_str, amount in lab_in.budgets.items():
         if amount > 0:
-            b = Budget(
-                period_id=current_period_id, # <--- Used here
-                lab_group_id=new_lab.lab_group_id, 
-                lab_id=new_lab.lab_id, 
-                category_id=int(cat_id_str), 
-                budget_amount=amount, 
-                updated_at=func.now()
-            )
+            b = Budget(period_id=current_period_id, lab_group_id=new_lab.lab_group_id, lab_id=new_lab.lab_id, category_id=int(cat_id_str), budget_amount=amount, updated_at=func.now())
             db.add(b)
             total_assigned += amount
-
     db.commit(); db.refresh(new_lab)
     return {"id": new_lab.lab_id, "code": new_lab.lab_code or "", "name": new_lab.lab_name, "group": new_lab.group.lab_group_name if new_lab.group else "Unassigned", "group_id": new_lab.lab_group_id, "venue": new_lab.venue, "budget": total_assigned, "ic_name": lab_in.ic_name, "ic_email": lab_in.ic_email, "budgets": lab_in.budgets}
 
@@ -154,30 +192,15 @@ def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
 def update_lab(lab_id: int, lab_in: LabCreate, db: Session = Depends(get_db)):
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab: raise HTTPException(status_code=404)
-    
-    # 1. Get the dynamic time-based Period ID!
     current_period_id = get_or_create_current_period(db)
-    
-    db_lab.lab_code = lab_in.lab_code
-    db_lab.lab_name = lab_in.lab_name
-    db_lab.lab_group_id = lab_in.lab_group_id
-    db_lab.venue = lab_in.venue
-    
+    db_lab.lab_code = lab_in.lab_code; db_lab.lab_name = lab_in.lab_name; db_lab.lab_group_id = lab_in.lab_group_id; db_lab.venue = lab_in.venue
     db.query(Budget).filter(Budget.lab_id == lab_id).delete()
     total_assigned = 0
     for cat_id_str, amount in lab_in.budgets.items():
         if amount > 0:
-            b = Budget(
-                period_id=current_period_id, # <--- Used here
-                lab_group_id=db_lab.lab_group_id, 
-                lab_id=db_lab.lab_id, 
-                category_id=int(cat_id_str), 
-                budget_amount=amount, 
-                updated_at=func.now()
-            )
+            b = Budget(period_id=current_period_id, lab_group_id=db_lab.lab_group_id, lab_id=db_lab.lab_id, category_id=int(cat_id_str), budget_amount=amount, updated_at=func.now())
             db.add(b)
             total_assigned += amount
-            
     db.commit(); db.refresh(db_lab)
     return {"id": db_lab.lab_id, "code": db_lab.lab_code or "", "name": db_lab.lab_name, "group": db_lab.group.lab_group_name if db_lab.group else "Unassigned", "group_id": db_lab.lab_group_id, "venue": db_lab.venue, "budget": total_assigned, "ic_name": lab_in.ic_name, "ic_email": lab_in.ic_email, "budgets": lab_in.budgets}
 
@@ -186,3 +209,11 @@ def delete_lab(lab_id: int, db: Session = Depends(get_db)):
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if lab: db.delete(lab); db.commit()
     return {"success": True}
+
+@router.put("/labs/{lab_id}/unassign")
+def unassign_lab_from_group(lab_id: int, db: Session = Depends(get_db)):
+    lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
+    if not lab: raise HTTPException(status_code=404, detail="Lab not found")
+    lab.lab_group_id = None
+    db.commit()
+    return {"success": True, "message": "Lab successfully removed from the group."}
