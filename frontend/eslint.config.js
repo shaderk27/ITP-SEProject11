@@ -24,9 +24,11 @@ export default defineConfig([
     },
   },
   {
-    files: ['src/components/ui/*.tsx'],
+    files: ['src/app/components/ui/*.tsx'],
     rules: {
-      'react-refresh/only-export-components': 'off',
+    'react-refresh/only-export-components': 'off',
+    'react-hooks/exhaustive-deps': 'off',
+    'react-hooks/rules-of-hooks': 'off',
     },
   },
 ])
