@@ -1,11 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from fastapi import HTTPException, Response, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 import jwt
 import bcrypt
 
-from app.models.auth import User  
 from app.repositories.auth_repository import AuthRepository
 
 # --- Configuration Constants ---

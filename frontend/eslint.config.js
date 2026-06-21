@@ -19,9 +19,14 @@ export default defineConfig([
       globals: globals.browser,
     },
     rules: {
-      '@typescript-eslint/no-explicit-any': 'warn',   // ✅ downgrade to warning while you fix
-      '@typescript-eslint/no-unused-vars': 'warn',    // ✅ downgrade to warning while you fix
+      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-unused-vars': 'warn',
     },
   },
-
+  {
+    files: ['src/components/ui/*.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

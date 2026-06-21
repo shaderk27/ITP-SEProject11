@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, Response, Cookie, Request, HTTPException, status
+from fastapi import APIRouter, Depends, Response, Cookie, Request, status
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 

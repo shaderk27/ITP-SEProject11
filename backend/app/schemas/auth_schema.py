@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 # REQUEST SCHEMAS
 # ==========================================
 
-from pydantic import BaseModel, EmailStr, Field
 
 class LoginRequest(BaseModel):
     """Validates the incoming login credentials."""
