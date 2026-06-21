@@ -15,13 +15,23 @@ class FakeQuery:
 class FakeDb:
     def __init__(self) -> None:
         self.lab_groups = [
-            SimpleNamespace(lab_group_id=1, lab_group_name="Chemistry Group", wbs_code="WBS-100"),
-            SimpleNamespace(lab_group_id=2, lab_group_name="Biology Group", wbs_code="WBS-200"),
+            SimpleNamespace(
+                lab_group_id=1, lab_group_name="Chemistry Group", wbs_code="WBS-100"
+            ),
+            SimpleNamespace(
+                lab_group_id=2, lab_group_name="Biology Group", wbs_code="WBS-200"
+            ),
         ]
         self.labs = [
-            SimpleNamespace(lab_id=10, lab_group_id=1, lab_code="CHEM-A", lab_name="Analytical Lab"),
-            SimpleNamespace(lab_id=20, lab_group_id=2, lab_code="BIO-M", lab_name="Microscope Lab"),
-            SimpleNamespace(lab_id=30, lab_group_id=1, lab_code="SW-L", lab_name="Software Lab"),
+            SimpleNamespace(
+                lab_id=10, lab_group_id=1, lab_code="CHEM-A", lab_name="Analytical Lab"
+            ),
+            SimpleNamespace(
+                lab_id=20, lab_group_id=2, lab_code="BIO-M", lab_name="Microscope Lab"
+            ),
+            SimpleNamespace(
+                lab_id=30, lab_group_id=1, lab_code="SW-L", lab_name="Software Lab"
+            ),
         ]
         self.requester_mappings = [
             SimpleNamespace(requester_name="Randy Kwok", default_lab_id=30),
