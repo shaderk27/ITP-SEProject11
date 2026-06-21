@@ -22,10 +22,14 @@ interface FieldErrors {
 }
 
 const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";;
-
+const ROLES: Role[] = [
+  { role_id: 1, role_name: "admin" },
+  { role_id: 2, role_name: "teamlead" },
+  { role_id: 3, role_name: "labic" },
+];
 // ── Page ──────────────────────────────────────────────────────────────────────
 export function CreateUserPage() {
-  const [roles, setRoles] = useState<Role[]>([]);
+  const [roles] = useState<Role[]>(ROLES);
   const [labGroups, setLabGroups] = useState<LabGroup[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -43,11 +47,7 @@ export function CreateUserPage() {
   });
 
 useEffect(() => {
-  setRoles([
-    { role_id: 1, role_name: "admin" },
-    { role_id: 2, role_name: "teamlead" },
-    { role_id: 3, role_name: "labic" },
-  ]);
+
 
   fetch(`${API}/api/config/lab-groups`, { credentials: "include" })
     .then((r) => (r.ok ? r.json() : []))
