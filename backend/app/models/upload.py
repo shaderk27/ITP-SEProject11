@@ -2,6 +2,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+
 @dataclass(frozen=True)
 class UploadMetadata:
     batch_id: str
@@ -32,6 +33,7 @@ class UploadMetadata:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
 
 @dataclass(frozen=True)
 class PRLineItem:

@@ -13,6 +13,7 @@ export interface User {
 }
 
 export type Permission =
+  | "user:create"
   | "dashboard:view"
   | "upload:create"
   | "review:view"
@@ -36,7 +37,7 @@ const rolePermissions: Record<UserRole, Permission[]> = {
   admin: [
     "dashboard:view", "upload:create", "review:view", "review:approve",
     "records:view", "reports:view", "alerts:view", "audit:view",
-    "config:view", "config:edit", "budget:view", "budget:edit",
+    "config:view", "config:edit", "budget:view", "budget:edit","user:create"
   ],
   teamlead: [
     "dashboard:view", "upload:create", "review:view", "records:view",
