@@ -24,14 +24,44 @@ interface NavItem {
 }
 
 const navigation: NavItem[] = [
-  { name: "Dashboard", path: "/", icon: LayoutDashboard, roles: ["admin", "teamlead", "labic"] },
-  { name: "Upload", path: "/upload", icon: Upload, roles: ["admin", "teamlead"] },
-  { name: "Review Queue", path: "/review", icon: ClipboardCheck, roles: ["admin", "teamlead"] },
-  { name: "PR Records", path: "/records", icon: FileText, roles: ["admin", "teamlead", "labic"] },
-  { name: "Reports", path: "/reports", icon: BarChart3, roles: ["admin", "teamlead", "labic"] },
+  {
+    name: "Dashboard",
+    path: "/",
+    icon: LayoutDashboard,
+    roles: ["admin", "teamlead", "labic"],
+  },
+  {
+    name: "Upload",
+    path: "/upload",
+    icon: Upload,
+    roles: ["admin", "teamlead"],
+  },
+  {
+    name: "Review Queue",
+    path: "/review",
+    icon: ClipboardCheck,
+    roles: ["admin", "teamlead"],
+  },
+  {
+    name: "PR Records",
+    path: "/records",
+    icon: FileText,
+    roles: ["admin", "teamlead", "labic"],
+  },
+  {
+    name: "Reports",
+    path: "/reports",
+    icon: BarChart3,
+    roles: ["admin", "teamlead", "labic"],
+  },
   { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead"] },
   { name: "Audit Log", path: "/audit", icon: FileSearch, roles: ["admin"] },
-  { name: "AI Chatbot", path: "/chatbot", icon: MessageSquare, roles: ["admin", "teamlead", "labic"] },
+  {
+    name: "AI Chatbot",
+    path: "/chatbot",
+    icon: MessageSquare,
+    roles: ["admin", "teamlead", "labic"],
+  },
   { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
 ];
 
@@ -79,7 +109,7 @@ export function RootLayout() {
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
                         isActive
                           ? "bg-[#1e3a8a] text-white"
-                          : "text-[#475569] hover:bg-[#f1f5f9]"
+                          : "text-[#475569] hover:bg-[#f1f5f9]",
                       )}
                     >
                       <Icon className="h-5 w-5" />
@@ -95,14 +125,25 @@ export function RootLayout() {
         <div className="border-t border-border p-4">
           <div className="flex items-center gap-3 mb-3">
             <div className="h-9 w-9 rounded-full bg-[#1e3a8a] flex items-center justify-center text-white text-sm font-medium">
-              {user?.name.split(" ").map((n) => n[0]).join("")}
+              {/* Fallback to 'U' if fullName is missing, safely mapping initials */}
+              {(user?.fullName || "User")
+                .split(" ")
+                .map((n) => n[0])
+                .join("")
+                .toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground truncate">
-                {user?.name}
+                {user?.fullName || "Loading..."}
               </p>
               <p className="text-xs text-muted-foreground truncate capitalize">
-                {user?.role === "teamlead" ? "Team Lead" : user?.role === "labic" ? "Lab IC" : "Admin"}
+                {user?.role === "teamlead"
+                  ? "Team Lead"
+                  : user?.role === "labic"
+                    ? "Lab IC"
+                    : user?.role
+                      ? "Admin"
+                      : "Connecting..."}
               </p>
             </div>
           </div>
@@ -129,12 +170,12 @@ export function RootLayout() {
                 {navigation.find((item) =>
                   item.path === "/"
                     ? location.pathname === "/"
-                    : location.pathname.startsWith(item.path)
+                    : location.pathname.startsWith(item.path),
                 )?.name || "Dashboard"}
               </h2>
               {user?.assignedLabs && (
                 <p className="text-xs text-muted-foreground">
-                  Assigned Labs: {user.assignedLabs.join(", ")}
+                  {/* Assigned Labs: {user.assignedLabs.join(", ")} */}
                 </p>
               )}
             </div>
