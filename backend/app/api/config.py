@@ -56,12 +56,18 @@ def get_lab_groups(db: Session = Depends(get_db)):
 def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     new_group = LabGroup(lab_group_name=group.name, wbs_code=group.wbs_code, description=group.description)
     db.add(new_group)
-    db.flush() # Flush to generate the new ID without committing yet
+    db.flush() 
     
-    # NEW: Bulk Claim Orphaned Labs
+    # Bulk Claim Orphaned Labs & Sync Budgets
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         db.query(Lab).filter(
             Lab.lab_id.in_(group.assigned_lab_ids)
+        ).update(
+            {"lab_group_id": new_group.lab_group_id},
+            synchronize_session=False
+        )
+        db.query(Budget).filter(
+            Budget.lab_id.in_(group.assigned_lab_ids)
         ).update(
             {"lab_group_id": new_group.lab_group_id},
             synchronize_session=False
@@ -80,10 +86,16 @@ def update_lab_group(group_id: int, group: LabGroupCreate, db: Session = Depends
     db_group.wbs_code = group.wbs_code
     db_group.description = group.description
     
-    # NEW: Bulk Claim Orphaned Labs during Edit
+    # Bulk Claim Orphaned Labs during Edit & Sync Budgets
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         db.query(Lab).filter(
             Lab.lab_id.in_(group.assigned_lab_ids)
+        ).update(
+            {"lab_group_id": group_id},
+            synchronize_session=False
+        )
+        db.query(Budget).filter(
+            Budget.lab_id.in_(group.assigned_lab_ids)
         ).update(
             {"lab_group_id": group_id},
             synchronize_session=False
@@ -94,32 +106,17 @@ def update_lab_group(group_id: int, group: LabGroupCreate, db: Session = Depends
 
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
+    # Unassign Budgets first
+    db.query(Budget).filter(Budget.lab_group_id == group_id).update({"lab_group_id": None}, synchronize_session=False)
+    # Unassign Labs
+    db.query(Lab).filter(Lab.lab_group_id == group_id).update({"lab_group_id": None}, synchronize_session=False)
     
-    # 1. Unassign the group from all Budgets first
-    db.query(Budget).filter(
-        Budget.lab_group_id == group_id
-    ).update(
-        {"lab_group_id": None}, 
-        synchronize_session=False
-    )
-
-    # 2. Unassign the group from all Labs
-    db.query(Lab).filter(
-        Lab.lab_group_id == group_id
-    ).update(
-        {"lab_group_id": None}, 
-        synchronize_session=False
-    )
-    
-    # 3. Safely delete the Lab Group
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Lab Group not found")
-        
+    if not group: raise HTTPException(status_code=404, detail="Lab Group not found")
+    
     db.delete(group)
     db.commit()
-    
-    return {"success": True, "message": "Lab group deleted and all associated labs and budgets unassigned."}
+    return {"success": True, "message": "Lab group deleted and all associated labs unassigned."}
 
 # ==============================
 # CATEGORIES API
@@ -152,7 +149,7 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
 # ==============================
 # LABS API
 # ==============================
-@router.get("/labs/orphaned") # NEW ENDPOINT
+@router.get("/labs/orphaned")
 def get_orphaned_labs(db: Session = Depends(get_db)):
     orphaned_labs = db.query(Lab).filter(Lab.lab_group_id == None).all()
     return [{"lab_id": lab.lab_id, "lab_name": lab.lab_name, "lab_code": lab.lab_code or ""} for lab in orphaned_labs]
@@ -214,6 +211,12 @@ def delete_lab(lab_id: int, db: Session = Depends(get_db)):
 def unassign_lab_from_group(lab_id: int, db: Session = Depends(get_db)):
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not lab: raise HTTPException(status_code=404, detail="Lab not found")
+    
+    # 1. Unassign Lab
     lab.lab_group_id = None
+    
+    # 2. Unassign Budgets
+    db.query(Budget).filter(Budget.lab_id == lab_id).update({"lab_group_id": None}, synchronize_session=False)
+    
     db.commit()
     return {"success": True, "message": "Lab successfully removed from the group."}
