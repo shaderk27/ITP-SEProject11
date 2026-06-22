@@ -1,340 +1,166 @@
-import { useState } from "react";
-import { Card } from "../ui/card";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
+import { Plus, Edit, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { Plus, Edit, Trash2, User } from "lucide-react";
+import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
 
 interface UserData {
   id: number;
-  name: string;
+  full_name: string;
   email: string;
   role: "admin" | "teamlead" | "labic";
-  assignedLabs: string[];
-  status: "active" | "inactive";
+  lab_group_name: string | null;
+  lab_group_code: string | null;
+  lab_name: string | null;
+  lab_code: string | null;
 }
 
-const mockUsers: UserData[] = [
-  { id: 1, name: "John Doe", email: "john.doe@sit.edu.sg", role: "admin", assignedLabs: [], status: "active" },
-  { id: 2, name: "Sarah Chen", email: "sarah.chen@sit.edu.sg", role: "teamlead", assignedLabs: ["W3L1", "W3L2", "W3L3"], status: "active" },
-  { id: 3, name: "Michael Tan", email: "michael.tan@sit.edu.sg", role: "teamlead", assignedLabs: ["W4L1", "W4L2"], status: "active" },
-  { id: 4, name: "Alice Johnson", email: "alice.johnson@sit.edu.sg", role: "labic", assignedLabs: ["W3L1"], status: "active" },
-  { id: 5, name: "Bob Smith", email: "bob.smith@sit.edu.sg", role: "labic", assignedLabs: ["W3L2"], status: "active" },
-  { id: 6, name: "Carol Davis", email: "carol.davis@sit.edu.sg", role: "labic", assignedLabs: ["W3L3"], status: "inactive" },
-];
-
-const availableLabs = [
-  { value: "W3L1", label: "W3L1 - Food Pilot Plant" },
-  { value: "W3L2", label: "W3L2 - Food Chemistry" },
-  { value: "W3L3", label: "W3L3 - Food Microbiology" },
-  { value: "W4L1", label: "W4L1 - Tensile Testing" },
-  { value: "W4L2", label: "W4L2 - Materials Analysis" },
-];
+const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 export function UserManagement() {
-  const [users, setUsers] = useState<UserData[]>(mockUsers);
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [editingUser, setEditingUser] = useState<UserData | null>(null);
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    role: "labic" as "admin" | "teamlead" | "labic",
-    assignedLabs: [] as string[],
-  });
+  const navigate = useNavigate();
+  const [users, setUsers] = useState<UserData[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleAddUser = () => {
-    const newUser: UserData = {
-      id: users.length + 1,
-      ...formData,
-      status: "active",
-    };
-    setUsers([...users, newUser]);
-    setShowAddDialog(false);
-    resetForm();
-  };
+  useEffect(() => {
+    fetch(`${API}/api/auth/users`, { credentials: "include" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load users.");
+        return res.json();
+      })
+      .then(setUsers)
+      .catch((err) => setError(err.message))
+      .finally(() => setIsLoading(false));
+  }, []);
 
-  const handleEditUser = (user: UserData) => {
-    setEditingUser(user);
-    setFormData({
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      assignedLabs: user.assignedLabs,
-    });
-    setShowAddDialog(true);
-  };
-
-  const handleUpdateUser = () => {
-    if (editingUser) {
-      setUsers(users.map(u =>
-        u.id === editingUser.id
-          ? { ...u, ...formData }
-          : u
-      ));
-      setShowAddDialog(false);
-      setEditingUser(null);
-      resetForm();
+  const getScopeLabel = (user: UserData) => {
+    if (user.role === "teamlead") {
+      return user.lab_group_name
+        ? `${user.lab_group_name}${user.lab_group_code ? ` - ${user.lab_group_code}` : ""}`
+        : "Unassigned lab group";
     }
-  };
-
-  const handleDeleteUser = (userId: number) => {
-    if (confirm("Are you sure you want to delete this user?")) {
-      setUsers(users.filter(u => u.id !== userId));
+    if (user.role === "labic") {
+      return user.lab_name
+        ? `${user.lab_name}${user.lab_code ? ` - ${user.lab_code}` : ""}`
+        : "Unassigned lab";
     }
-  };
-
-  const resetForm = () => {
-    setFormData({
-      name: "",
-      email: "",
-      role: "labic",
-      assignedLabs: [],
-    });
-  };
-
-  const toggleLabAssignment = (labCode: string) => {
-    setFormData(prev => ({
-      ...prev,
-      assignedLabs: prev.assignedLabs.includes(labCode)
-        ? prev.assignedLabs.filter(l => l !== labCode)
-        : [...prev.assignedLabs, labCode]
-    }));
+    return "-";
   };
 
   const getRoleBadgeStatus = (role: string) => {
     switch (role) {
-      case "admin": return "override";
-      case "teamlead": return "healthy";
-      case "labic": return "info";
-      default: return "general";
+      case "admin":
+        return "override";
+      case "teamlead":
+        return "healthy";
+      case "labic":
+        return "info";
+      default:
+        return "general";
     }
   };
 
+  if (isLoading) {
+    return <div className="p-6 text-sm text-muted-foreground">Loading users...</div>;
+  }
+
   return (
-    <>
-      <Card className="bg-white border-border">
-        <div className="p-6 border-b border-border flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-foreground">User Management</h3>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage users and assign them to lab groups
-            </p>
-          </div>
-          <Button
-            className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
-            onClick={() => {
-              resetForm();
-              setEditingUser(null);
-              setShowAddDialog(true);
-            }}
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            Add User
-          </Button>
+    <Card className="bg-white border-border">
+      <div className="p-6 border-b border-border flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-foreground">User Management</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            View users and their assigned role scope
+          </p>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-[#f8f9fa]">
-              <tr className="border-b border-border">
-                <th className="text-left p-4 text-sm font-medium text-muted-foreground">
-                  Name
-                </th>
-                <th className="text-left p-4 text-sm font-medium text-muted-foreground">
-                  Email
-                </th>
-                <th className="text-left p-4 text-sm font-medium text-muted-foreground">
-                  Role
-                </th>
-                <th className="text-left p-4 text-sm font-medium text-muted-foreground">
-                  Assigned Labs
-                </th>
-                <th className="text-left p-4 text-sm font-medium text-muted-foreground">
-                  Status
-                </th>
-                <th className="text-center p-4 text-sm font-medium text-muted-foreground">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((user) => (
-                <tr
-                  key={user.id}
-                  className="border-b border-border last:border-0 hover:bg-[#f8f9fa]"
-                >
-                  <td className="p-4 text-sm font-medium text-foreground">
-                    {user.name}
-                  </td>
-                  <td className="p-4 text-sm text-muted-foreground">
-                    {user.email}
-                  </td>
-                  <td className="p-4">
-                    <StatusBadge status={getRoleBadgeStatus(user.role) as any}>
-                      {user.role === "teamlead" ? "Team Lead" : user.role === "labic" ? "Lab IC" : "Admin"}
-                    </StatusBadge>
-                  </td>
-                  <td className="p-4 text-sm text-muted-foreground">
-                    {user.assignedLabs.length > 0 ? user.assignedLabs.join(", ") : "—"}
-                  </td>
-                  <td className="p-4">
-                    <StatusBadge status={user.status === "active" ? "approved" : "general"}>
-                      {user.status}
-                    </StatusBadge>
-                  </td>
-                  <td className="p-4 text-center">
-                    <div className="flex items-center justify-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleEditUser(user)}
-                      >
-                        <Edit className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-[#dc2626] hover:text-[#dc2626]"
-                        onClick={() => handleDeleteUser(user.id)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <Button
+          className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
+          onClick={() => navigate("/users/create")}
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Create User
+        </Button>
+      </div>
+
+      {error && (
+        <div className="m-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {error}
         </div>
-      </Card>
+      )}
 
-      {/* Add/Edit User Dialog */}
-      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <User className="h-5 w-5 text-[#1e3a8a]" />
-              {editingUser ? "Edit User" : "Add New User"}
-            </DialogTitle>
-            <DialogDescription>
-              {editingUser
-                ? "Update user details and lab assignments"
-                : "Create a new user and assign them to labs"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="name">Full Name</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="John Doe"
-                  className="mt-1"
-                />
-              </div>
-              <div>
-                <Label htmlFor="email">SIT Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  placeholder="john.doe@sit.edu.sg"
-                  className="mt-1"
-                />
-              </div>
-            </div>
-
-            <div>
-              <Label htmlFor="role">Role</Label>
-              <Select
-                value={formData.role}
-                onValueChange={(val) => setFormData({ ...formData, role: val as any })}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-[#f8f9fa]">
+            <tr className="border-b border-border">
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">
+                Name
+              </th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">
+                Email
+              </th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">
+                Role
+              </th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">
+                Scope
+              </th>
+              <th className="text-center p-4 text-sm font-medium text-muted-foreground">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr
+                key={user.id}
+                className="border-b border-border last:border-0 hover:bg-[#f8f9fa]"
               >
-                <SelectTrigger id="role" className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="teamlead">Team Lead</SelectItem>
-                  <SelectItem value="labic">Lab IC</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                {formData.role === "admin" && "Full system access"}
-                {formData.role === "teamlead" && "Can upload PRs and review records for assigned labs"}
-                {formData.role === "labic" && "Read-only access to assigned lab"}
-              </p>
-            </div>
-
-            {formData.role !== "admin" && (
-              <div>
-                <Label>Assigned Labs</Label>
-                <div className="grid grid-cols-2 gap-3 mt-2">
-                  {availableLabs.map((lab) => (
-                    <label
-                      key={lab.value}
-                      className={`flex items-center gap-2 p-3 border rounded-lg cursor-pointer transition-colors ${
-                        formData.assignedLabs.includes(lab.value)
-                          ? "bg-[#1e3a8a]/10 border-[#1e3a8a]"
-                          : "border-border hover:bg-[#f8f9fa]"
-                      }`}
+                <td className="p-4 text-sm font-medium text-foreground">
+                  {user.full_name}
+                </td>
+                <td className="p-4 text-sm text-muted-foreground">{user.email}</td>
+                <td className="p-4">
+                  <StatusBadge status={getRoleBadgeStatus(user.role) as any}>
+                    {user.role === "teamlead"
+                      ? "Team Lead"
+                      : user.role === "labic"
+                        ? "Lab IC"
+                        : "Admin"}
+                  </StatusBadge>
+                </td>
+                <td className="p-4 text-sm text-muted-foreground">
+                  {getScopeLabel(user)}
+                </td>
+                <td className="p-4 text-center">
+                  <div className="flex items-center justify-center gap-2">
+                    <Button size="sm" variant="outline" disabled title="Edit user is pending backend update support">
+                      <Edit className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-[#dc2626] hover:text-[#dc2626]"
+                      disabled
+                      title="Deactivate/delete user is pending backend update support"
                     >
-                      <input
-                        type="checkbox"
-                        checked={formData.assignedLabs.includes(lab.value)}
-                        onChange={() => toggleLabAssignment(lab.value)}
-                        className="rounded border-border text-[#1e3a8a] focus:ring-[#1e3a8a]"
-                      />
-                      <span className="text-sm">{lab.label}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground mt-2">
-                  {formData.role === "teamlead"
-                    ? "Select multiple labs for Team Lead to manage"
-                    : "Select one lab for Lab IC"}
-                </p>
-              </div>
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {users.length === 0 && !error && (
+              <tr>
+                <td colSpan={5} className="p-6 text-center text-sm text-muted-foreground">
+                  No users found.
+                </td>
+              </tr>
             )}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setShowAddDialog(false);
-              setEditingUser(null);
-              resetForm();
-            }}>
-              Cancel
-            </Button>
-            <Button
-              className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
-              onClick={editingUser ? handleUpdateUser : handleAddUser}
-              disabled={!formData.name || !formData.email || (formData.role !== "admin" && formData.assignedLabs.length === 0)}
-            >
-              {editingUser ? "Update User" : "Add User"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }

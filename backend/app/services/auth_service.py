@@ -1,17 +1,32 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
+import os
+
 from fastapi import HTTPException, Response, status
 from sqlalchemy.orm import Session
 import jwt
 import bcrypt
 
+from app.config import load_environment
 from app.repositories.auth_repository import AuthRepository
 
-# --- Configuration Constants ---
-SECRET_KEY = "SUPER_SECRET_DEVELOPMENT_KEY_CHANGE_ME_IN_PRODUCTION"
+load_environment()
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-only-change-me")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 COOKIE_NAME = "access_token"
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+ALLOW_PLACEHOLDER_PASSWORDS = (
+    os.getenv("ALLOW_PLACEHOLDER_PASSWORDS", "true").lower() == "true"
+)
+ALLOWED_EMAIL_DOMAINS = {
+    domain.strip().lower()
+    for domain in os.getenv(
+        "ALLOWED_EMAIL_DOMAINS", "sit.edu.sg,example.com,test.com"
+    ).split(",")
+    if domain.strip()
+}
 
 
 class AuthService:
@@ -33,12 +48,39 @@ class AuthService:
         except Exception:
             return False
 
+    def _is_allowed_email_domain(self, email: str) -> bool:
+        domain = email.rsplit("@", 1)[-1].lower()
+        return domain in ALLOWED_EMAIL_DOMAINS
+
     def get_all_roles(self) -> List[Dict[str, Any]]:
         """Retrieve all roles available in the system."""
         roles = self.repository.get_all_roles(self.db)
         return [
             {"role_id": role.role_id, "role_name": role.role_name} for role in roles
         ]
+
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        users = self.repository.get_all_users(self.db)
+        return [
+            {
+                "id": user.user_id,
+                "full_name": user.full_name,
+                "email": user.email,
+                "role": user.role.role_name if user.role else None,
+                "role_id": user.role_id,
+                "lab_group_id": user.lab_group_id,
+                "lab_group_name": user.lab_group.lab_group_name if user.lab_group else None,
+                "lab_group_code": user.lab_group.wbs_code if user.lab_group else None,
+                "lab_id": user.lab_id,
+                "lab_name": user.lab.lab_name if user.lab else None,
+                "lab_code": user.lab.lab_code if user.lab else None,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+            }
+            for user in users
+        ]
+
+    def get_assignments(self) -> list[dict]:
+        return self.repository.get_assignments(self.db)
 
     def _create_access_token(
         self, data: dict, expires_delta: Optional[timedelta] = None
@@ -62,8 +104,11 @@ class AuthService:
         user = self.repository.get_user_by_email(self.db, email)
 
         # 2. Check user existence and password validity
-        # If password hash is 'placeholder_no_auth_yet' (from dev_seed.sql), bypass check for easier initial testing
-        is_seed_placeholder = user and user.password_hash == "placeholder_no_auth_yet"
+        is_seed_placeholder = (
+            ALLOW_PLACEHOLDER_PASSWORDS
+            and user
+            and user.password_hash == "placeholder_no_auth_yet"
+        )
 
         if not user or (
             not is_seed_placeholder
@@ -81,6 +126,7 @@ class AuthService:
             "email": user.email,
             "role": user.role.role_name if user.role else None,
             "lab_group_id": user.lab_group_id,
+            "lab_id": user.lab_id,
         }
 
         token = self._create_access_token(data=token_payload)
@@ -93,7 +139,7 @@ class AuthService:
             max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             expires=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             samesite="lax",  # Protects against CSRF attacks
-            secure=False,  # Set to True in production over HTTPS
+            secure=COOKIE_SECURE,
             path="/",
         )
 
@@ -103,7 +149,13 @@ class AuthService:
                 "id": user.user_id,
                 "full_name": user.full_name,
                 "email": user.email,
+                "staff_id": user.staff_id,
                 "role": user.role.role_name if user.role else None,
+                "lab_group_id": user.lab_group_id,
+                "lab_id": user.lab_id,
+                "assignedLabs": [user.lab.lab_code] if user.lab else (
+                    [user.lab_group.wbs_code] if user.lab_group else []
+                ),
             },
         }
 
@@ -149,7 +201,10 @@ class AuthService:
             "staff_id": user.staff_id,
             "role": user.role.role_name if user.role else None,
             "lab_group_id": user.lab_group_id,
-            "assignedLabs": [user.lab_group.wbs_code] if user.lab_group else [],
+            "lab_id": user.lab_id,
+            "assignedLabs": [user.lab.lab_code] if user.lab else (
+                [user.lab_group.wbs_code] if user.lab_group else []
+            ),
         }
 
     def create_user(
@@ -160,16 +215,79 @@ class AuthService:
         role_id: int,
         staff_id: Optional[str] = None,
         lab_group_id: Optional[int] = None,
+        lab_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create a new user account with a hashed password."""
+        normalized_email = email.strip().lower()
+
+        if not self._is_allowed_email_domain(normalized_email):
+            allowed = ", ".join(sorted(ALLOWED_EMAIL_DOMAINS))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Email domain is not allowed. Allowed domains: {allowed}.",
+            )
 
         # 1. Check for duplicate email
-        existing = self.repository.get_user_by_email(self.db, email)
+        existing = self.repository.get_user_by_email(self.db, normalized_email)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="An account with this email already exists.",
             )
+
+        role = self.repository.get_role_by_id(self.db, role_id)
+        if not role:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Selected role does not exist.",
+            )
+
+        role_name = role.role_name.lower()
+        if role_name == "teamlead" and lab_group_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lab group is required for Team Lead users.",
+            )
+
+        if role_name == "labic" and lab_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lab is required for Lab IC users.",
+            )
+
+        if role_name == "admin":
+            lab_group_id = None
+            lab_id = None
+        elif role_name == "teamlead":
+            lab_id = None
+        elif role_name == "labic":
+            lab_group_id = None
+
+        if role_name == "teamlead" and lab_group_id is not None:
+            assigned_user = self.repository.get_user_by_role_and_lab_group(
+                self.db, role_id, lab_group_id
+            )
+            if assigned_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"This lab group already has a {role.role_name} assigned "
+                        f"to {assigned_user.full_name}."
+                    ),
+                )
+
+        if role_name == "labic" and lab_id is not None:
+            assigned_user = self.repository.get_user_by_role_and_lab(
+                self.db, role_id, lab_id
+            )
+            if assigned_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"This lab already has a Lab IC assigned "
+                        f"to {assigned_user.full_name}."
+                    ),
+                )
 
         # 2. Hash the plaintext password using the shared bcrypt helper
         password_hash = self._hash_password(password)
@@ -179,10 +297,11 @@ class AuthService:
             db=self.db,
             role_id=role_id,
             full_name=full_name,
-            email=email,
+            email=normalized_email,
             password_hash=password_hash,
             staff_id=staff_id,
             lab_group_id=lab_group_id,
+            lab_id=lab_id,
         )
 
         return {
@@ -192,4 +311,5 @@ class AuthService:
             "staff_id": user.staff_id,
             "role_id": user.role_id,
             "lab_group_id": user.lab_group_id,
+            "lab_id": user.lab_id,
         }

@@ -8,8 +8,8 @@ export interface User {
   fullName: string;
   email: string;
   role: UserRole;
-  assignedLabs: string[]; 
-  labGroupId: number | null; 
+  assignedLabs: string[];
+  labGroupId: number | null;
 }
 
 export type Permission =
@@ -37,7 +37,7 @@ const rolePermissions: Record<UserRole, Permission[]> = {
   admin: [
     "dashboard:view", "upload:create", "review:view", "review:approve",
     "records:view", "reports:view", "alerts:view", "audit:view",
-    "config:view", "config:edit", "budget:view", "budget:edit","user:create"
+    "config:view", "config:edit", "budget:view", "budget:edit", "user:create",
   ],
   teamlead: [
     "dashboard:view", "upload:create", "review:view", "records:view",
@@ -82,7 +82,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data) {
-          const rawWbsCode = data.lab_group?.wbs_code || data.wbs_code;
+          const rawAssignedLabs =
+            data.assignedLabs ||
+            data.assigned_labs ||
+            data.lab_group?.wbs_code ||
+            data.wbs_code;
 
           // Normalize backend properties to frontend camelCase matches
           setUser({
@@ -91,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: data.email,
             role: data.role,
             labGroupId: data.lab_group_id,
-            assignedLabs: parseAssignedLabs(rawWbsCode), //  FIXED: Parsed from the wbs_code column link
+            assignedLabs: parseAssignedLabs(rawAssignedLabs),
           });
         } else {
           setUser(null);
@@ -106,7 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch(`${API}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "include", 
+      credentials: "include",
       body: JSON.stringify({ email, password }),
     });
 
@@ -116,9 +120,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const rawJson = await res.json();
-    const rawUser = rawJson.user; 
-    
-    const rawWbsCode = rawUser.wbs_code || rawUser.lab_group?.wbs_code || rawUser.assigned_labs;
+    const rawUser = rawJson.user;
+    const rawAssignedLabs =
+      rawUser.assignedLabs ||
+      rawUser.assigned_labs ||
+      rawUser.wbs_code ||
+      rawUser.lab_group?.wbs_code;
 
     setUser({
       id: rawUser.id,
@@ -126,7 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: rawUser.email,
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
-      assignedLabs: parseAssignedLabs(rawWbsCode), //  FIXED: Sync with login endpoint
+      assignedLabs: parseAssignedLabs(rawAssignedLabs),
     });
   };
 
@@ -135,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await fetch(`${API}/api/auth/logout`, {
         method: "POST",
-        credentials: "include", 
+        credentials: "include",
       });
     } catch (error) {
       console.error("Backend logout handshaking encountered an issue:", error);

@@ -31,7 +31,7 @@ export function LoginPage() {
       const from = (location.state as any)?.from ?? "/";
       navigate(from, { replace: true });
     } catch (err: any) {
-      // The backend returns plain detail strings — map them to user-facing copy
+      // Map backend detail strings to user-facing copy.
       setError("Invalid email or password. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -113,12 +113,12 @@ export function LoginPage() {
             className="w-full bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
             disabled={isSubmitting}
           >
-            {isSubmitting ? "Signing in…" : "Sign In"}
+            {isSubmitting ? "Signing in..." : "Sign In"}
           </Button>
         </form>
 
         <div className="mt-6 text-center text-xs text-muted-foreground">
-          <p>© 2026 SIT. All rights reserved.</p>
+          <p>(c) 2026 SIT. All rights reserved.</p>
         </div>
       </Card>
     </div>

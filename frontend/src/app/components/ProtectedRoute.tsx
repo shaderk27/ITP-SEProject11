@@ -22,24 +22,24 @@ export function ProtectedRoute({
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen text-sm text-muted-foreground">
-        Loading…
+        Loading...
       </div>
     );
   }
 
-  // Not authenticated — preserve the intended path so login can redirect back
+  // Not authenticated: preserve the intended path so login can redirect back.
   if (!user) {
     return (
       <Navigate to="/login" replace state={{ from: location.pathname }} />
     );
   }
 
-  // Role check — only evaluated when allowedRoles is explicitly provided
+  // Role check only runs when allowedRoles is explicitly provided.
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/403" replace />;
   }
 
-  // Permission check — all listed permissions must pass (AND logic)
+  // Permission check requires all listed permissions to pass.
   if (requiredPermissions && !requiredPermissions.every(hasPermission)) {
     return <Navigate to="/403" replace />;
   }

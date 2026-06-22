@@ -63,11 +63,12 @@ class CurrentUserResponse(UserBaseResponse):
 
 class CreateUserRequest(BaseModel):
     full_name: str
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=8)
     role_id: int
     staff_id: Optional[str] = None
     lab_group_id: Optional[int] = None
+    lab_id: Optional[int] = None
 
 
 class RoleResponse(BaseModel):

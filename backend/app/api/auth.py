@@ -1,7 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, Response, Cookie, Request, status
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Depends, Response, Cookie, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -12,35 +11,37 @@ from app.repositories.auth_repository import AuthRepository
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
+    return AuthService(repository=AuthRepository(), db=db)
+
+
+def require_admin(
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+) -> dict:
+    current_user = service.get_current_user(access_token)
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access is required.",
+        )
+    return current_user
+
+
 @router.post("/login")
 async def login(
-    request: Request,  # Brought in the request object to read the raw body if it fails
+    payload: LoginRequest,
     response: Response,
-    db: Session = Depends(get_db),
+    service: AuthService = Depends(get_auth_service),
 ):
-    raw_body = await request.body()
-
-    try:
-        payload = LoginRequest.model_validate_json(raw_body)
-    except Exception as exc:
-        print("\n--- 422 VALIDATION DEBUGGER LOG ---")
-        print(
-            f"Raw body string received from React: {raw_body.decode('utf-8', errors='ignore')}"
-        )
-        print(f"Validation details: {str(exc)}")
-        print("-----------------------------------\n")
-
-        raise RequestValidationError(
-            errors=[{"loc": ["body"], "msg": str(exc), "type": "value_error"}]
-        )
-
-    service = AuthService(repository=AuthRepository(), db=db)
     return service.login(payload.email, payload.password, response)
 
 
 @router.get("/me")
-async def me(access_token: str | None = Cookie(None), db: Session = Depends(get_db)):
-    service = AuthService(repository=AuthRepository(), db=db)
+async def me(
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+):
     return service.get_current_user(access_token)
 
 
@@ -51,8 +52,11 @@ async def logout(response: Response):
 
 
 @router.post("/users", status_code=status.HTTP_201_CREATED)
-async def create_user(payload: CreateUserRequest, db: Session = Depends(get_db)):
-    service = AuthService(repository=AuthRepository(), db=db)
+async def create_user(
+    payload: CreateUserRequest,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
     return service.create_user(
         full_name=payload.full_name,
         email=payload.email,
@@ -60,10 +64,26 @@ async def create_user(payload: CreateUserRequest, db: Session = Depends(get_db))
         role_id=payload.role_id,
         staff_id=payload.staff_id,
         lab_group_id=payload.lab_group_id,
+        lab_id=payload.lab_id,
     )
 
 
 @router.get("/roles", response_model=List[RoleResponse])
-async def get_all_roles(db: Session = Depends(get_db)):
-    service = AuthService(repository=AuthRepository(), db=db)
+async def get_all_roles(service: AuthService = Depends(get_auth_service)):
     return service.get_all_roles()
+
+
+@router.get("/users")
+async def get_all_users(
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.get_all_users()
+
+
+@router.get("/assignments")
+async def get_assignments(
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.get_assignments()

@@ -11,6 +11,7 @@ import {
   Settings,
   MessageSquare,
   LogOut,
+  UserPlus,
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
@@ -56,6 +57,7 @@ const navigation: NavItem[] = [
   },
   { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead"] },
   { name: "Audit Log", path: "/audit", icon: FileSearch, roles: ["admin"] },
+  { name: "Create User", path: "/users/create", icon: UserPlus, roles: ["admin"] },
   {
     name: "AI Chatbot",
     path: "/chatbot",

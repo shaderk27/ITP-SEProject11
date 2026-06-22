@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import config
 from app.api.upload import router as upload_router
-from backend.app.api.auth import router as auth_router
+from app.api.auth import router as auth_router
 
 app = FastAPI(title="Lab Budget Monitoring API")
 
