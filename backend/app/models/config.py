@@ -45,7 +45,6 @@ class Lab(Base):
     aliases = relationship("LabAlias", back_populates="lab")
     
 
-
 class LabAlias(Base):
     __tablename__ = "lab_aliases"
 
@@ -137,7 +136,6 @@ class LabGroupCreate(BaseModel):
     wbs_code: str
     description: str | None = None
     assigned_lab_ids: list[int] | None = []
-
 
 class CategoryCreate(BaseModel):
     name: str

@@ -352,7 +352,7 @@ export function SystemConfigPage() {
               <div><label className="text-sm font-medium">WBS Prefix</label><input type="text" className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.wbs_code} onChange={(e) => setNewGroupForm({...newGroupForm, wbs_code: e.target.value})} /></div>
               <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newGroupForm.description} onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})} /></div>
               
-              {/* THE ORPHANED LABS CHECKLIST */}
+              {/* THE NEW ORPHANED LABS CHECKLIST (Visible during Creation AND Editing) */}
               {orphanedLabs.length > 0 && (
                 <div className="mt-4 p-4 border rounded-md bg-gray-50 border-blue-100">
                   <h4 className="text-sm font-semibold text-blue-900 mb-1">Unassigned Labs Detected ({orphanedLabs.length})</h4>
