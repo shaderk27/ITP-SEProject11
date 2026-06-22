@@ -53,6 +53,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (updates: Partial<User>) => void;
   hasAccess: (requiredRoles: UserRole[]) => boolean;
   hasPermission: (permission: Permission) => boolean;
   canAccessLabGroup: (labGroupId: number) => boolean;
@@ -75,6 +76,9 @@ function parseAssignedLabs(rawLabs: any): string[] {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const updateUser = (updates: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...updates } : null));
+  };
 
   // 1. Session Restore on Mount
   useEffect(() => {
@@ -169,7 +173,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, login, logout, hasAccess, hasPermission, canAccessLabGroup }}
+      value={{ user, isLoading, login, logout, updateUser, hasAccess, hasPermission, canAccessLabGroup }}
     >
       {children}
     </AuthContext.Provider>
