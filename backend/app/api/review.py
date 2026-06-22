@@ -101,12 +101,24 @@ class CategoryOption(BaseModel):
     category_name: str
 
 
+class LastReviewAction(BaseModel):
+    """Most recent correction on a queue item (for the 'last corrected by' footer)."""
+    reviewer_name: str
+    reviewed_at: datetime
+    comment: str | None
+    action_type: str
+
+
 class QueueItemDetail(BaseModel):
     """Everything the Edit Line form needs to render in one payload."""
     # Queue identity / state
     review_queue_id: int
     queue_status: str
     review_reason: str
+    # Batch context (so the form knows when to lock — only locks after commit).
+    batch_upload_status: str
+    # Most recent correction (None if never edited). Drives the footer.
+    last_action: LastReviewAction | None
     # Line data
     staging_line_id: int
     source_line_no: int | None
@@ -281,11 +293,13 @@ def get_batch_detail(
 
     pr_groups: list[ReviewPRGroup] = []
     for header in headers:
+        # Include both 'open' and 'resolved' queue items so Team Leads can
+        # re-edit a saved correction before the batch is committed.
         line_query = (
             db.query(StagingPRLine, ReviewQueueItem)
             .join(ReviewQueueItem, ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id)
             .filter(StagingPRLine.staging_header_id == header.staging_header_id)
-            .filter(ReviewQueueItem.queue_status == "open")
+            .filter(ReviewQueueItem.queue_status.in_(["open", "resolved"]))
         )
         if role_name == "teamlead" and current_user.lab_group_id is not None:
             line_query = line_query.filter(
@@ -376,10 +390,30 @@ def get_queue_item(
     current_lab = lab_name_by_id.get(line.suggested_lab_id, "General")
     current_category = cat_name_by_id.get(line.suggested_category_id, "General")
 
+    # Pull the most recent review_action on this queue item, if any.
+    latest_action_row = (
+        db.query(ReviewAction, User)
+        .join(User, User.user_id == ReviewAction.reviewed_by)
+        .filter(ReviewAction.review_queue_id == item.review_queue_id)
+        .order_by(ReviewAction.reviewed_at.desc())
+        .first()
+    )
+    last_action: LastReviewAction | None = None
+    if latest_action_row:
+        action, reviewer = latest_action_row
+        last_action = LastReviewAction(
+            reviewer_name=reviewer.full_name,
+            reviewed_at=action.reviewed_at,
+            comment=action.review_comment,
+            action_type=action.action_type,
+        )
+
     return QueueItemDetail(
         review_queue_id=item.review_queue_id,
         queue_status=item.queue_status,
         review_reason=item.review_reason or "",
+        batch_upload_status=batch.upload_status,
+        last_action=last_action,
         staging_line_id=line.staging_line_id,
         source_line_no=line.source_line_no,
         item_details=line.item_details or "",
@@ -453,10 +487,13 @@ def correct_queue_item(
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
-    if item.queue_status != "open":
+    # Block edits only after the batch has been committed to final tables.
+    # Before commit: Team Leads can re-correct the same item as many times
+    # as they need to (each save adds a new review_actions row, full history).
+    if batch.upload_status == "committed":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"Queue item is already '{item.queue_status}'. Refresh the queue.",
+            f"Batch {batch.batch_id} has already been committed. This item can no longer be edited.",
         )
 
     # Team Lead scoping: must own the item's current lab_group.

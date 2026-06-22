@@ -73,10 +73,13 @@ export function ReviewDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labGroupId]);
 
+  // Edits are allowed until the batch is committed. Inside a not-yet-committed
+  // batch, Team Leads can re-correct a saved line as many times as needed.
+  const isLocked = !!item && item.batch_upload_status === "committed";
   const canSave =
     !!item &&
     !saving &&
-    item.queue_status === "open" &&
+    !isLocked &&
     labGroupId !== null &&
     labId !== null &&
     categoryId !== null;
@@ -139,17 +142,37 @@ export function ReviewDetailsPage() {
           </Card>
         )}
 
-        {item && item.queue_status !== "open" && (
+        {item && isLocked && (
           <Card className="p-4 bg-[#f0fdf4] border-[#bbf7d0]">
             <div className="flex items-start gap-3">
               <CheckCircle className="h-5 w-5 text-[#15803d] mt-0.5" />
               <div>
                 <p className="text-sm font-medium text-[#14532d]">
-                  This queue item is already <strong>{item.queue_status}</strong>.
+                  Batch #{item.batch_id} has been committed. This line is locked.
                 </p>
                 <p className="text-sm text-[#14532d] mt-1">
                   No further edits are accepted. Use Back to Queue to pick another line.
                 </p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {item && !isLocked && item.queue_status === "resolved" && (
+          <Card className="p-4 bg-[#fff7ed] border-[#fed7aa]">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="h-5 w-5 text-[#c2410c] mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-[#9a3412]">
+                  This line was already saved — you can still edit it until the batch is committed.
+                </p>
+                {item.last_action && (
+                  <p className="text-sm text-[#9a3412] mt-1">
+                    Last corrected by <strong>{item.last_action.reviewer_name}</strong> at{" "}
+                    {formatDate(item.last_action.reviewed_at)}
+                    {item.last_action.comment ? ` · "${item.last_action.comment}"` : ""}.
+                  </p>
+                )}
               </div>
             </div>
           </Card>
@@ -212,7 +235,7 @@ export function ReviewDetailsPage() {
                 <Select
                   value={labGroupId !== null ? String(labGroupId) : undefined}
                   onValueChange={(v) => setLabGroupId(Number(v))}
-                  disabled={item.queue_status !== "open"}
+                  disabled={isLocked}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Pick a lab group" />
@@ -233,7 +256,7 @@ export function ReviewDetailsPage() {
                 <Select
                   value={labId !== null ? String(labId) : undefined}
                   onValueChange={(v) => setLabId(Number(v))}
-                  disabled={item.queue_status !== "open" || labGroupId === null}
+                  disabled={isLocked || labGroupId === null}
                 >
                   <SelectTrigger>
                     <SelectValue
@@ -256,7 +279,7 @@ export function ReviewDetailsPage() {
                 <Select
                   value={categoryId !== null ? String(categoryId) : undefined}
                   onValueChange={(v) => setCategoryId(Number(v))}
-                  disabled={item.queue_status !== "open"}
+                  disabled={isLocked}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Pick a category" />
@@ -277,7 +300,7 @@ export function ReviewDetailsPage() {
                   placeholder="Reason for manual correction…"
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
-                  disabled={item.queue_status !== "open"}
+                  disabled={isLocked}
                 />
               </div>
 
@@ -310,6 +333,21 @@ function Field({ label, value }: { label: string; value: string }) {
       <p className="text-sm text-foreground mt-1 whitespace-pre-line">{value || "—"}</p>
     </div>
   );
+}
+
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function formatAmount(raw: string): string {

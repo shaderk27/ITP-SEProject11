@@ -65,10 +65,19 @@ export interface CategoryOption {
   category_name: string;
 }
 
+export interface LastReviewAction {
+  reviewer_name: string;
+  reviewed_at: string;
+  comment: string | null;
+  action_type: string;
+}
+
 export interface QueueItemDetail {
   review_queue_id: number;
   queue_status: string;
   review_reason: string;
+  batch_upload_status: string;
+  last_action: LastReviewAction | null;
   staging_line_id: number;
   source_line_no: number | null;
   item_details: string;
