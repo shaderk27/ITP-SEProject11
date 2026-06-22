@@ -7,6 +7,12 @@
 -- ===========================================================
 
 
+-- ----- 0. Schema tweaks (per Randy) -----
+-- Allow labs.lab_group_id to be NULL. Safe to re-run; PostgreSQL accepts
+-- DROP NOT NULL on columns that are already nullable.
+ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
+
+
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
   ('admin'),
@@ -70,6 +76,25 @@ WHERE NOT EXISTS (
   WHERE l.lab_group_id = lg.lab_group_id
     AND l.is_general = true
 );
+
+
+-- ----- 5b. Specific real labs (handy for cascading-dropdown demos) -----
+-- Add new ones here as the team identifies real labs to seed.
+INSERT INTO labs (lab_group_id, lab_code, lab_name, is_general)
+SELECT
+  (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'ICT'),
+  'E2-02-02',
+  'ICT Embedded Lab',
+  false
+WHERE NOT EXISTS (SELECT 1 FROM labs WHERE lab_code = 'E2-02-02');
+
+INSERT INTO labs (lab_group_id, lab_code, lab_name, is_general)
+SELECT
+  (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'FCB'),
+  'W3-01-021',
+  'W3 Food Processing Lab',
+  false
+WHERE NOT EXISTS (SELECT 1 FROM labs WHERE lab_code = 'W3-01-021');
 
 
 -- ----- 6. Test users (one per role) -----
