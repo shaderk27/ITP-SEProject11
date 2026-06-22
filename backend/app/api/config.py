@@ -4,23 +4,10 @@ from sqlalchemy import func
 from typing import List
 from datetime import date
 
-from app.models.config import (
-    LabGroup,
-    Lab,
-    SpendingCategory,
-    Budget,
-    BudgetPeriod,
-    LabGroupOut,
-    LabOut,
-    CategoryOut,
-    LabGroupCreate,
-    LabCreate,
-    CategoryCreate,
-)
-from app.database import get_db
+from app.models.config import LabGroup, Lab, SpendingCategory, Budget, BudgetPeriod, LabGroupOut, LabOut, CategoryOut, LabGroupCreate, LabCreate, CategoryCreate
+from app.database import get_db 
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
-
 
 # ==============================
 # AUTOMATIC FY PERIOD GENERATOR
@@ -31,7 +18,7 @@ def get_or_create_current_period(db: Session) -> int:
         start_year = today.year - 1
     else:
         start_year = today.year
-
+        
     period_name = f"FY{start_year}"
     
     existing_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_name == period_name).first()
@@ -41,14 +28,13 @@ def get_or_create_current_period(db: Session) -> int:
     new_period = BudgetPeriod(
         period_name=period_name,
         start_date=date(start_year, 4, 1),
-        end_date=date(start_year + 1, 3, 31),
+        end_date=date(start_year + 1, 3, 31)
     )
     db.add(new_period)
     db.commit()
     db.refresh(new_period)
-
+    
     return new_period.period_id
-
 
 # ==============================
 # LAB GROUPS API
@@ -58,24 +44,13 @@ def get_lab_groups(db: Session = Depends(get_db)):
     groups = db.query(LabGroup).all()
     result = []
     for g in groups:
-        total_budget = (
-            db.query(func.sum(Budget.budget_amount))
-            .filter(Budget.lab_group_id == g.lab_group_id)
-            .scalar()
-            or 0
-        )
-        result.append(
-            {
-                "id": g.lab_group_id,
-                "name": g.lab_group_name,
-                "wbs_code": g.wbs_code or "",
-                "description": g.description or "",
-                "budget": total_budget,
-                "threshold": 80,
-            }
-        )
+        total_budget = db.query(func.sum(Budget.budget_amount)).filter(Budget.lab_group_id == g.lab_group_id).scalar() or 0
+        result.append({
+            "id": g.lab_group_id, "name": g.lab_group_name, 
+            "wbs_code": g.wbs_code or "", "description": g.description or "",
+            "budget": total_budget, "threshold": 80
+        })
     return result
-
 
 @router.post("/labgroups", response_model=LabGroupOut)
 def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
@@ -97,9 +72,7 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     return {"id": new_group.lab_group_id, "name": new_group.lab_group_name, "wbs_code": new_group.wbs_code, "description": new_group.description, "budget": 0, "threshold": 80}
 
 @router.put("/labgroups/{group_id}", response_model=LabGroupOut)
-def update_lab_group(
-    group_id: int, group: LabGroupCreate, db: Session = Depends(get_db)
-):
+def update_lab_group(group_id: int, group: LabGroupCreate, db: Session = Depends(get_db)):
     db_group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not db_group: raise HTTPException(status_code=404)
     
@@ -117,15 +90,7 @@ def update_lab_group(
         )
 
     db.commit()
-    return {
-        "id": db_group.lab_group_id,
-        "name": db_group.lab_group_name,
-        "wbs_code": db_group.wbs_code,
-        "description": db_group.description,
-        "budget": 0,
-        "threshold": 80,
-    }
-
+    return {"id": db_group.lab_group_id, "name": db_group.lab_group_name, "wbs_code": db_group.wbs_code, "description": db_group.description, "budget": 0, "threshold": 80}
 
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
@@ -156,69 +121,33 @@ def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
     
     return {"success": True, "message": "Lab group deleted and all associated labs and budgets unassigned."}
 
-
 # ==============================
 # CATEGORIES API
 # ==============================
 @router.get("/categories", response_model=List[CategoryOut])
 def get_categories(db: Session = Depends(get_db)):
     cats = db.query(SpendingCategory).all()
-    return [
-        {
-            "id": c.category_id,
-            "name": c.category_name,
-            "description": c.description or "",
-        }
-        for c in cats
-    ]
-
+    return [{"id": c.category_id, "name": c.category_name, "description": c.description or ""} for c in cats]
 
 @router.post("/categories", response_model=CategoryOut)
 def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
-    new_cat = SpendingCategory(
-        category_name=cat_in.name, description=cat_in.description
-    )
-    db.add(new_cat)
-    db.commit()
-    db.refresh(new_cat)
-    return {
-        "id": new_cat.category_id,
-        "name": new_cat.category_name,
-        "description": new_cat.description or "",
-    }
-
+    new_cat = SpendingCategory(category_name=cat_in.name, description=cat_in.description)
+    db.add(new_cat); db.commit(); db.refresh(new_cat)
+    return {"id": new_cat.category_id, "name": new_cat.category_name, "description": new_cat.description or ""}
 
 @router.put("/categories/{cat_id}", response_model=CategoryOut)
 def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(get_db)):
-    db_cat = (
-        db.query(SpendingCategory)
-        .filter(SpendingCategory.category_id == cat_id)
-        .first()
-    )
-    if not db_cat:
-        raise HTTPException(status_code=404)
-    db_cat.category_name = cat_in.name
-    db_cat.description = cat_in.description
+    db_cat = db.query(SpendingCategory).filter(SpendingCategory.category_id == cat_id).first()
+    if not db_cat: raise HTTPException(status_code=404)
+    db_cat.category_name = cat_in.name; db_cat.description = cat_in.description
     db.commit()
-    return {
-        "id": db_cat.category_id,
-        "name": db_cat.category_name,
-        "description": db_cat.description or "",
-    }
-
+    return {"id": db_cat.category_id, "name": db_cat.category_name, "description": db_cat.description or ""}
 
 @router.delete("/categories/{cat_id}")
 def delete_category(cat_id: int, db: Session = Depends(get_db)):
-    cat = (
-        db.query(SpendingCategory)
-        .filter(SpendingCategory.category_id == cat_id)
-        .first()
-    )
-    if cat:
-        db.delete(cat)
-        db.commit()
+    cat = db.query(SpendingCategory).filter(SpendingCategory.category_id == cat_id).first()
+    if cat: db.delete(cat); db.commit()
     return {"success": True}
-
 
 # ==============================
 # LABS API
@@ -232,8 +161,8 @@ def get_orphaned_labs(db: Session = Depends(get_db)):
 def get_labs(db: Session = Depends(get_db)):
     labs = db.query(Lab).all()
     result = []
-    for lab in labs:
-        budgets = db.query(Budget).filter(Budget.lab_id == lab.lab_id).all()
+    for l in labs:
+        budgets = db.query(Budget).filter(Budget.lab_id == l.lab_id).all()
         total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
         result.append({
@@ -244,7 +173,6 @@ def get_labs(db: Session = Depends(get_db)):
             "ic_name": "", "ic_email": "", "budgets": budget_map
         })
     return result
-
 
 @router.post("/labs", response_model=LabOut)
 def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
