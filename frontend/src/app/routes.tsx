@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Link } from "react-router";
 import { RootLayout } from "./components/layouts/RootLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -12,6 +12,16 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { AuditLogPage } from "./pages/AuditLogPage";
 import { SystemConfigPage } from "./pages/SystemConfigPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { CreateUserPage } from "./pages/CreateUserPage";
+import { AccessDenied } from "./pages/error/AccessDenied";
+import { NotFound } from "./pages/error/NotFound";
+
+// Minimal 403 fallback component for unauthorized users
+
+
+// Minimal 404 fallback component for unknown page
+
 
 export const router = createBrowserRouter([
   {
@@ -19,20 +29,121 @@ export const router = createBrowserRouter([
     Component: LoginPage,
   },
   {
+    path: "/403",
+    element: <AccessDenied />,
+  },
+  {
+    path: "/404",
+    element: <NotFound />,
+  },
+  {
     path: "/",
-    Component: RootLayout,
+    element: (
+      <ProtectedRoute>
+        <RootLayout />
+      </ProtectedRoute>
+    ),
     children: [
-      { index: true, Component: DashboardPage },
-      { path: "upload", Component: UploadPage },
-      { path: "upload/result", Component: ProcessingSummaryPage },
-      { path: "review", Component: ReviewQueuePage },
-      { path: "review/:id", Component: ReviewDetailsPage },
-      { path: "records", Component: RecordsPage },
-      { path: "reports", Component: ReportsPage },
-      { path: "alerts", Component: AlertsPage },
-      { path: "audit", Component: AuditLogPage },
-      { path: "config", Component: SystemConfigPage },
-      { path: "chatbot", Component: ChatbotPage },
+      {
+        index: true,
+        Component: DashboardPage,
+      },
+      {
+        path: "upload",
+        element: (
+          <ProtectedRoute requiredPermissions={["upload:create"]}>
+            <UploadPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "upload/result",
+        element: (
+          <ProtectedRoute requiredPermissions={["upload:create"]}>
+            <ProcessingSummaryPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "review",
+        element: (
+          <ProtectedRoute requiredPermissions={["review:view"]}>
+            <ReviewQueuePage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "review/:id",
+        element: (
+          <ProtectedRoute requiredPermissions={["review:view"]}>
+            <ReviewDetailsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "records",
+        element: (
+          <ProtectedRoute requiredPermissions={["records:view"]}>
+            <RecordsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "reports",
+        element: (
+          <ProtectedRoute requiredPermissions={["reports:view"]}>
+            <ReportsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "alerts",
+        element: (
+          <ProtectedRoute requiredPermissions={["alerts:view"]}>
+            <AlertsPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "audit",
+        element: (
+          // Strictly locked to Admins using your allowedRoles logic
+          <ProtectedRoute
+            allowedRoles={["admin"]}
+            requiredPermissions={["audit:view"]}
+          >
+            <AuditLogPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "config",
+        element: (
+          <ProtectedRoute
+            allowedRoles={["admin"]}
+            requiredPermissions={["config:view"]}
+          >
+            <SystemConfigPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: "chatbot",
+        Component: ChatbotPage, // Open to all logged-in roles
+      },
+      {
+        
+        path: "users/create",
+        element: (
+          <ProtectedRoute
+            allowedRoles={["admin"]}
+            requiredPermissions={["user:create"]}
+          >
+            <CreateUserPage />
+          </ProtectedRoute>
+        ),
+        
+      },
     ],
   },
 ]);
