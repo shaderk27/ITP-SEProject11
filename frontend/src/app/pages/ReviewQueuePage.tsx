@@ -1,103 +1,113 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { ChevronDown, ChevronRight, Eye, Lock } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronRight, Eye, Lock, RefreshCw, Upload } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
+import { useAuth } from "../context/AuthContext";
+import { commitBatch, getBatchDetail, listReviewBatches } from "../services/reviewService";
+import type {
+  ReviewBatchDetail,
+  ReviewBatchSummary,
+  ReviewPRGroup,
+  ReviewQueueLine,
+} from "../types/review";
 
-const reviewBatches = [
-  {
-    batchId: "UP-2026-053",
-    owner: "Sarah Chen",
-    uploadedAt: "2026-05-20 14:18",
-    status: "Review Required",
-    prs: [
-      {
-        pr: "PR-2026-1525",
-        requestor: "Sarah Chen",
-        purpose: "Workshop materials and lab consumables",
-        lines: [
-          {
-            id: "REV-001",
-            line: "Line 3",
-            itemDetails: "Miscellaneous supplies for food processing unit",
-            wbs: "MISC-001",
-            labGroup: "FCB",
-            lab: "General",
-            category: "Consumables",
-            amount: "$650.00",
-            issue: "Lab is General because no configured lab alias matched purpose, vendor instruction, or requester mapping.",
-          },
-        ],
-      },
-      {
-        pr: "PR-2026-1526",
-        requestor: "Michael Tan",
-        purpose: "External testing service for material samples",
-        lines: [
-          {
-            id: "REV-002",
-            line: "Line 1",
-            itemDetails: "External testing service",
-            wbs: "W3-99-01",
-            labGroup: "General",
-            lab: "General",
-            category: "Services",
-            amount: "$3,200.00",
-            issue: "WBS did not map confidently to a Lab Group. This line must be reviewed before budget calculation.",
-          },
-          {
-            id: "REV-003",
-            line: "Line 2",
-            itemDetails: "Specialized equipment calibration",
-            wbs: "W4-01-12",
-            labGroup: "EPD",
-            lab: "W4L1",
-            category: "General",
-            amount: "$1,850.00",
-            issue: "Category is General because uploaded PR category did not match configured presets.",
-          },
-        ],
-      },
-    ],
-  },
-  {
-    batchId: "UP-2026-052",
-    owner: "Emily Wong",
-    uploadedAt: "2026-05-19 09:04",
-    status: "Review Required",
-    prs: [
-      {
-        pr: "PR-2026-1519",
-        requestor: "Emily Wong",
-        purpose: "Replacement consumables for tensile testing",
-        lines: [
-          {
-            id: "REV-004",
-            line: "Line 1",
-            itemDetails: "Consumable replacement pack",
-            wbs: "W4-01-12",
-            labGroup: "EPD",
-            lab: "W4L1",
-            category: "General",
-            amount: "$920.00",
-            issue: "Category fallback requires Team Lead confirmation.",
-          },
-        ],
-      },
-    ],
-  },
-];
+type DetailState =
+  | { kind: "loading" }
+  | { kind: "ready"; data: ReviewBatchDetail }
+  | { kind: "error"; message: string };
 
 export function ReviewQueuePage() {
-  const [expandedBatch, setExpandedBatch] = useState<string | null>("UP-2026-053");
-  const [expandedPr, setExpandedPr] = useState<string | null>("PR-2026-1525");
+  const { user } = useAuth();
 
-  const totalLines = reviewBatches.reduce(
-    (batchTotal, batch) => batchTotal + batch.prs.reduce((prTotal, pr) => prTotal + pr.lines.length, 0),
-    0
-  );
+  const [batches, setBatches] = useState<ReviewBatchSummary[]>([]);
+  const [expandedBatch, setExpandedBatch] = useState<number | null>(null);
+  const [expandedPr, setExpandedPr] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<number, DetailState>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [committingBatch, setCommittingBatch] = useState<number | null>(null);
+  const [commitSuccess, setCommitSuccess] = useState<string | null>(null);
+
+  const fetchBatches = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await listReviewBatches(user);
+      setBatches(data);
+      // Reset detail cache when batch list refreshes; otherwise stale data lingers.
+      setDetails({});
+      if (data.length > 0) {
+        setExpandedBatch(data[0].batch_id);
+      } else {
+        setExpandedBatch(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load review queue.");
+      setBatches([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchBatches();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.email]);
+
+  // Lazy-fetch per-batch detail when expanded for the first time.
+  useEffect(() => {
+    if (expandedBatch === null) return;
+    if (details[expandedBatch]) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "loading" } }));
+    getBatchDetail(expandedBatch, user)
+      .then((data) => {
+        setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "ready", data } }));
+        // Auto-expand the first PR for convenience.
+        if (data.prs.length > 0) {
+          setExpandedPr(data.prs[0].source_pr_number);
+        }
+      })
+      .catch((err) =>
+        setDetails((prev) => ({
+          ...prev,
+          [expandedBatch]: {
+            kind: "error",
+            message: err instanceof Error ? err.message : "Failed to load batch detail.",
+          },
+        })),
+      );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedBatch]);
+
+  const totalOpen = batches.reduce((sum, b) => sum + b.open_queue_count, 0);
+
+  const handleCommit = async (batch: ReviewBatchSummary) => {
+    const ok = window.confirm(
+      `Commit batch #${batch.batch_id} (${batch.filename})?\n\n` +
+        `This will move ${batch.total_lines} reviewed line${batch.total_lines === 1 ? "" : "s"} ` +
+        `from staging into the finalized purchase records. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setCommittingBatch(batch.batch_id);
+    setCommitSuccess(null);
+    try {
+      const result = await commitBatch(batch.batch_id, user);
+      setCommitSuccess(
+        `Batch #${result.batch_id} committed: ${result.prs_created} PR${result.prs_created === 1 ? "" : "s"}` +
+          ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.`,
+      );
+      await fetchBatches();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to commit batch.");
+    } finally {
+      setCommittingBatch(null);
+    }
+  };
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
@@ -108,8 +118,7 @@ export function ReviewQueuePage() {
             label: "Upload Batch",
             options: [
               { value: "all", label: "All Batches" },
-              { value: "UP-2026-053", label: "UP-2026-053" },
-              { value: "UP-2026-052", label: "UP-2026-052" },
+              ...batches.map((b) => ({ value: String(b.batch_id), label: b.filename })),
             ],
           },
           {
@@ -126,11 +135,19 @@ export function ReviewQueuePage() {
       />
 
       <div className="p-6">
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold text-foreground">Review Queue</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            {totalLines} unresolved line errors across {reviewBatches.length} upload batches.
-          </p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-foreground">Review Queue</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              {loading
+                ? "Loading…"
+                : `${totalOpen} unresolved line error${totalOpen === 1 ? "" : "s"} across ${batches.length} upload batch${batches.length === 1 ? "" : "es"}.`}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={fetchBatches} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </div>
 
         <Card className="p-4 bg-[#fff7ed] border-[#fed7aa] mb-6">
@@ -138,110 +155,103 @@ export function ReviewQueuePage() {
             <Lock className="h-5 w-5 text-[#c2410c] mt-0.5" />
             <div>
               <p className="text-sm font-medium text-[#9a3412]">
-                Expand a batch, then expand a PR to edit its individual error lines.
+                Expand a batch, then expand a PR to see its individual error lines.
               </p>
               <p className="text-sm text-[#9a3412] mt-1">
-                A batch can only be approved or committed after every listed line error in that batch is resolved.
+                A batch can only be committed after every listed line error in that batch is resolved.
               </p>
             </div>
           </div>
         </Card>
 
+        {error && (
+          <Card className="p-4 mb-4 bg-[#fef2f2] border-[#fecaca]">
+            <p className="text-sm text-[#b91c1c]">{error}</p>
+          </Card>
+        )}
+
+        {commitSuccess && (
+          <Card className="p-4 mb-4 bg-[#f0fdf4] border-[#bbf7d0]">
+            <div className="flex items-start gap-3">
+              <CheckCircle className="h-5 w-5 text-[#15803d] mt-0.5" />
+              <p className="text-sm text-[#14532d]">{commitSuccess}</p>
+            </div>
+          </Card>
+        )}
+
+        {!loading && !error && batches.length === 0 && (
+          <Card className="p-8 text-center text-muted-foreground">
+            <p className="text-sm">No upload batches need review right now. Upload a file to get started.</p>
+          </Card>
+        )}
+
         <div className="space-y-4">
-          {reviewBatches.map((batch) => {
-            const batchLineCount = batch.prs.reduce((total, pr) => total + pr.lines.length, 0);
-            const isBatchExpanded = expandedBatch === batch.batchId;
+          {batches.map((batch) => {
+            const isBatchExpanded = expandedBatch === batch.batch_id;
+            const detail = details[batch.batch_id];
+            const canCommit = batch.upload_status === "ready_to_commit" && batch.open_queue_count === 0;
+            const isCommittingThis = committingBatch === batch.batch_id;
 
             return (
-              <Card key={batch.batchId} className="bg-white border-border overflow-hidden">
-                <button
-                  type="button"
-                  className="w-full p-5 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
-                  onClick={() => setExpandedBatch(isBatchExpanded ? null : batch.batchId)}
-                >
-                  <div className="flex items-center gap-3">
+              <Card key={batch.batch_id} className="bg-white border-border overflow-hidden">
+                <div className="w-full p-5 flex items-center justify-between gap-4 hover:bg-[#f8f9fa]">
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 text-left flex-1"
+                    onClick={() => setExpandedBatch(isBatchExpanded ? null : batch.batch_id)}
+                  >
                     {isBatchExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
                     <div>
-                      <p className="text-lg font-semibold text-foreground">{batch.batchId}</p>
+                      <p className="text-lg font-semibold text-foreground">
+                        Batch #{batch.batch_id} — {batch.filename}
+                      </p>
                       <p className="text-sm text-muted-foreground">
-                        {batchLineCount} unresolved line errors - Owner: {batch.owner} - Uploaded {batch.uploadedAt}
+                        {batch.open_queue_count} unresolved / {batch.total_lines} total lines · Uploaded by{" "}
+                        {batch.uploader_name} · {formatDate(batch.uploaded_at)}
                       </p>
                     </div>
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status="pending">{prettyStatus(batch.upload_status)}</StatusBadge>
+                    {canCommit && (
+                      <Button
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCommit(batch);
+                        }}
+                        disabled={isCommittingThis}
+                        className="bg-[#15803d] hover:bg-[#166534] text-white"
+                      >
+                        <Upload className="h-4 w-4 mr-1" />
+                        {isCommittingThis ? "Committing…" : "Commit Batch"}
+                      </Button>
+                    )}
                   </div>
-                  <StatusBadge status="pending">{batch.status}</StatusBadge>
-                </button>
+                </div>
 
                 {isBatchExpanded && (
                   <div className="border-t border-border bg-[#f8f9fa] p-4 space-y-3">
-                    {batch.prs.map((pr) => {
-                      const isPrExpanded = expandedPr === pr.pr;
-                      return (
-                        <div key={pr.pr} className="rounded-md border border-border bg-white overflow-hidden">
-                          <button
-                            type="button"
-                            className="w-full p-4 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
-                            onClick={() => setExpandedPr(isPrExpanded ? null : pr.pr)}
-                          >
-                            <div className="flex items-center gap-3">
-                              {isPrExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">{pr.pr}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {pr.lines.length} line error{pr.lines.length === 1 ? "" : "s"} - {pr.requestor}
-                                </p>
-                              </div>
-                            </div>
-                            <StatusBadge status="warning">Needs line edits</StatusBadge>
-                          </button>
-
-                          {isPrExpanded && (
-                            <div className="border-t border-border overflow-x-auto">
-                              <table className="w-full">
-                                <thead className="bg-[#f8f9fa]">
-                                  <tr className="border-b border-border">
-                                    <th className="text-left p-3 text-xs font-medium text-muted-foreground">Line</th>
-                                    <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
-                                    <th className="text-left p-3 text-xs font-medium text-muted-foreground">WBS</th>
-                                    <th className="text-left p-3 text-xs font-medium text-muted-foreground">Current Classification</th>
-                                    <th className="text-left p-3 text-xs font-medium text-muted-foreground">Issue</th>
-                                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
-                                    <th className="text-center p-3 text-xs font-medium text-muted-foreground">Action</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {pr.lines.map((line) => (
-                                    <Fragment key={line.id}>
-                                      <tr className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
-                                        <td className="p-3 text-sm font-medium text-foreground">{line.line}</td>
-                                        <td className="p-3 text-sm text-foreground">{line.itemDetails}</td>
-                                        <td className="p-3 text-sm text-muted-foreground">{line.wbs}</td>
-                                        <td className="p-3">
-                                          <div className="flex flex-wrap gap-2">
-                                            <StatusBadge status={line.labGroup === "General" ? "general" : "info"}>{line.labGroup}</StatusBadge>
-                                            <StatusBadge status={line.lab === "General" ? "general" : "info"}>{line.lab}</StatusBadge>
-                                            <StatusBadge status={line.category === "General" ? "general" : "info"}>{line.category}</StatusBadge>
-                                          </div>
-                                        </td>
-                                        <td className="p-3 text-xs text-muted-foreground max-w-sm">{line.issue}</td>
-                                        <td className="p-3 text-sm text-right font-medium text-foreground">{line.amount}</td>
-                                        <td className="p-3 text-center">
-                                          <Link to={`/review/${line.id}`}>
-                                            <Button size="sm" variant="outline">
-                                              <Eye className="h-4 w-4 mr-1" />
-                                              Edit Line
-                                            </Button>
-                                          </Link>
-                                        </td>
-                                      </tr>
-                                    </Fragment>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {!detail || detail.kind === "loading" ? (
+                      <p className="text-sm text-muted-foreground py-2 px-1">Loading line errors…</p>
+                    ) : detail.kind === "error" ? (
+                      <p className="text-sm text-[#b91c1c] py-2 px-1">{detail.message}</p>
+                    ) : detail.data.prs.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2 px-1">
+                        No line errors visible to you in this batch.
+                      </p>
+                    ) : (
+                      detail.data.prs.map((pr) => (
+                        <PRGroupCard
+                          key={pr.source_pr_number}
+                          pr={pr}
+                          isExpanded={expandedPr === pr.source_pr_number}
+                          onToggle={() =>
+                            setExpandedPr(expandedPr === pr.source_pr_number ? null : pr.source_pr_number)
+                          }
+                        />
+                      ))
+                    )}
                   </div>
                 )}
               </Card>
@@ -251,4 +261,126 @@ export function ReviewQueuePage() {
       </div>
     </div>
   );
+}
+
+// ─── PR-level row ────────────────────────────────────────────────────────
+function PRGroupCard({
+  pr,
+  isExpanded,
+  onToggle,
+}: {
+  pr: ReviewPRGroup;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-white overflow-hidden">
+      <button
+        type="button"
+        className="w-full p-4 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-3">
+          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          <div>
+            <p className="text-sm font-semibold text-foreground">{pr.source_pr_number}</p>
+            <p className="text-xs text-muted-foreground">
+              {pr.lines.length} line error{pr.lines.length === 1 ? "" : "s"}
+              {pr.requestor_name ? ` · ${pr.requestor_name}` : ""}
+            </p>
+          </div>
+        </div>
+        <StatusBadge status="warning">Needs line edits</StatusBadge>
+      </button>
+
+      {isExpanded && (
+        <div className="border-t border-border overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-[#f8f9fa]">
+              <tr className="border-b border-border">
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Line</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">WBS</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Current Classification</th>
+                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Issue</th>
+                <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
+                <th className="text-center p-3 text-xs font-medium text-muted-foreground">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pr.lines.map((line) => (
+                <LineRow key={line.review_queue_id} line={line} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Line-level row ──────────────────────────────────────────────────────
+function LineRow({ line }: { line: ReviewQueueLine }) {
+  return (
+    <Fragment>
+      <tr className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
+        <td className="p-3 text-sm font-medium text-foreground">
+          Line {line.source_line_no ?? "—"}
+        </td>
+        <td className="p-3 text-sm text-foreground">{line.item_details}</td>
+        <td className="p-3 text-sm text-muted-foreground">{line.wbs_code || "—"}</td>
+        <td className="p-3">
+          <div className="flex flex-wrap gap-2">
+            <StatusBadge status={line.is_lab_group_general ? "general" : "info"}>
+              {line.current_lab_group}
+            </StatusBadge>
+            <StatusBadge status={line.is_lab_general ? "general" : "info"}>
+              {line.current_lab}
+            </StatusBadge>
+            <StatusBadge status={line.is_category_general ? "general" : "info"}>
+              {line.current_category}
+            </StatusBadge>
+          </div>
+        </td>
+        <td className="p-3 text-xs text-muted-foreground max-w-sm">{line.review_reason}</td>
+        <td className="p-3 text-sm text-right font-medium text-foreground">
+          ${formatAmount(line.amount_gst)}
+        </td>
+        <td className="p-3 text-center">
+          <Link to={`/review/${line.review_queue_id}`}>
+            <Button size="sm" variant="outline">
+              <Eye className="h-4 w-4 mr-1" />
+              Edit Line
+            </Button>
+          </Link>
+        </td>
+      </tr>
+    </Fragment>
+  );
+}
+
+// ─── Tiny helpers ────────────────────────────────────────────────────────
+function formatDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function prettyStatus(raw: string): string {
+  return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatAmount(raw: string): string {
+  const num = Number(raw);
+  if (Number.isNaN(num)) return raw;
+  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }

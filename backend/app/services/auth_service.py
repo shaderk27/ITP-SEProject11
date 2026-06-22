@@ -6,6 +6,8 @@ from fastapi import HTTPException, Response, status
 from sqlalchemy.orm import Session
 import jwt
 import bcrypt
+import secrets
+import string
 
 from app.config import load_environment
 from app.repositories.auth_repository import AuthRepository
@@ -207,6 +209,49 @@ class AuthService:
             ),
         }
 
+    def update_user_profile(
+        self, 
+        user_id: int, 
+        full_name: Optional[str] = None, 
+        current_password: Optional[str] = None, 
+        new_password: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Updates the current user's profile details with secure password validation."""
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+            
+        if full_name:
+            user.full_name = full_name
+            
+        # --- NEW SECURITY LOGIC ---
+        if new_password:
+            # 1. Ensure they provided the current password
+            if not current_password:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Current password is required to set a new password."
+                )
+            
+            # 2. Verify the current password matches the database
+            if not self._verify_password(current_password, user.password_hash):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect current password."
+                )
+                
+            # 3. Hash and save the new password
+            user.password_hash = self._hash_password(new_password)
+            
+        self.db.commit()
+        self.db.refresh(user)
+        
+        return {"success": True, "message": "Profile updated successfully"}
+
+
     def create_user(
         self,
         full_name: str,
@@ -313,3 +358,88 @@ class AuthService:
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
         }
+    def get_labic_by_lab(self, lab_id: int) -> Optional[Dict[str, Any]]:
+        """Return the Lab IC user assigned to a given lab, or None if unassigned."""
+        labic_role = self.repository.get_role_by_name(self.db, "labic")
+        if not labic_role:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role 'labic' not found.",
+            )
+
+        user = self.repository.get_user_by_role_and_lab(self.db, labic_role.role_id, lab_id)
+        if not user:
+            return None
+
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "staff_id": user.staff_id,
+            "lab_id": user.lab_id,
+        }
+        
+    def get_users_by_role(self, role: str) -> List[Dict[str, Any]]:
+        role_record = self.repository.get_role_by_name(self.db, role)
+        if not role_record:
+            raise HTTPException(status_code=404, detail=f"Role '{role}' not found.")
+        
+        users = self.repository.get_users_by_role_id(self.db, role_record.role_id)
+        return [
+            {
+                "user_id": u.user_id,
+                "full_name": u.full_name,
+                "email": u.email,
+                "lab_group_id": u.lab_group_id,
+                "lab_id": u.lab_id,
+            }
+            for u in users
+        ]
+    def assign_lab_to_user(self, user_id: int, lab_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if user.role.role_name != "labic":
+            raise HTTPException(status_code=400, detail="Only labic users can be assigned to a lab.")
+        
+        user.lab_id = lab_id
+        user.lab_group_id = None  # enforce mutual exclusion constraint
+        self.db.commit()
+        self.db.refresh(user)
+        
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "lab_id": user.lab_id,
+        }
+    def assign_labgroup_to_user(self, user_id: int, lab_group_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if user.role.role_name != "teamlead":
+            raise HTTPException(status_code=400, detail="Only labic users can be assigned to a lab.")
+        
+        user.lab_group_id = lab_group_id
+        user.lab_id = None  # enforce mutual exclusion constraint
+        self.db.commit()
+        self.db.refresh(user)
+        
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "lab_group_id": user.lab_group_id,
+        }
+    def forgot_password(self, email: str) -> None:
+        user = self.repository.get_user_by_email(self.db, email)
+        if not user:
+            return
+
+        temp_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+        hashed = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
+
+        self.repository.invalidate_reset_tokens(self.db, user.user_id)
+        self.repository.create_reset_token(self.db, user.user_id, hashed)
+
+        self._send_temp_password_email(user.email, user.full_name, temp_password)

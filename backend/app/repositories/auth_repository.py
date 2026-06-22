@@ -1,7 +1,8 @@
-from typing import Optional, Sequence
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
-from app.models.auth import User, Role
+from app.models.auth import PasswordResetToken, User, Role
 
 
 class AuthRepository:
@@ -16,7 +17,9 @@ class AuthRepository:
     def get_user_by_id(self, db: Session, user_id: int) -> Optional[User]:
         return db.execute(
             select(User)
-            .options(joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+            )
             .where(User.user_id == user_id)
         ).scalar_one_or_none()
 
@@ -80,8 +83,19 @@ class AuthRepository:
         """Retrieve all users with role and scope relationships."""
         return (
             db.query(User)
-            .options(joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+            )
             .order_by(User.user_id)
+            .all()
+        )
+    def get_users_by_role_id(
+        self, db: Session, role_id: int
+    ) -> List[User]:
+        """Fetch all users assigned to a given role."""
+        return (
+            db.query(User)
+            .filter(User.role_id == role_id)
             .all()
         )
 
@@ -133,3 +147,34 @@ class AuthRepository:
             }
             for row in rows
         ]
+    #forgot pw stuff
+
+    def get_active_reset_token(self, db: Session, user_id: int) -> Optional[PasswordResetToken]:
+        return (
+            db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.used == False,
+                PasswordResetToken.expires_at > datetime.now(timezone.utc),
+            )
+            .first()
+        )
+
+    def invalidate_reset_tokens(self, db: Session, user_id: int) -> None:
+        db.query(PasswordResetToken)\
+            .filter(PasswordResetToken.user_id == user_id, PasswordResetToken.used == False)\
+            .update({"used": True})
+
+    def create_reset_token(self, db: Session, user_id: int, hashed_temp_password: str) -> PasswordResetToken:
+        token = PasswordResetToken(
+            user_id=user_id,
+            temp_password=hashed_temp_password,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        db.add(token)
+        db.commit()
+        return token
+
+    def mark_token_used(self, db: Session, token: PasswordResetToken) -> None:
+        token.used = True
+        db.commit()

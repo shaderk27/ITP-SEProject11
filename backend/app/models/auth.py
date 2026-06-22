@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional, List
-from sqlalchemy import BigInteger, String, Text, DateTime, ForeignKey
+from sqlalchemy import BigInteger, String, Text, DateTime, ForeignKey,Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -59,7 +59,9 @@ class User(Base):
     lab_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("labs.lab_id"), nullable=True
     )
-
+    reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
+        "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
+    )
     # Relationships
     role: Mapped["Role"] = relationship("Role", back_populates="users")
     lab_group: Mapped[Optional["LabGroup"]] = relationship("LabGroup")
@@ -67,3 +69,29 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User(email={self.email!r}, full_name={self.full_name!r})>"
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    token_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    temp_password: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    # Relationship back to user
+    user: Mapped["User"] = relationship("User", back_populates="reset_tokens")
+
+    def __repr__(self) -> str:
+        return f"<PasswordResetToken(user_id={self.user_id!r}, expires_at={self.expires_at!r}, used={self.used!r})>"

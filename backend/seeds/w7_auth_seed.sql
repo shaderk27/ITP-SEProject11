@@ -52,7 +52,10 @@ OVERRIDING SYSTEM VALUE
 VALUES
     (1, 1, 'Development Admin', 'admin@example.com', 'DEV-ADMIN', 'placeholder_no_auth_yet', NULL, NULL),
     (2, 2, 'Development Team Lead', 'teamlead.fcb@example.com', 'DEV-TL-FCB', 'placeholder_no_auth_yet', 1, NULL),
-    (3, 3, 'Development Lab IC', 'labic.fcb@example.com', 'DEV-LIC-FCB', 'placeholder_no_auth_yet', NULL, 1)
+    (3, 3, 'Development Lab IC', 'labic.fcb@example.com', 'DEV-LIC-FCB', 'placeholder_no_auth_yet', NULL, 1),
+    (4, 3, 'ICT Lab IC', 'labic.ict@example.com', 'DEV-LIC-ICT', 'placeholder_no_auth_yet', NULL, 3),
+    (5, 3, 'NONE Lab IC', 'labic.non@example.com', 'DEV-LIC-NON', 'placeholder_no_auth_yet', NULL, NULL),
+	(6, 2, 'NONE Team Lead', 'teamlead.non@example.com', 'DEV-TL-NON', 'placeholder_no_auth_yet', NULL, NULL)
 ON CONFLICT (user_id) DO UPDATE
 SET
     role_id = EXCLUDED.role_id,
@@ -67,3 +70,12 @@ SELECT setval(pg_get_serial_sequence('roles', 'role_id'), (SELECT MAX(role_id) F
 SELECT setval(pg_get_serial_sequence('lab_groups', 'lab_group_id'), (SELECT MAX(lab_group_id) FROM lab_groups));
 SELECT setval(pg_get_serial_sequence('labs', 'lab_id'), (SELECT MAX(lab_id) FROM labs));
 SELECT setval(pg_get_serial_sequence('users', 'user_id'), (SELECT MAX(user_id) FROM users));
+DROP TABLE IF EXISTS password_reset_tokens            CASCADE;
+CREATE TABLE password_reset_tokens (
+    token_id        bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         bigint          NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    temp_password   text            NOT NULL,       -- hashed
+    expires_at      timestamptz     NOT NULL,
+    used            boolean         NOT NULL DEFAULT false,
+    created_at      timestamptz     NOT NULL DEFAULT now()
+);
