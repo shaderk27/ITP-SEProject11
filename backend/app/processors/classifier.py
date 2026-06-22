@@ -45,22 +45,34 @@ def classify_line_item(
 
     lab_match = _match_lab_by_text(scoped_labs, purpose)
     if lab_match:
-        return _result(lab_match, matched_group, f"Purpose matched lab '{lab_match.lab_name}'")
+        return _result(
+            lab_match, matched_group, f"Purpose matched lab '{lab_match.lab_name}'"
+        )
 
     lab_match = _match_lab_by_text(scoped_labs, instruction_to_vendor)
     if lab_match:
-        return _result(lab_match, matched_group, f"Vendor instruction matched lab '{lab_match.lab_name}'")
+        return _result(
+            lab_match,
+            matched_group,
+            f"Vendor instruction matched lab '{lab_match.lab_name}'",
+        )
 
     if req_clean:
         lab_match = _match_lab_by_requestor(db, scoped_labs, req_clean)
         if lab_match:
-            return _result(lab_match, matched_group, f"Requestor matched lab '{lab_match.lab_name}'")
+            return _result(
+                lab_match,
+                matched_group,
+                f"Requestor matched lab '{lab_match.lab_name}'",
+            )
 
     # Final fallback keeps the current demo behavior where configured lab codes
     # embedded anywhere in the row can still classify the line.
     lab_match = _match_lab_by_text(scoped_labs, text_lower)
     if lab_match:
-        return _result(lab_match, matched_group, f"Row context matched lab '{lab_match.lab_name}'")
+        return _result(
+            lab_match, matched_group, f"Row context matched lab '{lab_match.lab_name}'"
+        )
 
     if matched_group:
         return {
@@ -126,7 +138,9 @@ def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
 
 
 def _result(lab, group, reason: str) -> dict:
-    group_id = getattr(group, "lab_group_id", None) or getattr(lab, "lab_group_id", None)
+    group_id = getattr(group, "lab_group_id", None) or getattr(
+        lab, "lab_group_id", None
+    )
     return {
         "lab_id": getattr(lab, "lab_id", None),
         "lab_group_id": group_id,

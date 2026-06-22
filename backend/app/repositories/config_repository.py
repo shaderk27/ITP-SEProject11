@@ -2,13 +2,14 @@
 from sqlalchemy.orm import Session
 from app.models.config import LabGroup, Lab, LabAlias, RequesterLabMapping
 
+
 class ConfigRepository:
     def __init__(self, db_session: Session):
         self.db = db_session
 
     def get_classification_maps(self):
         """Builds the dictionaries needed for the W7-04 Classifier."""
-        
+
         # 1. Build WBS Map: { "WBS-CODE": "Lab Group Name" }
         wbs_map = {}
         groups = self.db.query(LabGroup).filter(LabGroup.wbs_code.isnot(None)).all()
@@ -25,7 +26,11 @@ class ConfigRepository:
 
         # 3. Build Requestor Map: { "Requestor Name": "Lab Name" }
         requestor_map = {}
-        requestors = self.db.query(RequesterLabMapping, Lab).join(Lab, RequesterLabMapping.default_lab_id == Lab.lab_id).all()
+        requestors = (
+            self.db.query(RequesterLabMapping, Lab)
+            .join(Lab, RequesterLabMapping.default_lab_id == Lab.lab_id)
+            .all()
+        )
         for req, lab in requestors:
             requestor_map[req.requester_name.lower()] = lab.lab_name
 
