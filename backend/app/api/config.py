@@ -58,14 +58,15 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     db.add(new_group)
     db.flush() # Flush to generate the new ID without committing yet
     
-    # NEW: Bulk Claim Orphaned Labs
+    # NEW: Bulk Claim Orphaned Labs & Sync Budgets Explicitly
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
-        db.query(Lab).filter(
-            Lab.lab_id.in_(group.assigned_lab_ids)
-        ).update(
-            {"lab_group_id": new_group.lab_group_id},
-            synchronize_session=False
-        )
+        labs_to_update = db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
+        for l in labs_to_update:
+            l.lab_group_id = new_group.lab_group_id
+            
+        budgets_to_update = db.query(Budget).filter(Budget.lab_id.in_(group.assigned_lab_ids)).all()
+        for b in budgets_to_update:
+            b.lab_group_id = new_group.lab_group_id
 
     db.commit()
     db.refresh(new_group)
@@ -80,36 +81,30 @@ def update_lab_group(group_id: int, group: LabGroupCreate, db: Session = Depends
     db_group.wbs_code = group.wbs_code
     db_group.description = group.description
     
-    # NEW: Bulk Claim Orphaned Labs during Edit
+    # NEW: Bulk Claim Orphaned Labs during Edit & Sync Budgets Explicitly
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
-        db.query(Lab).filter(
-            Lab.lab_id.in_(group.assigned_lab_ids)
-        ).update(
-            {"lab_group_id": group_id},
-            synchronize_session=False
-        )
+        labs_to_update = db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
+        for l in labs_to_update:
+            l.lab_group_id = group_id
+            
+        budgets_to_update = db.query(Budget).filter(Budget.lab_id.in_(group.assigned_lab_ids)).all()
+        for b in budgets_to_update:
+            b.lab_group_id = group_id
 
     db.commit()
     return {"id": db_group.lab_group_id, "name": db_group.lab_group_name, "wbs_code": db_group.wbs_code, "description": db_group.description, "budget": 0, "threshold": 80}
 
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
-    
-    # 1. Unassign the group from all Budgets first
-    db.query(Budget).filter(
-        Budget.lab_group_id == group_id
-    ).update(
-        {"lab_group_id": None}, 
-        synchronize_session=False
-    )
+    # 1. Unassign the group from all Budgets first explicitly
+    budgets = db.query(Budget).filter(Budget.lab_group_id == group_id).all()
+    for b in budgets:
+        b.lab_group_id = None
 
-    # 2. Unassign the group from all Labs
-    db.query(Lab).filter(
-        Lab.lab_group_id == group_id
-    ).update(
-        {"lab_group_id": None}, 
-        synchronize_session=False
-    )
+    # 2. Unassign the group from all Labs explicitly
+    labs = db.query(Lab).filter(Lab.lab_group_id == group_id).all()
+    for l in labs:
+        l.lab_group_id = None
     
     # 3. Safely delete the Lab Group
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
@@ -152,7 +147,7 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
 # ==============================
 # LABS API
 # ==============================
-@router.get("/labs/orphaned") # NEW ENDPOINT
+@router.get("/labs/orphaned")
 def get_orphaned_labs(db: Session = Depends(get_db)):
     orphaned_labs = db.query(Lab).filter(Lab.lab_group_id == None).all()
     return [{"lab_id": lab.lab_id, "lab_name": lab.lab_name, "lab_code": lab.lab_code or ""} for lab in orphaned_labs]
@@ -214,6 +209,14 @@ def delete_lab(lab_id: int, db: Session = Depends(get_db)):
 def unassign_lab_from_group(lab_id: int, db: Session = Depends(get_db)):
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not lab: raise HTTPException(status_code=404, detail="Lab not found")
+    
+    # 1. Unassign Lab
     lab.lab_group_id = None
+    
+    # 2. Unassign Budgets explicitly
+    budgets = db.query(Budget).filter(Budget.lab_id == lab_id).all()
+    for b in budgets:
+        b.lab_group_id = None
+        
     db.commit()
     return {"success": True, "message": "Lab successfully removed from the group."}
