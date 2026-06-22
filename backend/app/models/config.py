@@ -13,6 +13,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 from pydantic import BaseModel
+from typing import List, Optional
 
 # --- SQLALCHEMY DATABASE MODELS ---
 
@@ -33,7 +34,7 @@ class Lab(Base):
     __tablename__ = "labs"
 
     lab_id = Column(BigInteger, primary_key=True)
-    lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id"))
+    lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id", ondelete="SET NULL"), nullable=True)
     lab_code = Column(String(50))
     lab_name = Column(String(150), nullable=False)
     venue = Column(Text)
@@ -42,6 +43,7 @@ class Lab(Base):
 
     group = relationship("LabGroup", back_populates="labs")
     aliases = relationship("LabAlias", back_populates="lab")
+    
 
 
 class LabAlias(Base):
@@ -134,6 +136,7 @@ class LabGroupCreate(BaseModel):
     name: str
     wbs_code: str
     description: str | None = None
+    assigned_lab_ids: list[int] | None = []
 
 
 class CategoryCreate(BaseModel):

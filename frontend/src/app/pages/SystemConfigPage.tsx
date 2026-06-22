@@ -9,17 +9,16 @@ export function SystemConfigPage() {
   const [labGroups, setLabGroups] = useState<any[]>([]);
   const [labs, setLabs] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
+  const [orphanedLabs, setOrphanedLabs] = useState<any[]>([]);
+  const [selectedLabIds, setSelectedLabIds] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // --- NEW: EXPANDING ROWS STATE ---
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
 
-  // --- EDITING STATES ---
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
   const [editingLabId, setEditingLabId] = useState<number | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
 
-  // --- MODAL & FORM STATES ---
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
   const [newGroupForm, setNewGroupForm] = useState({ name: "", wbs_code: "", description: "" });
 
@@ -31,17 +30,18 @@ export function SystemConfigPage() {
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-  // --- DATA FETCHING ---
   const fetchConfigData = async () => {
     try {
-      const [groupsRes, labsRes, catsRes] = await Promise.all([
+      const [groupsRes, labsRes, catsRes, orphanedRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/config/labgroups`),
         fetch(`${API_BASE_URL}/api/config/labs`),
-        fetch(`${API_BASE_URL}/api/config/categories`)
+        fetch(`${API_BASE_URL}/api/config/categories`),
+        fetch(`${API_BASE_URL}/api/config/labs/orphaned`)
       ]);
       setLabGroups(await groupsRes.json());
       setLabs(await labsRes.json());
       setCategories(await catsRes.json());
+      setOrphanedLabs(await orphanedRes.json());
     } catch (err) {
       console.error(err);
     } finally {
@@ -54,7 +54,6 @@ export function SystemConfigPage() {
     fetchConfigData();
   }, []);
 
-  // --- NEW: TOGGLE ROW HELPER ---
   const toggleGroupExpand = (groupId: number) => {
     if (expandedGroups.includes(groupId)) {
       setExpandedGroups(expandedGroups.filter(id => id !== groupId));
@@ -63,7 +62,12 @@ export function SystemConfigPage() {
     }
   };
 
-  // --- GENERIC CRUD HANDLERS ---
+  const toggleOrphanedLab = (labId: number) => {
+    setSelectedLabIds(prev => 
+      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
+    );
+  };
+
   const handleSave = async (endpoint: string, method: string, payload: any, onSuccess: () => void) => {
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -81,7 +85,14 @@ export function SystemConfigPage() {
     } catch (error) { console.error(error); }
   };
 
-  // --- OPEN EDIT MODAL HELPERS ---
+  const handleUnassignLab = async (labId: number, labName: string) => {
+    if (!window.confirm(`Remove "${labName}" from this Lab Group?`)) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/config/labs/${labId}/unassign`, { method: "PUT" });
+      if (res.ok) fetchConfigData();
+    } catch (error) { console.error(error); }
+  };
+
   const openEditGroup = (group: any) => {
     setEditingGroupId(group.id);
     setNewGroupForm({ name: group.name, wbs_code: group.wbs_code || "", description: group.description || "" });
@@ -103,8 +114,7 @@ export function SystemConfigPage() {
     setIsLabModalOpen(true);
   };
 
-  // --- CLOSE MODAL HELPERS ---
-  const resetGroupModal = () => { setIsGroupModalOpen(false); setEditingGroupId(null); setNewGroupForm({ name: "", wbs_code: "", description: "" }); };
+  const resetGroupModal = () => { setIsGroupModalOpen(false); setEditingGroupId(null); setNewGroupForm({ name: "", wbs_code: "", description: "" }); setSelectedLabIds([]); };
   const resetCategoryModal = () => { setIsCategoryModalOpen(false); setEditingCategoryId(null); setNewCategoryForm({ name: "", description: "" }); };
   const resetLabModal = () => { setIsLabModalOpen(false); setEditingLabId(null); setNewLabForm({ lab_code: "", lab_name: "", lab_group_id: "", ic_name: "", ic_email: "", venue: "", budgets: {} }); };
 
@@ -139,7 +149,7 @@ export function SystemConfigPage() {
                 <table className="w-full">
                   <thead className="bg-[#f8f9fa]">
                     <tr className="border-b border-border text-sm font-medium text-muted-foreground">
-                      <th className="w-12 p-4"></th> {/* Blank header for expand button */}
+                      <th className="w-12 p-4"></th> 
                       <th className="text-left p-4">Lab Group Name</th>
                       <th className="text-left p-4">Lab Group Code</th>
                       <th className="text-right p-4">Allocated Budget</th>
@@ -150,9 +160,7 @@ export function SystemConfigPage() {
                   <tbody>
                     {labGroups.map((group) => {
                       const isExpanded = expandedGroups.includes(group.id);
-                      // Dynamically find all labs that belong to this group
                       const groupLabs = labs.filter(l => l.group_id === group.id);
-                      // Future-proofing: spent is mocked to 0 right now
                       const spent = 0; 
                       const availableBalance = group.budget - spent;
 
@@ -200,7 +208,7 @@ export function SystemConfigPage() {
                                           <th className="text-left p-3">Lab Name</th>
                                           <th className="text-right p-3">Allocated Budget</th>
                                           <th className="text-right p-3 text-[#16a34a]">Available</th>
-                                          <th className="text-center p-3">Edit</th>
+                                          <th className="text-center p-3">Actions</th>
                                         </tr>
                                       </thead>
                                       <tbody>
@@ -210,8 +218,9 @@ export function SystemConfigPage() {
                                             <td className="p-3 text-sm text-gray-700">{lab.name}</td>
                                             <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                             <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                            <td className="p-3 text-center">
+                                            <td className="p-3 text-center flex justify-center gap-2">
                                               <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-400 hover:text-gray-700" /></Button>
+                                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleUnassignLab(lab.id, lab.name)}><X className="h-3 w-3 text-red-400 hover:text-red-700" /></Button>
                                             </td>
                                           </tr>
                                         ))}
@@ -259,7 +268,9 @@ export function SystemConfigPage() {
                         <tr key={lab.id} className="border-b border-border hover:bg-[#f8f9fa]">
                           <td className="p-4 text-sm font-bold text-[#1e3a8a]">{lab.code}</td>
                           <td className="p-4 text-sm font-medium text-foreground">{lab.name}</td>
-                          <td className="p-4 text-sm text-muted-foreground">{lab.group}</td>
+                          <td className="p-4 text-sm text-muted-foreground">
+                            {lab.group === "Unassigned" ? <span className="text-yellow-600 bg-yellow-50 px-2 py-1 rounded-md text-xs border border-yellow-200">Unassigned</span> : lab.group}
+                          </td>
                           <td className="p-4 text-sm text-right text-gray-600">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                           <td className="p-4 text-sm text-right font-bold text-[#16a34a]">${labAvailable.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                           <td className="p-4 text-center">
@@ -332,11 +343,41 @@ export function SystemConfigPage() {
               e.preventDefault(); 
               const endpoint = editingGroupId ? `/api/config/labgroups/${editingGroupId}` : "/api/config/labgroups";
               const method = editingGroupId ? "PUT" : "POST";
-              handleSave(endpoint, method, newGroupForm, resetGroupModal); 
+              
+              // ALWAYS append assigned lab IDs, regardless of Create or Edit mode!
+              const payload = { ...newGroupForm, assigned_lab_ids: selectedLabIds };
+              
+              handleSave(endpoint, method, payload, resetGroupModal); 
             }} className="space-y-4">
               <div><label className="text-sm font-medium">Group Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.name} onChange={(e) => setNewGroupForm({...newGroupForm, name: e.target.value})} /></div>
               <div><label className="text-sm font-medium">WBS Prefix</label><input type="text" className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.wbs_code} onChange={(e) => setNewGroupForm({...newGroupForm, wbs_code: e.target.value})} /></div>
               <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newGroupForm.description} onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})} /></div>
+              
+              {/* THE NEW ORPHANED LABS CHECKLIST (Visible during Creation AND Editing) */}
+              {orphanedLabs.length > 0 && (
+                <div className="mt-4 p-4 border rounded-md bg-gray-50 border-blue-100">
+                  <h4 className="text-sm font-semibold text-blue-900 mb-1">Unassigned Labs Detected ({orphanedLabs.length})</h4>
+                  <p className="text-xs text-gray-500 mb-3">Select labs to automatically assign to this group.</p>
+                  
+                  <div className="max-h-36 overflow-y-auto space-y-2 pr-2">
+                    {orphanedLabs.map(lab => (
+                      <div key={lab.lab_id} className="flex items-center space-x-2">
+                        <input 
+                          type="checkbox"
+                          id={`lab-${lab.lab_id}`}
+                          checked={selectedLabIds.includes(lab.lab_id)}
+                          onChange={() => toggleOrphanedLab(lab.lab_id)}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 h-4 w-4"
+                        />
+                        <label htmlFor={`lab-${lab.lab_id}`} className="text-sm cursor-pointer text-gray-700 font-medium">
+                          {lab.lab_name} <span className="text-xs text-gray-400 font-normal">({lab.lab_code})</span>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={resetGroupModal}>Cancel</Button><Button type="submit" className="bg-[#1e3a8a] text-white">{editingGroupId ? "Save Changes" : "Create"}</Button></div>
             </form>
           </Card>
