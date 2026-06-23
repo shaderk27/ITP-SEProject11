@@ -208,7 +208,10 @@ node_modules/
 frontend/node_modules/
 frontend/dist/
 
-# Personal working notes
+
+
+# Local scratch seed copied during manual DB testing
+backend/dev_seed.sql
 instructions/
 
 # Ruff stuff:

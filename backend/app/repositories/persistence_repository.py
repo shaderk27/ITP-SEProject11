@@ -25,7 +25,7 @@ from app.models.staging import (
     UploadBatch,
 )
 from app.models.upload import PRLineItem, UploadMetadata
-from app.models.user import User
+from app.models.auth import User
 
 
 def persist_upload_to_db(

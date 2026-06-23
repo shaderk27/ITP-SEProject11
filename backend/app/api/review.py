@@ -25,7 +25,7 @@ from app.models.staging import (
     StagingPRLine,
     UploadBatch,
 )
-from app.models.user import User
+from app.models.auth import User
 
 router = APIRouter(prefix="/api/review", tags=["Review"])
 

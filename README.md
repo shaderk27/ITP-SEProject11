@@ -1,7 +1,30 @@
 # Lab Budget Monitoring System
 
 ## Database setup
- - When connecting to the PostGresQL, change line 7 "<PASSWORD>" of database.py to the password created during setup
+Copy `.env.example` to `.env` and replace `<PASSWORD>` with your local Postgres password:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+The backend automatically reads `.env` from the repo root. Real `.env` files are ignored by Git.
+Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the frontend does not clear browser cookies.
+
+For local auth testing, seed the W7 roles/users after your tables exist:
+
+```powershell
+$env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
+psql "$env:DATABASE_URL" -f backend/seeds/w7_auth_seed.sql
+```
+
+If PowerShell says `psql` is not recognized, use the full PostgreSQL path:
+
+```powershell
+$env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" "$env:DATABASE_URL" -f backend/seeds/w7_auth_seed.sql
+```
+
+You can also run the SQL manually in pgAdmin Query Tool by opening `backend/seeds/w7_auth_seed.sql`.
 
 ## Frontend setup
 
@@ -19,7 +42,6 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 python -m pip install -r backend/requirements.txt
 $env:PYTHONPATH="backend"
 python -m uvicorn app.main:app --reload --app-dir backend --port 8080
-pip install psycopg2-binary  (if required)   
 ```
 
 The backend runs on `http://127.0.0.1:8080/`. The frontend dev server proxies `/api` requests to this backend.
@@ -35,8 +57,7 @@ The backend runs on `http://127.0.0.1:8080/`. The frontend dev server proxies `/
 ## Build check
 
 ```bash
-cd frontend
-npm run build
+npm --prefix frontend run build
 ```
 
 ```bash
@@ -45,3 +66,7 @@ python -m pytest backend/app/tests
 ```
 
 The current frontend uses a demo login role selector for Admin, Team Lead, and Lab IC.
+
+## Api endpoints
+You can check api documentation at:
+http://localhost:8080/docs

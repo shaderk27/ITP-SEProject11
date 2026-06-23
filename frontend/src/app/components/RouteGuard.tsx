@@ -1,35 +1,35 @@
-import { useEffect } from "react";
-import { useNavigate } from "react-router";
-import { useAuth } from "../context/AuthContext";
-import type { UserRole } from "../context/AuthContext";
+// import { useEffect } from "react";
+// import { useNavigate } from "react-router";
+// import { useAuth } from "../context/AuthContext";
+// import type { UserRole } from "../context/AuthContext";
 
-interface RouteGuardProps {
-  children: React.ReactNode;
-  allowedRoles?: UserRole[];
-}
+// interface RouteGuardProps {
+//   children: React.ReactNode;
+//   allowedRoles?: UserRole[];
+// }
 
-export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
-  const { user } = useAuth();
-  const navigate = useNavigate();
+// export function RouteGuard({ children, allowedRoles }: RouteGuardProps) {
+//   const { user } = useAuth();
+//   const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!user) {
-      navigate("/login");
-      return;
-    }
+//   useEffect(() => {
+//     if (!user) {
+//       navigate("/login");
+//       return;
+//     }
 
-    if (allowedRoles && !allowedRoles.includes(user.role)) {
-      navigate("/");
-    }
-  }, [user, allowedRoles, navigate]);
+//     if (allowedRoles && !allowedRoles.includes(user.role)) {
+//       navigate("/");
+//     }
+//   }, [user, allowedRoles, navigate]);
 
-  if (!user) {
-    return null;
-  }
+//   if (!user) {
+//     return null;
+//   }
 
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return null;
-  }
+//   if (allowedRoles && !allowedRoles.includes(user.role)) {
+//     return null;
+//   }
 
-  return <>{children}</>;
-}
+//   return <>{children}</>;
+// }

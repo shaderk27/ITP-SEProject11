@@ -15,7 +15,7 @@ from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
-from app.models.user import User
+from app.models.auth import User
 
 router = APIRouter(prefix="/api/records", tags=["Records"])
 
