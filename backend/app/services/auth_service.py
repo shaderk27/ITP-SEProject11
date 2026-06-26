@@ -6,6 +6,8 @@ from fastapi import HTTPException, Response, status
 from sqlalchemy.orm import Session
 import jwt
 import bcrypt
+import secrets
+import string
 
 from app.config import load_environment
 from app.repositories.auth_repository import AuthRepository
@@ -429,3 +431,15 @@ class AuthService:
             "email": user.email,
             "lab_group_id": user.lab_group_id,
         }
+    def forgot_password(self, email: str) -> None:
+        user = self.repository.get_user_by_email(self.db, email)
+        if not user:
+            return
+
+        temp_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+        hashed = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
+
+        self.repository.invalidate_reset_tokens(self.db, user.user_id)
+        self.repository.create_reset_token(self.db, user.user_id, hashed)
+
+        self._send_temp_password_email(user.email, user.full_name, temp_password)
