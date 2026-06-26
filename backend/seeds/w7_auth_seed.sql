@@ -70,3 +70,12 @@ SELECT setval(pg_get_serial_sequence('roles', 'role_id'), (SELECT MAX(role_id) F
 SELECT setval(pg_get_serial_sequence('lab_groups', 'lab_group_id'), (SELECT MAX(lab_group_id) FROM lab_groups));
 SELECT setval(pg_get_serial_sequence('labs', 'lab_id'), (SELECT MAX(lab_id) FROM labs));
 SELECT setval(pg_get_serial_sequence('users', 'user_id'), (SELECT MAX(user_id) FROM users));
+DROP TABLE IF EXISTS password_reset_tokens            CASCADE;
+CREATE TABLE password_reset_tokens (
+    token_id        bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         bigint          NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    temp_password   text            NOT NULL,       -- hashed
+    expires_at      timestamptz     NOT NULL,
+    used            boolean         NOT NULL DEFAULT false,
+    created_at      timestamptz     NOT NULL DEFAULT now()
+);

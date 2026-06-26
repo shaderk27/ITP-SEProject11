@@ -96,6 +96,14 @@ async def create_user(
 async def get_all_roles(service: AuthService = Depends(get_auth_service)):
     return service.get_all_roles()
 
+@router.post("/forgot-password")
+async def forgot_password(
+    payload: ForgotPasswordSchema,
+    service: AuthService = Depends(get_auth_service),
+):
+    # Always return 200 even if email not found — don't leak whether email exists
+    service.forgot_password(payload.email)
+    return { "message": "If that email exists, a temporary password has been sent." }
 
 # @router.get("/users")
 # async def get_all_users(
