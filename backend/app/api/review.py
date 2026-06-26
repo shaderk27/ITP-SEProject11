@@ -172,6 +172,7 @@ class CommitResponse(BaseModel):
     batch_id: int
     new_upload_status: str
     prs_created: int
+    prs_updated: int
     lines_created: int
     pr_ids: list[int]
 
@@ -611,12 +612,17 @@ def commit_batch(
       - For Team Lead: batch must contain at least one line in their lab_group.
 
     Side effects (single transaction):
-      - INSERT one purchase_requests row per staging_pr_headers row
+      - For each staging header:
+        * If no purchase_requests row exists with same source_pr_number:
+            INSERT new PR + pr_versions(change_type='created', old_data=NULL)
+        * If one already exists (re-upload):
+            DELETE all its existing purchase_request_lines,
+            UPDATE the PR fields with the new values,
+            INSERT pr_versions(change_type='updated', old_data=<prior snapshot>)
       - INSERT one purchase_request_lines row per staging_pr_lines row
         (carrying source_staging_line_id for traceability)
-      - INSERT one pr_versions row per PR (change_type='created')
       - UPDATE upload_batches.upload_status = 'committed', processed_at = NOW()
-      - INSERT one audit_logs row (BATCH_COMMITTED)
+      - INSERT one audit_logs row (BATCH_COMMITTED) with both created + updated counts
     """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
@@ -676,6 +682,8 @@ def commit_batch(
         )
 
     pr_ids: list[int] = []
+    prs_created_count = 0
+    prs_updated_count = 0
     lines_created = 0
 
     for header in headers:
@@ -689,20 +697,70 @@ def commit_batch(
         # (All lines under one PR typically share a group; refine later if not.)
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
 
-        pr = PurchaseRequest(
-            source_pr_number=header.source_pr_number,
-            latest_batch_id=batch.batch_id,
-            requestor_name=header.requestor_name,
-            req_type=header.req_type,
-            request_date=header.pr_sub_date,
-            purpose=header.purpose,
-            wbs_code=header.wbs_code,
-            instruction_to_vendor=header.instruction_to_vendor,
-            grand_total_sgd=header.grand_total_sgd,
-            lab_group_id=pr_lab_group_id,
+        # UPDATE if a PR with this source_pr_number already exists; otherwise INSERT.
+        # Replaces all lines on UPDATE — file is source of truth.
+        existing_pr = (
+            db.query(PurchaseRequest)
+            .filter(PurchaseRequest.source_pr_number == header.source_pr_number)
+            .first()
         )
-        db.add(pr)
-        db.flush()
+
+        if existing_pr is None:
+            change_type = "created"
+            old_data = None
+
+            pr = PurchaseRequest(
+                source_pr_number=header.source_pr_number,
+                latest_batch_id=batch.batch_id,
+                requestor_name=header.requestor_name,
+                req_type=header.req_type,
+                request_date=header.pr_sub_date,
+                purpose=header.purpose,
+                wbs_code=header.wbs_code,
+                instruction_to_vendor=header.instruction_to_vendor,
+                grand_total_sgd=header.grand_total_sgd,
+                lab_group_id=pr_lab_group_id,
+            )
+            db.add(pr)
+            db.flush()
+            prs_created_count += 1
+        else:
+            change_type = "updated"
+            existing_line_count = (
+                db.query(func.count(PurchaseRequestLine.pr_line_id))
+                .filter(PurchaseRequestLine.pr_id == existing_pr.pr_id)
+                .scalar()
+                or 0
+            )
+            old_data = {
+                "source_pr_number": existing_pr.source_pr_number,
+                "requestor_name": existing_pr.requestor_name,
+                "wbs_code": existing_pr.wbs_code,
+                "lab_group_id": existing_pr.lab_group_id,
+                "grand_total_sgd": str(existing_pr.grand_total_sgd) if existing_pr.grand_total_sgd is not None else None,
+                "line_count": existing_line_count,
+                "latest_batch_id": existing_pr.latest_batch_id,
+            }
+
+            # Replace lines: delete old, insert new from staging.
+            db.query(PurchaseRequestLine).filter(
+                PurchaseRequestLine.pr_id == existing_pr.pr_id
+            ).delete(synchronize_session=False)
+
+            existing_pr.latest_batch_id = batch.batch_id
+            existing_pr.requestor_name = header.requestor_name
+            existing_pr.req_type = header.req_type
+            existing_pr.request_date = header.pr_sub_date
+            existing_pr.purpose = header.purpose
+            existing_pr.wbs_code = header.wbs_code
+            existing_pr.instruction_to_vendor = header.instruction_to_vendor
+            existing_pr.grand_total_sgd = header.grand_total_sgd
+            existing_pr.lab_group_id = pr_lab_group_id
+            existing_pr.updated_at = func.now()
+            db.flush()
+            pr = existing_pr
+            prs_updated_count += 1
+
         pr_ids.append(pr.pr_id)
 
         for line in lines:
@@ -722,13 +780,12 @@ def commit_batch(
             )
             lines_created += 1
 
-        # History row for this PR.
         db.add(
             PRVersion(
                 pr_id=pr.pr_id,
                 batch_id=batch.batch_id,
-                change_type="created",
-                old_data=None,
+                change_type=change_type,
+                old_data=old_data,
                 new_data={
                     "source_pr_number": pr.source_pr_number,
                     "requestor_name": pr.requestor_name,
@@ -736,6 +793,7 @@ def commit_batch(
                     "lab_group_id": pr.lab_group_id,
                     "grand_total_sgd": str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else None,
                     "line_count": len(lines),
+                    "latest_batch_id": pr.latest_batch_id,
                 },
                 changed_by=current_user.user_id,
                 change_reason=f"Batch {batch.batch_id} committed",
@@ -756,7 +814,8 @@ def commit_batch(
             old_value={"upload_status": "ready_to_commit"},
             new_value={
                 "upload_status": "committed",
-                "prs_created": len(pr_ids),
+                "prs_created": prs_created_count,
+                "prs_updated": prs_updated_count,
                 "lines_created": lines_created,
             },
         )
@@ -768,7 +827,8 @@ def commit_batch(
         success=True,
         batch_id=batch.batch_id,
         new_upload_status=batch.upload_status,
-        prs_created=len(pr_ids),
+        prs_created=prs_created_count,
+        prs_updated=prs_updated_count,
         lines_created=lines_created,
         pr_ids=pr_ids,
     )

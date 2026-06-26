@@ -95,8 +95,16 @@ export function ReviewQueuePage() {
     setCommitSuccess(null);
     try {
       const result = await commitBatch(batch.batch_id, user);
+      const parts: string[] = [];
+      if (result.prs_created > 0) {
+        parts.push(`${result.prs_created} new PR${result.prs_created === 1 ? "" : "s"}`);
+      }
+      if (result.prs_updated > 0) {
+        parts.push(`${result.prs_updated} updated PR${result.prs_updated === 1 ? "" : "s"}`);
+      }
+      const prSummary = parts.length > 0 ? parts.join(" + ") : "0 PRs";
       setCommitSuccess(
-        `Batch #${result.batch_id} committed: ${result.prs_created} PR${result.prs_created === 1 ? "" : "s"}` +
+        `Batch #${result.batch_id} committed: ${prSummary}` +
           ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.`,
       );
       await fetchBatches();
