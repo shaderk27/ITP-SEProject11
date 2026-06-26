@@ -20,6 +20,7 @@ app.add_middleware(
 app.include_router(upload_router, prefix="/api")
 app.include_router(review_router)
 app.include_router(records_router)
+app.include_router(auth_router)
 
 
 @app.get("/health")

@@ -48,7 +48,6 @@ class Lab(Base):
     aliases = relationship("LabAlias", back_populates="lab")
 
 
-
 class LabAlias(Base):
     __tablename__ = "lab_aliases"
 

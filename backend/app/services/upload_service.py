@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 import dataclasses
 
 from app.models.upload import UploadMetadata
-from app.models.user import User
+from app.models.auth import User
 from app.processors.upload_parser import (
     parse_line_items,
     read_upload_dataframe,

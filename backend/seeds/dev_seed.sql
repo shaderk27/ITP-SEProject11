@@ -7,10 +7,12 @@
 -- ===========================================================
 
 
--- ----- 0. Schema tweaks (per Randy) -----
--- Allow labs.lab_group_id to be NULL. Safe to re-run; PostgreSQL accepts
--- DROP NOT NULL on columns that are already nullable.
+-- ----- 0. Schema tweaks (per Randy + Tim) -----
+-- Randy: allow labs.lab_group_id to be NULL. Safe to re-run.
 ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
+
+-- Tim (W7-02): users.lab_id column for Lab IC scoping. IF NOT EXISTS = idempotent.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
 
 
 -- ----- 1. Roles -----
