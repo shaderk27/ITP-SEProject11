@@ -127,8 +127,14 @@ class UploadService:
 
             if self.db:
                 try:
-                    item_dict = item.to_dict() if hasattr(item, "to_dict") else getattr(item, "__dict__", {})
-                    row_text = " ".join([str(v) for v in item_dict.values() if v is not None]).lower()
+                    item_dict = (
+                        item.to_dict()
+                        if hasattr(item, "to_dict")
+                        else getattr(item, "__dict__", {})
+                    )
+                    row_text = " ".join(
+                        [str(v) for v in item_dict.values() if v is not None]
+                    ).lower()
 
                     req_name = item_dict.get("requestor", "")
                     classification = classify_line_item(
@@ -143,7 +149,9 @@ class UploadService:
                     )
                     lab_id = classification.get("lab_id")
                     group_id = classification.get("lab_group_id")
-                    classification_reason = classification.get("reason", classification_reason)
+                    classification_reason = classification.get(
+                        "reason", classification_reason
+                    )
 
                     if lab_id and lab_id in lab_cache:
                         assigned_lab = lab_cache[lab_id]["lab_name"]
@@ -151,13 +159,15 @@ class UploadService:
                     elif group_id and group_id in group_cache:
                         assigned_group = group_cache[group_id]
                 except Exception:
-                    classification_reason = "Classification unavailable. Manual review required."
+                    classification_reason = (
+                        "Classification unavailable. Manual review required."
+                    )
                     classification = {
                         "lab_id": None,
                         "lab_group_id": None,
                         "reason": classification_reason,
                     }
-            
+
             # Uploaded flow stores the resolved classification labels with each line.
             if dataclasses.is_dataclass(item):
                 item = dataclasses.replace(
@@ -169,7 +179,7 @@ class UploadService:
 
             # Snapshot for the DB persistence step (post-replace so .lab / .lab_group are final).
             classified_items.append({"item": item, "classification": classification})
-            
+
             if assigned_lab == "Unassigned Lab" or not assigned_lab:
                 needs_review_count += 1
 

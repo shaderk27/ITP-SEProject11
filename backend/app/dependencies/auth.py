@@ -5,6 +5,7 @@ Today: header-based identity (X-User-Email) for dev/demo.
 After W7-02: swap the body of get_current_user() to decode a real token.
 Every endpoint that uses `Depends(get_current_user)` keeps working unchanged.
 """
+
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 

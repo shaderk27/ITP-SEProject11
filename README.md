@@ -10,21 +10,31 @@ Copy-Item .env.example .env
 The backend automatically reads `.env` from the repo root. Real `.env` files are ignored by Git.
 Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the frontend does not clear browser cookies.
 
-For local auth testing, seed the W7 roles/users after your tables exist:
+For local auth, upload, review queue, and records testing, seed the development data after your tables exist:
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-psql "$env:DATABASE_URL" -f backend/seeds/w7_auth_seed.sql
+psql "$env:DATABASE_URL" -f backend/seeds/dev_seed.sql
 ```
 
 If PowerShell says `psql` is not recognized, use the full PostgreSQL path:
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-& "C:\Program Files\PostgreSQL\18\bin\psql.exe" "$env:DATABASE_URL" -f backend/seeds/w7_auth_seed.sql
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" "$env:DATABASE_URL" -f backend/seeds/dev_seed.sql
 ```
 
-You can also run the SQL manually in pgAdmin Query Tool by opening `backend/seeds/w7_auth_seed.sql`.
+You can also run the SQL manually in pgAdmin Query Tool by opening `backend/seeds/dev_seed.sql`.
+
+Seeded local login accounts use placeholder passwords when `ALLOW_PLACEHOLDER_PASSWORDS=true`:
+
+```text
+admin@test.com
+teamlead.fcb@test.com
+labic@test.com
+```
+
+Use any non-empty password for these seeded users in local development.
 
 ## Frontend setup
 
@@ -40,6 +50,7 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 
 ```bash
 python -m pip install -r backend/requirements.txt
+python -m pip install -r backend/requirements-dev.txt
 $env:PYTHONPATH="backend"
 python -m uvicorn app.main:app --reload --app-dir backend --port 8080
 ```
@@ -57,6 +68,8 @@ The backend runs on `http://127.0.0.1:8080/`. The frontend dev server proxies `/
 ## Build check
 
 ```bash
+npm --prefix frontend run lint -- --max-warnings=-1
+npm --prefix frontend run type-check
 npm --prefix frontend run build
 ```
 
@@ -65,7 +78,23 @@ $env:PYTHONPATH="backend"
 python -m pytest backend/app/tests
 ```
 
-The current frontend uses a demo login role selector for Admin, Team Lead, and Lab IC.
+Backend CI also runs these checks from the `backend` directory:
+
+```bash
+python -m ruff check .
+python -m ruff format --check .
+python -m mypy app/
+```
+
+Security checks used by CI:
+
+```bash
+python -m pip_audit -r backend/requirements.txt
+python -m bandit -r backend/app/ -ll
+npm --prefix frontend audit --audit-level=high
+```
+
+The current frontend uses email/password login. Upload, review queue, and records pages also send the logged-in user's email to the backend for current local RBAC checks.
 
 ## Api endpoints
 You can check api documentation at:

@@ -4,6 +4,7 @@ Review queue API endpoints (W9-01).
 Endpoints for Team Leads and Admins to see batches with unresolved
 auto-classifications. Frontend's Review Queue page reads from here.
 """
+
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -36,6 +37,7 @@ ALLOWED_REVIEW_ROLES = {"admin", "teamlead"}
 # ─── Response shapes ─────────────────────────────────────────────────────
 class BatchSummary(BaseModel):
     """One row in the Review Queue page's batch list."""
+
     batch_id: int
     filename: str
     upload_status: str
@@ -47,11 +49,12 @@ class BatchSummary(BaseModel):
 
 class ReviewQueueLine(BaseModel):
     """One line error inside a PR group."""
+
     review_queue_id: int
     staging_line_id: int
     source_line_no: int | None
     item_details: str
-    amount_gst: str          # Decimal serialized as string for safe transport
+    amount_gst: str  # Decimal serialized as string for safe transport
     wbs_code: str
     current_lab_group: str
     current_lab: str
@@ -65,6 +68,7 @@ class ReviewQueueLine(BaseModel):
 
 class ReviewPRGroup(BaseModel):
     """One PR header with its in-scope line errors."""
+
     source_pr_number: str
     requestor_name: str
     purpose: str
@@ -74,6 +78,7 @@ class ReviewPRGroup(BaseModel):
 
 class BatchDetail(BaseModel):
     """Full batch view: header info + nested PRs and lines that need review."""
+
     batch_id: int
     filename: str
     upload_status: str
@@ -103,6 +108,7 @@ class CategoryOption(BaseModel):
 
 class LastReviewAction(BaseModel):
     """Most recent correction on a queue item (for the 'last corrected by' footer)."""
+
     reviewer_name: str
     reviewed_at: datetime
     comment: str | None
@@ -111,6 +117,7 @@ class LastReviewAction(BaseModel):
 
 class QueueItemDetail(BaseModel):
     """Everything the Edit Line form needs to render in one payload."""
+
     # Queue identity / state
     review_queue_id: int
     queue_status: str
@@ -206,8 +213,14 @@ def list_batches(
     open_batches_query = (
         db.query(UploadBatch.batch_id)
         .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
-        .join(StagingPRLine, StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id)
-        .join(ReviewQueueItem, ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id,
+        )
+        .join(
+            ReviewQueueItem,
+            ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id,
+        )
         .filter(ReviewQueueItem.queue_status == "open")
     )
     if role_name == "teamlead":
@@ -216,22 +229,24 @@ def list_batches(
         )
 
     # 2. Batches in 'ready_to_commit' status (zero open items, awaiting Commit click).
-    ready_batches_query = (
-        db.query(UploadBatch.batch_id)
-        .filter(UploadBatch.upload_status == "ready_to_commit")
+    ready_batches_query = db.query(UploadBatch.batch_id).filter(
+        UploadBatch.upload_status == "ready_to_commit"
     )
     if role_name == "teamlead":
         ready_batches_query = (
-            ready_batches_query
-            .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
-            .join(StagingPRLine, StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id)
+            ready_batches_query.join(
+                StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id
+            )
+            .join(
+                StagingPRLine,
+                StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id,
+            )
             .filter(StagingPRLine.suggested_lab_group_id == current_user.lab_group_id)
         )
 
-    relevant_ids = (
-        {row[0] for row in open_batches_query.distinct().all()}
-        | {row[0] for row in ready_batches_query.distinct().all()}
-    )
+    relevant_ids = {row[0] for row in open_batches_query.distinct().all()} | {
+        row[0] for row in ready_batches_query.distinct().all()
+    }
     if not relevant_ids:
         return []
 
@@ -280,9 +295,13 @@ def get_batch_detail(
         )
 
     # Name lookups so each line can carry resolved display strings.
-    lab_group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
-    lab_names = {l.lab_id: l.lab_name for l in db.query(Lab).all()}
-    category_names = {c.category_id: c.category_name for c in db.query(SpendingCategory).all()}
+    lab_group_names = {
+        g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()
+    }
+    lab_names = {lab.lab_id: lab.lab_name for lab in db.query(Lab).all()}
+    category_names = {
+        c.category_id: c.category_name for c in db.query(SpendingCategory).all()
+    }
 
     headers = (
         db.query(StagingPRHeader)
@@ -297,7 +316,10 @@ def get_batch_detail(
         # re-edit a saved correction before the batch is committed.
         line_query = (
             db.query(StagingPRLine, ReviewQueueItem)
-            .join(ReviewQueueItem, ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id)
+            .join(
+                ReviewQueueItem,
+                ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id,
+            )
             .filter(StagingPRLine.staging_header_id == header.staging_header_id)
             .filter(ReviewQueueItem.queue_status.in_(["open", "resolved"]))
         )
@@ -321,7 +343,9 @@ def get_batch_detail(
                     staging_line_id=line.staging_line_id,
                     source_line_no=line.source_line_no,
                     item_details=line.item_details or "",
-                    amount_gst=str(line.amount_gst) if line.amount_gst is not None else "0",
+                    amount_gst=str(line.amount_gst)
+                    if line.amount_gst is not None
+                    else "0",
                     wbs_code=header.wbs_code or "",
                     current_lab_group=lg_name,
                     current_lab=lab_name,
@@ -366,13 +390,19 @@ def get_queue_item(
     """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only Admin or Team Lead can resolve review items.")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only Admin or Team Lead can resolve review items.",
+        )
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
     # Team Lead can only see items in their own lab_group.
     if role_name == "teamlead":
-        if current_user.lab_group_id is None or line.suggested_lab_group_id != current_user.lab_group_id:
+        if (
+            current_user.lab_group_id is None
+            or line.suggested_lab_group_id != current_user.lab_group_id
+        ):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 "This review item is not in your assigned lab group.",
@@ -381,9 +411,11 @@ def get_queue_item(
     # Resolve current display names.
     lab_groups = db.query(LabGroup).order_by(LabGroup.lab_group_name).all()
     labs = db.query(Lab).order_by(Lab.lab_name).all()
-    categories = db.query(SpendingCategory).order_by(SpendingCategory.category_name).all()
+    categories = (
+        db.query(SpendingCategory).order_by(SpendingCategory.category_name).all()
+    )
     lg_name_by_id = {g.lab_group_id: g.lab_group_name for g in lab_groups}
-    lab_name_by_id = {l.lab_id: l.lab_name for l in labs}
+    lab_name_by_id = {lab.lab_id: lab.lab_name for lab in labs}
     cat_name_by_id = {c.category_id: c.category_name for c in categories}
 
     current_lab_group = lg_name_by_id.get(line.suggested_lab_group_id, "General")
@@ -448,12 +480,12 @@ def get_queue_item(
         ],
         available_labs=[
             LabOption(
-                lab_id=l.lab_id,
-                lab_name=l.lab_name,
-                lab_group_id=l.lab_group_id,
-                is_general=bool(l.is_general),
+                lab_id=lab.lab_id,
+                lab_name=lab.lab_name,
+                lab_group_id=lab.lab_group_id,
+                is_general=bool(lab.is_general),
             )
-            for l in labs
+            for lab in labs
         ],
         available_categories=[
             CategoryOption(category_id=c.category_id, category_name=c.category_name)
@@ -483,7 +515,10 @@ def correct_queue_item(
     """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only Admin or Team Lead can resolve review items.")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Only Admin or Team Lead can resolve review items.",
+        )
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
@@ -498,27 +533,42 @@ def correct_queue_item(
 
     # Team Lead scoping: must own the item's current lab_group.
     if role_name == "teamlead":
-        if current_user.lab_group_id is None or line.suggested_lab_group_id != current_user.lab_group_id:
+        if (
+            current_user.lab_group_id is None
+            or line.suggested_lab_group_id != current_user.lab_group_id
+        ):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
                 "This review item is not in your assigned lab group.",
             )
 
     # Validate FKs exist + lab belongs to chosen group.
-    lab_group = db.query(LabGroup).filter(LabGroup.lab_group_id == body.lab_group_id).first()
+    lab_group = (
+        db.query(LabGroup).filter(LabGroup.lab_group_id == body.lab_group_id).first()
+    )
     if not lab_group:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown lab_group_id={body.lab_group_id}.")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown lab_group_id={body.lab_group_id}."
+        )
     lab = db.query(Lab).filter(Lab.lab_id == body.lab_id).first()
     if not lab:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown lab_id={body.lab_id}.")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown lab_id={body.lab_id}."
+        )
     if lab.lab_group_id != body.lab_group_id:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             f"Lab '{lab.lab_name}' does not belong to lab_group '{lab_group.lab_group_name}'.",
         )
-    category = db.query(SpendingCategory).filter(SpendingCategory.category_id == body.category_id).first()
+    category = (
+        db.query(SpendingCategory)
+        .filter(SpendingCategory.category_id == body.category_id)
+        .first()
+    )
     if not category:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown category_id={body.category_id}.")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown category_id={body.category_id}."
+        )
 
     # Snapshot old values for audit before mutating.
     old_values = {
@@ -575,8 +625,14 @@ def correct_queue_item(
     # 5. If this was the last open item in the batch, mark batch ready_to_commit.
     remaining_open = (
         db.query(func.count(ReviewQueueItem.review_queue_id))
-        .join(StagingPRLine, StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id)
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
+        )
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .filter(StagingPRHeader.batch_id == batch.batch_id)
         .filter(ReviewQueueItem.queue_status == "open")
         .scalar()
@@ -620,7 +676,9 @@ def commit_batch(
     """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only Admin or Team Lead can commit a batch.")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, "Only Admin or Team Lead can commit a batch."
+        )
 
     batch = db.query(UploadBatch).filter(UploadBatch.batch_id == batch_id).first()
     if not batch:
@@ -628,13 +686,21 @@ def commit_batch(
 
     # Block re-commits.
     if batch.upload_status == "committed":
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Batch {batch_id} is already committed.")
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"Batch {batch_id} is already committed."
+        )
 
     # Block if any open queue items remain.
     open_count = (
         db.query(func.count(ReviewQueueItem.review_queue_id))
-        .join(StagingPRLine, StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id)
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
+        )
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .filter(StagingPRHeader.batch_id == batch_id)
         .filter(ReviewQueueItem.queue_status == "open")
         .scalar()
@@ -649,10 +715,15 @@ def commit_batch(
     # Team Lead scope: must own at least one line in this batch.
     if role_name == "teamlead":
         if current_user.lab_group_id is None:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Team Lead is not assigned to a lab group.")
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Team Lead is not assigned to a lab group."
+            )
         owns_any = (
             db.query(StagingPRLine.staging_line_id)
-            .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+            .join(
+                StagingPRHeader,
+                StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+            )
             .filter(StagingPRHeader.batch_id == batch_id)
             .filter(StagingPRLine.suggested_lab_group_id == current_user.lab_group_id)
             .first()
@@ -734,7 +805,9 @@ def commit_batch(
                     "requestor_name": pr.requestor_name,
                     "wbs_code": pr.wbs_code,
                     "lab_group_id": pr.lab_group_id,
-                    "grand_total_sgd": str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else None,
+                    "grand_total_sgd": str(pr.grand_total_sgd)
+                    if pr.grand_total_sgd is not None
+                    else None,
                     "line_count": len(lines),
                 },
                 changed_by=current_user.user_id,
@@ -779,8 +852,14 @@ def _load_queue_item_or_404(db: Session, review_queue_id: int):
     """Fetch a queue item joined with line / header / batch, or raise 404."""
     row = (
         db.query(ReviewQueueItem, StagingPRLine, StagingPRHeader, UploadBatch)
-        .join(StagingPRLine, StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id)
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
+        )
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .join(UploadBatch, UploadBatch.batch_id == StagingPRHeader.batch_id)
         .filter(ReviewQueueItem.review_queue_id == review_queue_id)
         .first()
@@ -808,7 +887,10 @@ def _build_summary(
     # Total parsed lines in this batch (not role-filtered — count what was uploaded).
     total_lines = (
         db.query(func.count(StagingPRLine.staging_line_id))
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .filter(StagingPRHeader.batch_id == batch.batch_id)
         .scalar()
         or 0
@@ -817,8 +899,14 @@ def _build_summary(
     # Open queue items in this batch — Team Lead only sees their own group's items.
     open_count_query = (
         db.query(func.count(ReviewQueueItem.review_queue_id))
-        .join(StagingPRLine, StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id)
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
+        )
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .filter(StagingPRHeader.batch_id == batch.batch_id)
         .filter(ReviewQueueItem.queue_status == "open")
     )

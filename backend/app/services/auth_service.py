@@ -69,7 +69,9 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "role_id": user.role_id,
                 "lab_group_id": user.lab_group_id,
-                "lab_group_name": user.lab_group.lab_group_name if user.lab_group else None,
+                "lab_group_name": user.lab_group.lab_group_name
+                if user.lab_group
+                else None,
                 "lab_group_code": user.lab_group.wbs_code if user.lab_group else None,
                 "lab_id": user.lab_id,
                 "lab_name": user.lab.lab_name if user.lab else None,
@@ -153,9 +155,9 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "lab_group_id": user.lab_group_id,
                 "lab_id": user.lab_id,
-                "assignedLabs": [user.lab.lab_code] if user.lab else (
-                    [user.lab_group.wbs_code] if user.lab_group else []
-                ),
+                "assignedLabs": [user.lab.lab_code]
+                if user.lab
+                else ([user.lab_group.wbs_code] if user.lab_group else []),
             },
         }
 
@@ -202,53 +204,51 @@ class AuthService:
             "role": user.role.role_name if user.role else None,
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
-            "assignedLabs": [user.lab.lab_code] if user.lab else (
-                [user.lab_group.wbs_code] if user.lab_group else []
-            ),
+            "assignedLabs": [user.lab.lab_code]
+            if user.lab
+            else ([user.lab_group.wbs_code] if user.lab_group else []),
         }
 
     def update_user_profile(
-        self, 
-        user_id: int, 
-        full_name: Optional[str] = None, 
-        current_password: Optional[str] = None, 
-        new_password: Optional[str] = None
+        self,
+        user_id: int,
+        full_name: Optional[str] = None,
+        current_password: Optional[str] = None,
+        new_password: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Updates the current user's profile details with secure password validation."""
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
-            
+
         if full_name:
             user.full_name = full_name
-            
+
         # --- NEW SECURITY LOGIC ---
         if new_password:
             # 1. Ensure they provided the current password
             if not current_password:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Current password is required to set a new password."
+                    detail="Current password is required to set a new password.",
                 )
-            
+
             # 2. Verify the current password matches the database
             if not self._verify_password(current_password, user.password_hash):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Incorrect current password."
+                    detail="Incorrect current password.",
                 )
-                
+
             # 3. Hash and save the new password
             user.password_hash = self._hash_password(new_password)
-            
+
         self.db.commit()
         self.db.refresh(user)
-        
-        return {"success": True, "message": "Profile updated successfully"}
 
+        return {"success": True, "message": "Profile updated successfully"}
 
     def create_user(
         self,
