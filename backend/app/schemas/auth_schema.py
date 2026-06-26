@@ -78,6 +78,7 @@ class RoleResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = None
     current_password: Optional[str] = None
@@ -94,3 +95,4 @@ class AssignLabGroupSchema(BaseModel):
     lab_group_id: int
     class Config:
         from_attributes = True
+

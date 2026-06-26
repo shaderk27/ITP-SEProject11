@@ -5,6 +5,7 @@ Read-only view of committed purchase requests (the official historical
 record). Foundation for W9-02's 'Historical retrieval test' requirement
 and a stepping stone for W11-03 reporting work.
 """
+
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -88,8 +89,10 @@ def list_committed_prs(
         return []
 
     # Pre-fetch all lab/category/group names so we don't N+1.
-    lab_names = {l.lab_id: l.lab_name for l in db.query(Lab).all()}
-    cat_names = {c.category_id: c.category_name for c in db.query(SpendingCategory).all()}
+    lab_names = {lab.lab_id: lab.lab_name for lab in db.query(Lab).all()}
+    cat_names = {
+        c.category_id: c.category_name for c in db.query(SpendingCategory).all()
+    }
     group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
 
     pr_ids = [pr.pr_id for pr in prs]
@@ -110,7 +113,9 @@ def list_committed_prs(
             requestor_name=pr.requestor_name or "",
             purpose=pr.purpose or "",
             wbs_code=pr.wbs_code or "",
-            grand_total_sgd=str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else "0",
+            grand_total_sgd=str(pr.grand_total_sgd)
+            if pr.grand_total_sgd is not None
+            else "0",
             lab_group_name=group_names.get(pr.lab_group_id, "General"),
             latest_batch_id=pr.latest_batch_id,
             updated_at=pr.updated_at,
@@ -121,8 +126,12 @@ def list_committed_prs(
                     line_no=line.line_no,
                     item_description=line.item_description or "",
                     qty=str(line.qty) if line.qty is not None else None,
-                    unit_rate=str(line.unit_rate) if line.unit_rate is not None else None,
-                    amount_gst=str(line.amount_gst) if line.amount_gst is not None else "0",
+                    unit_rate=str(line.unit_rate)
+                    if line.unit_rate is not None
+                    else None,
+                    amount_gst=str(line.amount_gst)
+                    if line.amount_gst is not None
+                    else "0",
                     currency_code=line.currency_code or "SGD",
                     lab_name=lab_names.get(line.lab_id, "General"),
                     category_name=cat_names.get(line.category_id, "General"),

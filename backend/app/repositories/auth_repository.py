@@ -16,7 +16,9 @@ class AuthRepository:
     def get_user_by_id(self, db: Session, user_id: int) -> Optional[User]:
         return db.execute(
             select(User)
-            .options(joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+            )
             .where(User.user_id == user_id)
         ).scalar_one_or_none()
 
@@ -80,7 +82,9 @@ class AuthRepository:
         """Retrieve all users with role and scope relationships."""
         return (
             db.query(User)
-            .options(joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+            )
             .order_by(User.user_id)
             .all()
         )

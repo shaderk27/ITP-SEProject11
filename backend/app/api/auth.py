@@ -4,7 +4,14 @@ from fastapi import APIRouter, Depends, Query, Response, Cookie, HTTPException, 
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.auth_schema import AssignLabGroupSchema, AssignLabSchema, LoginRequest, CreateUserRequest, RoleResponse, UpdateProfileRequest
+from app.schemas.auth_schema import (
+    LoginRequest,
+    CreateUserRequest,
+    RoleResponse,
+    UpdateProfileRequest,
+    AssignLabGroupSchema,
+    AssignLabSchema,
+)
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
 
@@ -44,6 +51,7 @@ async def me(
 ):
     return service.get_current_user(access_token)
 
+
 @router.put("/me")
 async def update_me(
     payload: UpdateProfileRequest,
@@ -52,13 +60,14 @@ async def update_me(
 ):
     current_user = service.get_current_user(access_token)
     user_id = current_user.get("id")
-    
+
     return service.update_user_profile(
-        user_id=user_id, 
-        full_name=payload.full_name, 
+        user_id=user_id,
+        full_name=payload.full_name,
         current_password=payload.current_password,
-        new_password=payload.new_password
+        new_password=payload.new_password,
     )
+
 
 @router.post("/logout")
 async def logout(response: Response):
