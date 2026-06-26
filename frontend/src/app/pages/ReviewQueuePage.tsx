@@ -35,7 +35,7 @@ export function ReviewQueuePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listReviewBatches(user);
+      const data = await listReviewBatches();
       setBatches(data);
       // Reset detail cache when batch list refreshes; otherwise stale data lingers.
       setDetails({});
@@ -62,7 +62,7 @@ export function ReviewQueuePage() {
     if (expandedBatch === null) return;
     if (details[expandedBatch]) return;
     setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "loading" } }));
-    getBatchDetail(expandedBatch, user)
+    getBatchDetail(expandedBatch)
       .then((data) => {
         setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "ready", data } }));
         // Auto-expand the first PR for convenience.
@@ -94,7 +94,7 @@ export function ReviewQueuePage() {
     setCommittingBatch(batch.batch_id);
     setCommitSuccess(null);
     try {
-      const result = await commitBatch(batch.batch_id, user);
+      const result = await commitBatch(batch.batch_id);
       const parts: string[] = [];
       if (result.prs_created > 0) {
         parts.push(`${result.prs_created} new PR${result.prs_created === 1 ? "" : "s"}`);

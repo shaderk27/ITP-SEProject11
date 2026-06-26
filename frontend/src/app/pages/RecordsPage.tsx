@@ -24,7 +24,7 @@ export function RecordsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listCommittedPRs(user);
+      const data = await listCommittedPRs();
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
         setExpandedPr(data[0].pr_id);

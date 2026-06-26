@@ -43,7 +43,7 @@ export function ReviewDetailsPage() {
     }
     setLoading(true);
     setError(null);
-    getQueueItem(queueId, user)
+    getQueueItem(queueId)
       .then((data) => {
         setItem(data);
         setLabGroupId(data.suggested_lab_group_id);
@@ -89,16 +89,12 @@ export function ReviewDetailsPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      const result = await saveCorrection(
-        queueId,
-        {
-          lab_group_id: labGroupId,
-          lab_id: labId,
-          category_id: categoryId,
-          comment: comment.trim() || undefined,
-        },
-        user,
-      );
+      const result = await saveCorrection(queueId, {
+        lab_group_id: labGroupId,
+        lab_id: labId,
+        category_id: categoryId,
+        comment: comment.trim() || undefined,
+      });
       // On success, head back to the queue with a friendly toast-like signal.
       navigate(`/review?resolved=${result.review_queue_id}`);
     } catch (err) {
