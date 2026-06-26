@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, Response, Cookie, HTTPException, 
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.auth_schema import AssignLabGroupSchema, AssignLabSchema, LabICOut, LoginRequest, CreateUserRequest, RoleResponse, UpdateProfileRequest
+from app.schemas.auth_schema import AssignLabGroupSchema, AssignLabSchema, LoginRequest, CreateUserRequest, RoleResponse, UpdateProfileRequest
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
 

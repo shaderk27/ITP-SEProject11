@@ -13,7 +13,6 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 from pydantic import BaseModel
-from typing import List, Optional
 
 # --- SQLALCHEMY DATABASE MODELS ---
 
