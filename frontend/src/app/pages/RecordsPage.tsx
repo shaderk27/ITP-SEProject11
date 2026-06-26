@@ -18,6 +18,7 @@ export function RecordsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchRecords = async () => {
     setLoading(true);
@@ -54,10 +55,26 @@ export function RecordsPage() {
     new Set(records.map((r) => r.lab_group_name)),
   ).map((name) => ({ value: name.toLowerCase(), label: name }));
 
+  const q = searchQuery.trim().toLowerCase();
+  const filteredRecords = q
+    ? records.filter((pr) => {
+        if (pr.source_pr_number?.toLowerCase().includes(q)) return true;
+        if (pr.requestor_name?.toLowerCase().includes(q)) return true;
+        if (pr.wbs_code?.toLowerCase().includes(q)) return true;
+        if (pr.lab_group_name?.toLowerCase().includes(q)) return true;
+        return pr.lines.some(
+          (line) =>
+            line.item_description?.toLowerCase().includes(q) ||
+            line.lab_name?.toLowerCase().includes(q),
+        );
+      })
+    : records;
+
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       <FilterBar
         searchPlaceholder="Search PR, requestor, WBS, item details..."
+        onSearchChange={setSearchQuery}
         filters={[
           {
             label: "Lab Group",
@@ -84,7 +101,9 @@ export function RecordsPage() {
             <p className="text-sm text-muted-foreground mt-1">
               {loading
                 ? "Loading…"
-                : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
+                : q
+                  ? `${filteredRecords.length} of ${records.length} committed purchase request${records.length === 1 ? "" : "s"} match "${searchQuery.trim()}".`
+                  : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
             </p>
           </div>
           <Button size="sm" variant="outline" onClick={fetchRecords} disabled={loading}>
@@ -107,8 +126,16 @@ export function RecordsPage() {
           </Card>
         )}
 
+        {!loading && !error && records.length > 0 && filteredRecords.length === 0 && (
+          <Card className="p-8 text-center text-muted-foreground">
+            <p className="text-sm">
+              No PRs match "{searchQuery.trim()}". Try a different search term.
+            </p>
+          </Card>
+        )}
+
         <div className="space-y-4">
-          {records.map((pr) => {
+          {filteredRecords.map((pr) => {
             const isExpanded = expandedPr === pr.pr_id;
             return (
               <Card key={pr.pr_id} className="bg-white border-border overflow-hidden">
