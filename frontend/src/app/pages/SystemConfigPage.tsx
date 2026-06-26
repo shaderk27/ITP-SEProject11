@@ -55,9 +55,7 @@ export function SystemConfigPage() {
       setCategories(await catsRes.json());
       setOrphanedLabs(await orphanedRes.json());
       setLabicUsers(await labicRes.json());
-      const teamleadData = await teamleadRes.json();
-      console.log("teamleadData", teamleadData);
-      setTeamleadUsers(Array.isArray(teamleadData) ? teamleadData : []);
+      setTeamleadUsers(await teamleadRes.json());
     } catch (err) {
       console.error(err);
     } finally {
@@ -277,7 +275,7 @@ export function SystemConfigPage() {
                           </tr>
                           
                           {/* THE EXPANDING NESTED LABS TABLE */}
-                          {isExpanded && (
+                                                    {isExpanded && (
                             <tr className="bg-gray-50 border-b border-border shadow-inner">
                               <td colSpan={7} className="p-0">
                                 <div className="p-4 pl-16 pr-8">
@@ -294,24 +292,47 @@ export function SystemConfigPage() {
                                         <tr className="text-xs font-semibold text-gray-500">
                                           <th className="text-left p-3">Lab Code</th>
                                           <th className="text-left p-3">Lab Name</th>
+                                          <th className="text-left p-3">Lab IC</th>
                                           <th className="text-right p-3">Allocated Budget</th>
                                           <th className="text-right p-3 text-[#16a34a]">Available</th>
                                           <th className="text-center p-3">Actions</th>
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {groupLabs.map(lab => (
-                                          <tr key={lab.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                                            <td className="p-3 text-sm font-medium text-[#1e3a8a]">{lab.code}</td>
-                                            <td className="p-3 text-sm text-gray-700">{lab.name}</td>
-                                            <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                            <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                            <td className="p-3 text-center flex justify-center gap-2">
-                                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-400 hover:text-gray-700" /></Button>
-                                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleUnassignLab(lab.id, lab.name)}><X className="h-3 w-3 text-red-400 hover:text-red-700" /></Button>
-                                            </td>
-                                          </tr>
-                                        ))}
+                                        {groupLabs.map(lab => {
+                                          const labic = labicUsers.find(u => u.lab_id === lab.id);
+                                          return (
+                                            <tr key={lab.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
+                                              <td className="p-3 text-sm font-medium text-[#1e3a8a]">{lab.code}</td>
+                                              <td className="p-3 text-sm text-gray-700">{lab.name}</td>
+                                              <td className="p-3 text-sm">
+                                                {labic ? (
+                                                  <button
+                                                    onClick={() => openAssignLabICModal(lab)}
+                                                    className="text-left hover:opacity-70 transition-opacity"
+                                                    title="Click to reassign"
+                                                  >
+                                                    <p className="font-medium text-gray-800">{labic.full_name}</p>
+                                                    <p className="text-xs text-gray-400">{labic.email}</p>
+                                                  </button>
+                                                ) : (
+                                                  <button
+                                                    onClick={() => openAssignLabICModal(lab)}
+                                                    className="text-xs text-[#1e3a8a] underline hover:text-[#1e40af]"
+                                                  >
+                                                    + Assign Lab IC
+                                                  </button>
+                                                )}
+                                              </td>
+                                              <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                              <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                              <td className="p-3 text-center flex justify-center gap-2">
+                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-400 hover:text-gray-700" /></Button>
+                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleUnassignLab(lab.id, lab.name)}><X className="h-3 w-3 text-red-400 hover:text-red-700" /></Button>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
                                       </tbody>
                                     </table>
                                   )}
