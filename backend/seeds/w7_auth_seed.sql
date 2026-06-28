@@ -52,7 +52,10 @@ OVERRIDING SYSTEM VALUE
 VALUES
     (1, 1, 'Development Admin', 'admin@example.com', 'DEV-ADMIN', 'placeholder_no_auth_yet', NULL, NULL),
     (2, 2, 'Development Team Lead', 'teamlead.fcb@example.com', 'DEV-TL-FCB', 'placeholder_no_auth_yet', 1, NULL),
-    (3, 3, 'Development Lab IC', 'labic.fcb@example.com', 'DEV-LIC-FCB', 'placeholder_no_auth_yet', NULL, 1)
+    (3, 3, 'Development Lab IC', 'labic.fcb@example.com', 'DEV-LIC-FCB', 'placeholder_no_auth_yet', NULL, 1),
+    (4, 3, 'ICT Lab IC', 'labic.ict@example.com', 'DEV-LIC-ICT', 'placeholder_no_auth_yet', NULL, 3),
+    (5, 3, 'NONE Lab IC', 'labic.non@example.com', 'DEV-LIC-NON', 'placeholder_no_auth_yet', NULL, NULL),
+	(6, 2, 'NONE Team Lead', 'teamlead.non@example.com', 'DEV-TL-NON', 'placeholder_no_auth_yet', NULL, NULL)
 ON CONFLICT (user_id) DO UPDATE
 SET
     role_id = EXCLUDED.role_id,

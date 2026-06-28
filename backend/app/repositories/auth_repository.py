@@ -1,4 +1,4 @@
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 from app.models.auth import User, Role
@@ -86,6 +86,15 @@ class AuthRepository:
                 joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
             )
             .order_by(User.user_id)
+            .all()
+        )
+    def get_users_by_role_id(
+        self, db: Session, role_id: int
+    ) -> List[User]:
+        """Fetch all users assigned to a given role."""
+        return (
+            db.query(User)
+            .filter(User.role_id == role_id)
             .all()
         )
 

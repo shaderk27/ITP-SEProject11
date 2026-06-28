@@ -356,3 +356,76 @@ class AuthService:
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
         }
+    def get_labic_by_lab(self, lab_id: int) -> Optional[Dict[str, Any]]:
+        """Return the Lab IC user assigned to a given lab, or None if unassigned."""
+        labic_role = self.repository.get_role_by_name(self.db, "labic")
+        if not labic_role:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Role 'labic' not found.",
+            )
+
+        user = self.repository.get_user_by_role_and_lab(self.db, labic_role.role_id, lab_id)
+        if not user:
+            return None
+
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "staff_id": user.staff_id,
+            "lab_id": user.lab_id,
+        }
+        
+    def get_users_by_role(self, role: str) -> List[Dict[str, Any]]:
+        role_record = self.repository.get_role_by_name(self.db, role)
+        if not role_record:
+            raise HTTPException(status_code=404, detail=f"Role '{role}' not found.")
+        
+        users = self.repository.get_users_by_role_id(self.db, role_record.role_id)
+        return [
+            {
+                "user_id": u.user_id,
+                "full_name": u.full_name,
+                "email": u.email,
+                "lab_group_id": u.lab_group_id,
+                "lab_id": u.lab_id,
+            }
+            for u in users
+        ]
+    def assign_lab_to_user(self, user_id: int, lab_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if user.role.role_name != "labic":
+            raise HTTPException(status_code=400, detail="Only labic users can be assigned to a lab.")
+        
+        user.lab_id = lab_id
+        user.lab_group_id = None  # enforce mutual exclusion constraint
+        self.db.commit()
+        self.db.refresh(user)
+        
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "lab_id": user.lab_id,
+        }
+    def assign_labgroup_to_user(self, user_id: int, lab_group_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if user.role.role_name != "teamlead":
+            raise HTTPException(status_code=400, detail="Only labic users can be assigned to a lab.")
+        
+        user.lab_group_id = lab_group_id
+        user.lab_id = None  # enforce mutual exclusion constraint
+        self.db.commit()
+        self.db.refresh(user)
+        
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "lab_group_id": user.lab_group_id,
+        }

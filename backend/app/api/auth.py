@@ -1,6 +1,6 @@
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Response, Cookie, HTTPException, status
+from fastapi import APIRouter, Depends, Query, Response, Cookie, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,6 +9,8 @@ from app.schemas.auth_schema import (
     CreateUserRequest,
     RoleResponse,
     UpdateProfileRequest,
+    AssignLabGroupSchema,
+    AssignLabSchema,
 )
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
@@ -95,11 +97,20 @@ async def get_all_roles(service: AuthService = Depends(get_auth_service)):
     return service.get_all_roles()
 
 
+# @router.get("/users")
+# async def get_all_users(
+#     service: AuthService = Depends(get_auth_service),
+#     _admin: dict = Depends(require_admin),
+# ):
+#     return service.get_all_users()
 @router.get("/users")
 async def get_all_users(
+    role: Optional[str] = Query(None),
     service: AuthService = Depends(get_auth_service),
     _admin: dict = Depends(require_admin),
 ):
+    if role:
+        return service.get_users_by_role(role)
     return service.get_all_users()
 
 
@@ -109,3 +120,20 @@ async def get_assignments(
     _admin: dict = Depends(require_admin),
 ):
     return service.get_assignments()
+@router.put("/users/{user_id}/assign-lab")
+async def assign_lab_ic(
+    user_id: int,
+    payload: AssignLabSchema,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.assign_lab_to_user(user_id, payload.lab_id)
+
+@router.put("/users/{user_id}/assign-labgroup")
+async def assign_team_ic(
+    user_id: int,
+    payload: AssignLabGroupSchema,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.assign_labgroup_to_user(user_id, payload.lab_group_id)

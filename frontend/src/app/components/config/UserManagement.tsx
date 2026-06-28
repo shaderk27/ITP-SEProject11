@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus, Edit, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
@@ -135,9 +135,6 @@ export function UserManagement() {
                 </td>
                 <td className="p-4 text-center">
                   <div className="flex items-center justify-center gap-2">
-                    <Button size="sm" variant="outline" disabled title="Edit user is pending backend update support">
-                      <Edit className="h-3 w-3" />
-                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
