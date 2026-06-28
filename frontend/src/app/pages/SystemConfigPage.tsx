@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
-import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker } from "lucide-react";
+import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker, Mail, UserRound, CheckCircle2, UserPlus } from "lucide-react";
 import { UserManagement } from "../components/config/UserManagement";
 
 export function SystemConfigPage() {
@@ -47,8 +47,12 @@ export function SystemConfigPage() {
         fetch(`${API_BASE_URL}/api/config/labs`),
         fetch(`${API_BASE_URL}/api/config/categories`),
         fetch(`${API_BASE_URL}/api/config/labs/orphaned`),
-        fetch(`${API_BASE_URL}/api/auth/users?role=labic`),
-        fetch(`${API_BASE_URL}/api/auth/users?role=teamlead`),
+        fetch(`${API_BASE_URL}/api/auth/users?role=labic`, {
+          credentials: "include",
+        }),
+        fetch(`${API_BASE_URL}/api/auth/users?role=teamlead`, {
+          credentials: "include",
+        }),
       ]);
       setLabGroups(await groupsRes.json());
       setLabs(await labsRes.json());
@@ -148,14 +152,24 @@ export function SystemConfigPage() {
   const handleAssignLabIC = async () => {
     if (!assignTargetLab || selectedLabICUserId === "") return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/users/${selectedLabICUserId}/assign-lab`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lab_id: assignTargetLab.id }),
-      });
-      if (res.ok) { resetAssignLabICModal(); fetchConfigData(); }
-      else console.error("Failed to assign Lab IC");
-    } catch (error) { console.error(error); }
+      const res = await fetch(
+        `${API_BASE_URL}/api/auth/users/${selectedLabICUserId}/assign-lab`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ lab_id: assignTargetLab.id }),
+        }
+      );
+      if (res.ok) {
+        resetAssignLabICModal();
+        fetchConfigData();
+      } else {
+        alert(await readErrorDetail(res, "Failed to assign Lab IC."));
+      }
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const openAssignTeamLeadModal = (group: any) => {
@@ -174,14 +188,33 @@ export function SystemConfigPage() {
   const handleAssignTeamLead = async () => {
     if (!assignTargetGroup || selectedTeamLeadUserId === "") return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/users/${selectedTeamLeadUserId}/assign-labgroup`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lab_group_id: assignTargetGroup.id }),
-      });
-      if (res.ok) { resetAssignTeamLeadModal(); fetchConfigData(); }
-      else console.error("Failed to assign Team Lead");
-    } catch (error) { console.error(error); }
+      const res = await fetch(
+        `${API_BASE_URL}/api/auth/users/${selectedTeamLeadUserId}/assign-labgroup`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ lab_group_id: assignTargetGroup.id }),
+        }
+      );
+      if (res.ok) {
+        resetAssignTeamLeadModal();
+        fetchConfigData();
+      } else {
+        alert(await readErrorDetail(res, "Failed to assign Team Lead."));
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const readErrorDetail = async (res: Response, fallback: string) => {
+    try {
+      const body = await res.json();
+      return typeof body?.detail === "string" ? body.detail : fallback;
+    } catch {
+      return fallback;
+    }
   };
 
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading system configuration...</div>;
@@ -253,12 +286,15 @@ export function SystemConfigPage() {
                                   <p className="text-xs text-muted-foreground">{teamlead.email}</p>
                                 </button>
                               ) : (
-                                <button
+                                <Button
+                                  size="sm"
+                                  variant="outline"
                                   onClick={() => openAssignTeamLeadModal(group)}
-                                  className="text-xs text-[#1e3a8a] underline hover:text-[#1e40af]"
+                                  className="h-8 px-2.5 border-[#1e3a8a]/30 text-[#1e3a8a] hover:bg-[#eff6ff] hover:text-[#1e40af]"
                                 >
-                                  + Assign Team Lead
-                                </button>
+                                  <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+                                  Assign Team Lead
+                                </Button>
                               )}
                             </td>
                             <td className="p-4 text-sm text-right text-gray-600">
@@ -317,12 +353,15 @@ export function SystemConfigPage() {
                                                     <p className="text-xs text-gray-400">{labic.email}</p>
                                                   </button>
                                                 ) : (
-                                                  <button
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
                                                     onClick={() => openAssignLabICModal(lab)}
-                                                    className="text-xs text-[#1e3a8a] underline hover:text-[#1e40af]"
+                                                    className="h-8 px-2.5 border-[#1e3a8a]/30 text-[#1e3a8a] hover:bg-[#eff6ff] hover:text-[#1e40af]"
                                                   >
-                                                    + Assign Lab IC
-                                                  </button>
+                                                    <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+                                                    Assign Lab IC
+                                                  </Button>
                                                 )}
                                               </td>
                                               <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -394,12 +433,15 @@ export function SystemConfigPage() {
                                 <p className="text-xs text-muted-foreground">{labic.email}</p>
                               </button>
                             ) : (
-                              <button
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => openAssignLabICModal(lab)}
-                                className="text-xs text-[#1e3a8a] underline hover:text-[#1e40af]"
+                                className="h-8 px-2.5 border-[#1e3a8a]/30 text-[#1e3a8a] hover:bg-[#eff6ff] hover:text-[#1e40af]"
                               >
-                                + Assign Lab IC
-                              </button>
+                                <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+                                Assign Lab IC
+                              </Button>
                             )}
                           </td>
                           <td className="p-4 text-sm text-right text-gray-600">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
@@ -456,7 +498,7 @@ export function SystemConfigPage() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="users"><UserManagement /></TabsContent>
+          <TabsContent value="users"><UserManagement onUsersChanged={fetchConfigData} /></TabsContent>
         </Tabs>
       </div>
 
@@ -465,8 +507,8 @@ export function SystemConfigPage() {
       {/* LAB GROUP MODAL */}
       {isGroupModalOpen && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md bg-white p-6 shadow-xl">
-            <div className="flex justify-between items-center mb-4">
+          <Card className="w-full max-w-xl bg-white shadow-xl overflow-hidden">
+            <div className="flex justify-between items-start gap-4 p-6 border-b border-border bg-[#f8f9fa]">
               <h3 className="text-lg font-bold">{editingGroupId ? "Edit Lab Group" : "Add New Lab Group"}</h3>
               <Button variant="ghost" size="sm" onClick={resetGroupModal}><X className="h-4 w-4" /></Button>
             </div>
@@ -518,8 +560,8 @@ export function SystemConfigPage() {
       {/* CATEGORY MODAL */}
       {isCategoryModalOpen && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md bg-white p-6 shadow-xl">
-            <div className="flex justify-between items-center mb-4">
+          <Card className="w-full max-w-xl bg-white shadow-xl overflow-hidden">
+            <div className="flex justify-between items-start gap-4 p-6 border-b border-border bg-[#f8f9fa]">
               <h3 className="text-lg font-bold">{editingCategoryId ? "Edit Category" : "Add Spending Category"}</h3>
               <Button variant="ghost" size="sm" onClick={resetCategoryModal}><X className="h-4 w-4" /></Button>
             </div>
@@ -600,17 +642,20 @@ export function SystemConfigPage() {
           <Card className="w-full max-w-md bg-white p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <div>
-                <h3 className="text-lg font-bold">Assign Lab IC</h3>
+                <h3 className="text-lg font-semibold text-foreground">Assign Lab IC</h3>
                 <p className="text-sm text-muted-foreground mt-0.5">{assignTargetLab.code} — {assignTargetLab.name}</p>
               </div>
               <Button variant="ghost" size="sm" onClick={resetAssignLabICModal}><X className="h-4 w-4" /></Button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700">Select Lab IC</label>
+            <div className="p-6 space-y-5">
+              <div className="rounded-md border border-border bg-white p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <UserRound className="h-4 w-4 text-[#1e3a8a]" />
+                  <label className="text-sm font-medium text-foreground">Available Lab IC users</label>
+                </div>
                 <select
-                  className="w-full mt-1 p-2 border rounded-md bg-white text-sm"
+                  className="w-full rounded-md border border-input bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/20"
                   value={selectedLabICUserId}
                   onChange={(e) => setSelectedLabICUserId(e.target.value === "" ? "" : Number(e.target.value))}
                 >
@@ -631,9 +676,25 @@ export function SystemConfigPage() {
                 <p className="text-xs text-muted-foreground mt-1">
                   Only unassigned Lab IC users are shown. To reassign from another lab, unassign them first via User Management.
                 </p>
+                {selectedLabICUserId !== "" && (
+                  <div className="mt-3 rounded-md border border-[#1e3a8a]/20 bg-[#eff6ff] p-3 text-sm">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-[#1e3a8a]" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground">
+                          {labicUsers.find(u => u.user_id === selectedLabICUserId)?.full_name}
+                        </p>
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Mail className="h-3.5 w-3.5" />
+                          {labicUsers.find(u => u.user_id === selectedLabICUserId)?.email}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t">
+              <div className="flex justify-end gap-2 pt-5 border-t">
                 <Button variant="outline" onClick={resetAssignLabICModal}>Cancel</Button>
                 <Button
                   onClick={handleAssignLabIC}
@@ -653,17 +714,20 @@ export function SystemConfigPage() {
           <Card className="w-full max-w-md bg-white p-6 shadow-xl">
             <div className="flex justify-between items-center mb-4">
               <div>
-                <h3 className="text-lg font-bold">Assign Team Lead</h3>
+                <h3 className="text-lg font-semibold text-foreground">Assign Team Lead</h3>
                 <p className="text-sm text-muted-foreground mt-0.5">{assignTargetGroup.name}</p>
               </div>
               <Button variant="ghost" size="sm" onClick={resetAssignTeamLeadModal}><X className="h-4 w-4" /></Button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700">Select Team Lead</label>
+            <div className="p-6 space-y-5">
+              <div className="rounded-md border border-border bg-white p-4">
+                <div className="mb-3 flex items-center gap-2">
+                  <UserRound className="h-4 w-4 text-[#1e3a8a]" />
+                  <label className="text-sm font-medium text-foreground">Available Team Leads</label>
+                </div>
                 <select
-                  className="w-full mt-1 p-2 border rounded-md bg-white text-sm"
+                  className="w-full rounded-md border border-input bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/20"
                   value={selectedTeamLeadUserId}
                   onChange={(e) => setSelectedTeamLeadUserId(e.target.value === "" ? "" : Number(e.target.value))}
                 >
@@ -684,9 +748,25 @@ export function SystemConfigPage() {
                 <p className="text-xs text-muted-foreground mt-1">
                   Only unassigned Team Leads are shown. To reassign from another group, unassign them first via User Management.
                 </p>
+                {selectedTeamLeadUserId !== "" && (
+                  <div className="mt-3 rounded-md border border-[#1e3a8a]/20 bg-[#eff6ff] p-3 text-sm">
+                    <div className="flex items-start gap-2">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 text-[#1e3a8a]" />
+                      <div className="min-w-0">
+                        <p className="font-medium text-foreground">
+                          {teamleadUsers.find(u => u.user_id === selectedTeamLeadUserId)?.full_name}
+                        </p>
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Mail className="h-3.5 w-3.5" />
+                          {teamleadUsers.find(u => u.user_id === selectedTeamLeadUserId)?.email}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="flex justify-end gap-2 pt-4 border-t">
+              <div className="flex justify-end gap-2 pt-5 border-t">
                 <Button variant="outline" onClick={resetAssignTeamLeadModal}>Cancel</Button>
                 <Button
                   onClick={handleAssignTeamLead}
