@@ -330,9 +330,9 @@ export function ReviewDetailsPage() {
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm text-foreground mt-1 whitespace-pre-line">{value || "—"}</p>
+      <p className="text-sm text-foreground mt-1 whitespace-pre-line break-words">{value || "—"}</p>
     </div>
   );
 }

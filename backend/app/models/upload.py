@@ -42,6 +42,9 @@ class PRLineItem:
     pr_sub_date: str
     requestor: str
     purpose: str
+    pr_status: str
+    po_number: str
+    po_status: str
     grand_total_sgd: Decimal | None
     item_details: str
     quantity: Decimal | None

@@ -7,6 +7,9 @@ export interface UploadValidationError {
 export interface UploadLineItem {
   row_number: number;
   pr_number: string;
+  pr_status: string;
+  po_number: string;
+  po_status: string;
   pr_sub_date: string;
   requestor: string;
   purpose: string;
