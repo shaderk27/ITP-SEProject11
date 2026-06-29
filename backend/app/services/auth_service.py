@@ -35,6 +35,7 @@ SMTP_HOST = os.getenv("SMTP_HOST", "SMTP_HOST is not set in environment")
 SMTP_USER = os.getenv("SMTP_USER", "SMTP_USER is not set in environment")
 SMTP_PASS = os.getenv("SMTP_PASS", "SMTP_PASS is not set in environment")
 
+
 class AuthService:
     def __init__(self, repository: AuthRepository, db: Session):
         self.repository = repository
@@ -510,7 +511,10 @@ class AuthService:
             "email": user.email,
             "lab_group_id": user.lab_group_id,
         }
-    def _send_temp_password_email(self, email: str, name: str, temp_password: str) -> None:
+
+    def _send_temp_password_email(
+        self, email: str, name: str, temp_password: str
+    ) -> None:
         msg = MIMEText(
             f"Hi {name},\n\n"
             f"Your temporary password is: {temp_password}\n\n"
@@ -525,13 +529,14 @@ class AuthService:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASS)
             server.send_message(msg)
-            
 
     def forgot_password(self, email: str) -> None:
         user = self.repository.get_user_by_email(self.db, email)
         if not user:
             return
-        temp_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
+        temp_password = "".join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(12)
+        )
         hashed = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
         self.repository.invalidate_reset_tokens(self.db, user.user_id)
         self.repository.create_reset_token(self.db, user.user_id, hashed)

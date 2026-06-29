@@ -159,9 +159,12 @@ class AuthRepository:
             }
             for row in rows
         ]
-    #forgot pw stuff
 
-    def get_active_reset_token(self, db: Session, user_id: int) -> Optional[PasswordResetToken]:
+    # forgot pw stuff
+
+    def get_active_reset_token(
+        self, db: Session, user_id: int
+    ) -> Optional[PasswordResetToken]:
         return (
             db.query(PasswordResetToken)
             .filter(
@@ -173,11 +176,13 @@ class AuthRepository:
         )
 
     def invalidate_reset_tokens(self, db: Session, user_id: int) -> None:
-        db.query(PasswordResetToken)\
-            .filter(PasswordResetToken.user_id == user_id, ~PasswordResetToken.used )\
-            .update({"used": True})
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user_id, ~PasswordResetToken.used
+        ).update({"used": True})
 
-    def create_reset_token(self, db: Session, user_id: int, hashed_temp_password: str) -> PasswordResetToken:
+    def create_reset_token(
+        self, db: Session, user_id: int, hashed_temp_password: str
+    ) -> PasswordResetToken:
         token = PasswordResetToken(
             user_id=user_id,
             temp_password=hashed_temp_password,

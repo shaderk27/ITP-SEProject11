@@ -4,6 +4,7 @@ SQLAlchemy models for the `users` and `roles` tables.
 These tables already exist in the DB (created by the initial schema).
 This file just exposes them to the Python side so endpoints can query them.
 """
+
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
