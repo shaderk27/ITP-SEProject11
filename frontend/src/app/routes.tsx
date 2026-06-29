@@ -16,17 +16,17 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { CreateUserPage } from "./pages/CreateUserPage";
 import { AccessDenied } from "./pages/error/AccessDenied";
 import { NotFound } from "./pages/error/NotFound";
-
-// Minimal 403 fallback component for unauthorized users
-
-
-// Minimal 404 fallback component for unknown page
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 
 
 export const router = createBrowserRouter([
   {
     path: "/login",
     Component: LoginPage,
+  },
+  {
+    path: "/forgot-password",
+    Component: ForgotPasswordPage,
   },
   {
     path: "/403",

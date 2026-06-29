@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useLocation } from "react-router";
+import { useNavigate, useLocation, Link } from "react-router";
 import { Card } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -103,9 +103,12 @@ export function LoginPage() {
               />
               <span className="text-muted-foreground">Remember me</span>
             </label>
-            <a href="#" className="text-sm text-[#1e3a8a] hover:underline">
+            <Link
+              to="/forgot-password"
+              className="text-sm text-[#1e3a8a] hover:underline"
+            >
               Forgot password?
-            </a>
+            </Link>
           </div>
 
           <Button

@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+from email.mime.text import MIMEText
+import smtplib
 from typing import List, Optional, Dict, Any
 import os
 
@@ -29,7 +31,9 @@ ALLOWED_EMAIL_DOMAINS = {
     ).split(",")
     if domain.strip()
 }
-
+SMTP_HOST = os.getenv("SMTP_HOST", "SMTP_HOST is not set in environment")
+SMTP_USER = os.getenv("SMTP_USER", "SMTP_USER is not set in environment")
+SMTP_PASS = os.getenv("SMTP_PASS", "SMTP_PASS is not set in environment")
 
 class AuthService:
     def __init__(self, repository: AuthRepository, db: Session):
@@ -506,17 +510,31 @@ class AuthService:
             "email": user.email,
             "lab_group_id": user.lab_group_id,
         }
+    def _send_temp_password_email(self, email: str, name: str, temp_password: str) -> None:
+        msg = MIMEText(
+            f"Hi {name},\n\n"
+            f"Your temporary password is: {temp_password}\n\n"
+            f"It expires in 1 hour. Please log in and change your password immediately.\n\n"
+            f"If you did not request this, please contact your administrator."
+        )
+        msg["Subject"] = "Your Temporary Password"
+        msg["From"] = SMTP_USER
+        msg["To"] = email
+
+        with smtplib.SMTP(SMTP_HOST, 587) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+            
+
     def forgot_password(self, email: str) -> None:
         user = self.repository.get_user_by_email(self.db, email)
         if not user:
             return
-
         temp_password = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(12))
         hashed = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
-
         self.repository.invalidate_reset_tokens(self.db, user.user_id)
         self.repository.create_reset_token(self.db, user.user_id, hashed)
-        #TODO ADD EMAIL SERV
         self._send_temp_password_email(user.email, user.full_name, temp_password)
 
     def unassign_user_scope(self, user_id: int) -> Dict[str, Any]:

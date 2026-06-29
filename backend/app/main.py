@@ -4,6 +4,7 @@ from app.api import config
 from app.api.records import router as records_router
 from app.api.review import router as review_router
 from app.api.upload import router as upload_router
+from app.api.auth import router as auth_router
 
 app = FastAPI(title="Lab Budget Monitoring API")
 
