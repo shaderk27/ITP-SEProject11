@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional, List
-from sqlalchemy import BigInteger, String, Text, DateTime, ForeignKey
+from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -59,6 +59,7 @@ class User(Base):
     lab_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("labs.lab_id"), nullable=True
     )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # Relationships
     role: Mapped["Role"] = relationship("Role", back_populates="users")
