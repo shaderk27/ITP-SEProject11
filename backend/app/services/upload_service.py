@@ -83,16 +83,16 @@ class UploadService:
                         if g_id is not None:
                             group_cache[g_id] = g_name
 
-                for l in all_labs:
+                for lab in all_labs:
                     group_name = "Pending Lab Group"
-                    fk_id = getattr(l, "lab_group_id", None)
+                    fk_id = getattr(lab, "lab_group_id", None)
                     if fk_id is not None and fk_id in group_cache:
                         group_name = group_cache[fk_id]
 
-                    l_id = getattr(l, "lab_id", None)
+                    l_id = getattr(lab, "lab_id", None)
                     if l_id is not None:
                         lab_cache[l_id] = {
-                            "lab_name": getattr(l, "lab_name", "Unknown Lab"),
+                            "lab_name": getattr(lab, "lab_name", "Unknown Lab"),
                             "lab_group_name": group_name
                         }
             except Exception:

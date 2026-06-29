@@ -166,7 +166,7 @@ class AuthRepository:
             db.query(PasswordResetToken)
             .filter(
                 PasswordResetToken.user_id == user_id,
-                PasswordResetToken.used == False,
+                ~PasswordResetToken.used,
                 PasswordResetToken.expires_at > datetime.now(timezone.utc),
             )
             .first()
@@ -174,7 +174,7 @@ class AuthRepository:
 
     def invalidate_reset_tokens(self, db: Session, user_id: int) -> None:
         db.query(PasswordResetToken)\
-            .filter(PasswordResetToken.user_id == user_id, PasswordResetToken.used == False)\
+            .filter(PasswordResetToken.user_id == user_id, ~PasswordResetToken.used )\
             .update({"used": True})
 
     def create_reset_token(self, db: Session, user_id: int, hashed_temp_password: str) -> PasswordResetToken:

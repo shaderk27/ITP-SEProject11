@@ -52,21 +52,6 @@ async def me(
 ):
     return service.get_current_user(access_token)
 
-@router.put("/me")
-async def update_me(
-    payload: UpdateProfileRequest,
-    access_token: str | None = Cookie(None),
-    service: AuthService = Depends(get_auth_service),
-):
-    current_user = service.get_current_user(access_token)
-    user_id = current_user.get("id")
-    
-    return service.update_user_profile(
-        user_id=user_id, 
-        full_name=payload.full_name, 
-        current_password=payload.current_password,
-        new_password=payload.new_password
-    )
 
 @router.put("/me")
 async def update_me(
