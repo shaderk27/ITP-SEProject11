@@ -747,7 +747,9 @@ def commit_batch(
         )
 
     pr_ids: list[int] = []
+    prs_updated = 0
     lines_created = 0
+    lines_updated = 0
 
     for header in headers:
         lines = (
@@ -760,23 +762,61 @@ def commit_batch(
         # (All lines under one PR typically share a group; refine later if not.)
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
 
-        pr = PurchaseRequest(
-            source_pr_number=header.source_pr_number,
-            latest_batch_id=batch.batch_id,
-            requestor_name=header.requestor_name,
-            req_type=header.req_type,
-            request_date=header.pr_sub_date,
-            purpose=header.purpose,
-            wbs_code=header.wbs_code,
-            instruction_to_vendor=header.instruction_to_vendor,
-            grand_total_sgd=header.grand_total_sgd,
-            lab_group_id=pr_lab_group_id,
+        pr = (
+            db.query(PurchaseRequest)
+            .filter(PurchaseRequest.source_pr_number == header.source_pr_number)
+            .first()
         )
-        db.add(pr)
-        db.flush()
-        pr_ids.append(pr.pr_id)
+        is_new_pr = pr is None
+        if pr is None:
+            pr = PurchaseRequest(
+                source_pr_number=header.source_pr_number,
+                latest_batch_id=batch.batch_id,
+                requestor_name=header.requestor_name,
+                req_type=header.req_type,
+                request_date=header.pr_sub_date,
+                purpose=header.purpose,
+                wbs_code=header.wbs_code,
+                instruction_to_vendor=header.instruction_to_vendor,
+                grand_total_sgd=header.grand_total_sgd,
+                lab_group_id=pr_lab_group_id,
+            )
+            db.add(pr)
+            db.flush()
+            pr_ids.append(pr.pr_id)
+        else:
+            pr.latest_batch_id = batch.batch_id
+            pr.updated_at = func.now()
+            prs_updated += 1
+
+        existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
+        status_updates: list[dict] = []
 
         for line in lines:
+            line_identity_key = _raw_line_value(line, "line_identity_key")
+            existing_line = existing_lines_by_identity.get(line_identity_key)
+            if existing_line:
+                old_staging_line = _staging_line_for_committed_line(db, existing_line)
+                old_status = _source_status_snapshot(old_staging_line)
+                new_status = _source_status_snapshot(line)
+
+                # Source-system reupload rule:
+                # keep reviewed final Lab/Category/Amount fields intact, but
+                # point traceability to the newest raw source row and version
+                # the source lifecycle status change.
+                existing_line.source_staging_line_id = line.staging_line_id
+                lines_updated += 1
+                if old_status != new_status:
+                    status_updates.append(
+                        {
+                            "line_identity_key": line_identity_key,
+                            "line_no": line.source_line_no,
+                            "old_status": old_status,
+                            "new_status": new_status,
+                        }
+                    )
+                continue
+
             db.add(
                 PurchaseRequestLine(
                     pr_id=pr.pr_id,
@@ -793,27 +833,47 @@ def commit_batch(
             )
             lines_created += 1
 
-        # History row for this PR.
-        db.add(
-            PRVersion(
-                pr_id=pr.pr_id,
-                batch_id=batch.batch_id,
-                change_type="created",
-                old_data=None,
-                new_data={
-                    "source_pr_number": pr.source_pr_number,
-                    "requestor_name": pr.requestor_name,
-                    "wbs_code": pr.wbs_code,
-                    "lab_group_id": pr.lab_group_id,
-                    "grand_total_sgd": str(pr.grand_total_sgd)
-                    if pr.grand_total_sgd is not None
-                    else None,
-                    "line_count": len(lines),
-                },
-                changed_by=current_user.user_id,
-                change_reason=f"Batch {batch.batch_id} committed",
+        if is_new_pr:
+            # History row for this PR.
+            db.add(
+                PRVersion(
+                    pr_id=pr.pr_id,
+                    batch_id=batch.batch_id,
+                    change_type="created",
+                    old_data=None,
+                    new_data={
+                        "source_pr_number": pr.source_pr_number,
+                        "requestor_name": pr.requestor_name,
+                        "wbs_code": pr.wbs_code,
+                        "lab_group_id": pr.lab_group_id,
+                        "grand_total_sgd": str(pr.grand_total_sgd)
+                        if pr.grand_total_sgd is not None
+                        else None,
+                        "line_count": len(lines),
+                    },
+                    changed_by=current_user.user_id,
+                    change_reason=f"Batch {batch.batch_id} committed",
+                )
             )
-        )
+        elif status_updates:
+            db.add(
+                PRVersion(
+                    pr_id=pr.pr_id,
+                    batch_id=batch.batch_id,
+                    change_type="source_status_updated",
+                    old_data={
+                        "status_updates": [u["old_status"] for u in status_updates]
+                    },
+                    new_data={
+                        "status_updates": [u["new_status"] for u in status_updates]
+                    },
+                    changed_by=current_user.user_id,
+                    change_reason=(
+                        f"Batch {batch.batch_id} refreshed source PR/PO status "
+                        "without overwriting reviewed classification."
+                    ),
+                )
+            )
 
     # Mark batch committed.
     batch.upload_status = "committed"
@@ -830,7 +890,9 @@ def commit_batch(
             new_value={
                 "upload_status": "committed",
                 "prs_created": len(pr_ids),
+                "prs_updated": prs_updated,
                 "lines_created": lines_created,
+                "lines_updated": lines_updated,
             },
         )
     )
@@ -875,6 +937,45 @@ def _load_queue_item_or_404(db: Session, review_queue_id: int):
 def _role_name(user: User) -> str:
     """Pull the user's role_name lowercased — empty string if unset."""
     return (user.role.role_name if user.role else "").lower().strip()
+
+
+def _existing_committed_lines_by_identity(
+    db: Session, pr: PurchaseRequest
+) -> dict[str, PurchaseRequestLine]:
+    lines_by_identity: dict[str, PurchaseRequestLine] = {}
+    for line in pr.lines:
+        staging_line = _staging_line_for_committed_line(db, line)
+        line_identity_key = _raw_line_value(staging_line, "line_identity_key")
+        if line_identity_key:
+            lines_by_identity[line_identity_key] = line
+    return lines_by_identity
+
+
+def _staging_line_for_committed_line(
+    db: Session, line: PurchaseRequestLine
+) -> StagingPRLine | None:
+    if line.source_staging_line_id is None:
+        return None
+    return (
+        db.query(StagingPRLine)
+        .filter(StagingPRLine.staging_line_id == line.source_staging_line_id)
+        .first()
+    )
+
+
+def _raw_line_value(line: StagingPRLine | None, key: str) -> str:
+    if line is None or not isinstance(line.raw_line_json, dict):
+        return ""
+    value = line.raw_line_json.get(key)
+    return "" if value is None else str(value)
+
+
+def _source_status_snapshot(line: StagingPRLine | None) -> dict[str, str]:
+    return {
+        "pr_status": _raw_line_value(line, "pr_status"),
+        "po_number": _raw_line_value(line, "po_number"),
+        "po_status": _raw_line_value(line, "po_status"),
+    }
 
 
 def _build_summary(

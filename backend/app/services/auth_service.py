@@ -78,6 +78,7 @@ class AuthService:
                 "lab_id": user.lab_id,
                 "lab_name": user.lab.lab_name if user.lab else None,
                 "lab_code": user.lab.lab_code if user.lab else None,
+                "is_active": user.is_active,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
             }
             for user in users
@@ -108,6 +109,12 @@ class AuthService:
         user = self.repository.get_user_by_email(self.db, email)
 
         # 2. Check user existence and password validity
+        if user and not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive.",
+            )
+
         is_seed_placeholder = (
             ALLOW_PLACEHOLDER_PASSWORDS
             and user
@@ -196,6 +203,11 @@ class AuthService:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User account no longer exists.",
+            )
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive.",
             )
 
         return {
@@ -358,6 +370,7 @@ class AuthService:
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
         }
+
     def get_labic_by_lab(self, lab_id: int) -> Optional[Dict[str, Any]]:
         """Return the Lab IC user assigned to a given lab, or None if unassigned."""
         labic_role = self.repository.get_role_by_name(self.db, "labic")
@@ -367,7 +380,9 @@ class AuthService:
                 detail="Role 'labic' not found.",
             )
 
-        user = self.repository.get_user_by_role_and_lab(self.db, labic_role.role_id, lab_id)
+        user = self.repository.get_user_by_role_and_lab(
+            self.db, labic_role.role_id, lab_id
+        )
         if not user:
             return None
 
@@ -378,12 +393,12 @@ class AuthService:
             "staff_id": user.staff_id,
             "lab_id": user.lab_id,
         }
-        
+
     def get_users_by_role(self, role: str) -> List[Dict[str, Any]]:
         role_record = self.repository.get_role_by_name(self.db, role)
         if not role_record:
             raise HTTPException(status_code=404, detail=f"Role '{role}' not found.")
-        
+
         users = self.repository.get_users_by_role_id(self.db, role_record.role_id)
         return [
             {
@@ -392,39 +407,99 @@ class AuthService:
                 "email": u.email,
                 "lab_group_id": u.lab_group_id,
                 "lab_id": u.lab_id,
+                "is_active": u.is_active,
             }
             for u in users
         ]
+
     def assign_lab_to_user(self, user_id: int, lab_id: int) -> Dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
         if user.role.role_name != "labic":
-            raise HTTPException(status_code=400, detail="Only labic users can be assigned to a lab.")
-        
+            raise HTTPException(
+                status_code=400, detail="Only Lab IC users can be assigned to a lab."
+            )
+
+        lab = self.repository.get_lab_by_id(self.db, lab_id)
+        if not lab:
+            raise HTTPException(status_code=404, detail="Lab not found.")
+
+        if user.lab_id is not None and user.lab_id != lab_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This Lab IC is already assigned to another lab. "
+                    "Unassign them before assigning a new lab."
+                ),
+            )
+
+        assigned_user = self.repository.get_user_by_role_and_lab(
+            self.db, user.role_id, lab_id
+        )
+        if assigned_user and assigned_user.user_id != user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"This lab already has a Lab IC assigned to "
+                    f"{assigned_user.full_name}."
+                ),
+            )
+
         user.lab_id = lab_id
         user.lab_group_id = None  # enforce mutual exclusion constraint
         self.db.commit()
         self.db.refresh(user)
-        
+
         return {
             "user_id": user.user_id,
             "full_name": user.full_name,
             "email": user.email,
             "lab_id": user.lab_id,
         }
-    def assign_labgroup_to_user(self, user_id: int, lab_group_id: int) -> Dict[str, Any]:
+
+    def assign_labgroup_to_user(
+        self, user_id: int, lab_group_id: int
+    ) -> Dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
         if user.role.role_name != "teamlead":
-            raise HTTPException(status_code=400, detail="Only labic users can be assigned to a lab.")
-        
+            raise HTTPException(
+                status_code=400,
+                detail="Only Team Lead users can be assigned to a lab group.",
+            )
+
+        lab_group = self.repository.get_lab_group_by_id(self.db, lab_group_id)
+        if not lab_group:
+            raise HTTPException(status_code=404, detail="Lab group not found.")
+
+        if user.lab_group_id is not None and user.lab_group_id != lab_group_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This Team Lead is already assigned to another lab group. "
+                    "Unassign them before assigning a new lab group."
+                ),
+            )
+
+        assigned_user = self.repository.get_user_by_role_and_lab_group(
+            self.db, user.role_id, lab_group_id
+        )
+        if assigned_user and assigned_user.user_id != user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"This lab group already has a Team Lead assigned to "
+                    f"{assigned_user.full_name}."
+                ),
+            )
+
         user.lab_group_id = lab_group_id
         user.lab_id = None  # enforce mutual exclusion constraint
         self.db.commit()
         self.db.refresh(user)
-        
+
         return {
             "user_id": user.user_id,
             "full_name": user.full_name,
@@ -443,3 +518,59 @@ class AuthService:
         self.repository.create_reset_token(self.db, user.user_id, hashed)
         #TODO ADD EMAIL SERV
         self._send_temp_password_email(user.email, user.full_name, temp_password)
+
+    def unassign_user_scope(self, user_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        if user.role.role_name not in {"teamlead", "labic"}:
+            raise HTTPException(
+                status_code=400,
+                detail="Only Team Lead or Lab IC users have an assignment scope.",
+            )
+
+        user.lab_group_id = None
+        user.lab_id = None
+        self.db.commit()
+        self.db.refresh(user)
+
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "lab_group_id": user.lab_group_id,
+            "lab_id": user.lab_id,
+        }
+
+    def deactivate_user(self, user_id: int, current_admin_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if user.user_id == current_admin_id:
+            raise HTTPException(
+                status_code=400, detail="Admin users cannot deactivate themselves."
+            )
+        if user.lab_group_id is not None or user.lab_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Unassign the user before deactivating the account.",
+            )
+        if not user.is_active:
+            return {
+                "user_id": user.user_id,
+                "full_name": user.full_name,
+                "email": user.email,
+                "is_active": user.is_active,
+            }
+
+        user.is_active = False
+        self.db.commit()
+        self.db.refresh(user)
+
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "is_active": user.is_active,
+        }

@@ -55,6 +55,7 @@ export function ProcessingSummaryPage() {
   const acceptedRows = result
     ? result.records.inserted.map((record) => [
         record.line.pr_number,
+        record.line.pr_status || "-",
         `Row ${record.line.row_number}`,
         record.line.item_details,
         record.line.wbs,
@@ -65,6 +66,7 @@ export function ProcessingSummaryPage() {
       ])
     : sampleLines.accepted.map((line) => [
         line.pr,
+        "-",
         line.line,
         line.item,
         line.wbs,
@@ -76,20 +78,22 @@ export function ProcessingSummaryPage() {
   const updateRows = result
     ? result.records.updated.map((record) => [
         record.line.pr_number,
+        record.line.pr_status || "-",
         `Row ${record.line.row_number}`,
         "PR + item details + WBS + requestor + purpose",
         record.reason,
         record.line.amount_gst,
       ])
-    : sampleLines.updates.map((line) => [line.pr, line.line, line.identity, line.changed, line.amount]);
+    : sampleLines.updates.map((line) => [line.pr, "-", line.line, line.identity, line.changed, line.amount]);
   const duplicateRows = result
     ? result.records.duplicate.map((record) => [
         record.line.pr_number,
+        record.line.pr_status || "-",
         `Row ${record.line.row_number}`,
         record.reason,
         record.previous_batch_id ?? "Previous upload",
       ])
-    : sampleLines.duplicates.map((line) => [line.pr, line.line, line.identity, line.uploadedBefore]);
+    : sampleLines.duplicates.map((line) => [line.pr, "-", line.line, line.identity, line.uploadedBefore]);
   const reviewRows = result
     ? [...result.records.inserted, ...result.records.updated]
         .filter((record) => {
@@ -99,13 +103,14 @@ export function ProcessingSummaryPage() {
         })
         .map((record) => [
           record.line.pr_number,
+          record.line.pr_status || "-",
           `Row ${record.line.row_number}`,
           record.line.item_details,
           record.line.wbs,
           record.line.classification_reason ?? "Manual review required.",
           record.line.amount_gst,
         ])
-    : sampleLines.review.map((line) => [line.pr, line.line, line.item, line.wbs, line.issue, line.amount]);
+    : sampleLines.review.map((line) => [line.pr, "-", line.line, line.item, line.wbs, line.issue, line.amount]);
   const rejectedRows = result
     ? result.validation_errors.map((error, index) => ({
         row: index + 1,
@@ -194,28 +199,28 @@ export function ProcessingSummaryPage() {
 
             <TabsContent value="accepted" className="p-6">
               <SummaryTable
-                columns={["PR", "Line", "Item", "WBS", "Lab Group", "Lab", "Category", "Amount + GST"]}
+                columns={["PR", "PR Status", "Line", "Item", "WBS", "Lab Group", "Lab", "Category", "Amount"]}
                 rows={acceptedRows}
               />
             </TabsContent>
 
             <TabsContent value="updates" className="p-6">
               <SummaryTable
-                columns={["PR", "Line", "Identity Basis", "Detected Change", "Latest Amount"]}
+                columns={["PR", "PR Status", "Line", "Identity Basis", "Detected Change", "Latest Amount"]}
                 rows={updateRows}
               />
             </TabsContent>
 
             <TabsContent value="duplicates" className="p-6">
               <SummaryTable
-                columns={["PR", "Line", "Reason", "Previously Uploaded"]}
+                columns={["PR", "PR Status", "Line", "Reason", "Previously Uploaded"]}
                 rows={duplicateRows}
               />
             </TabsContent>
 
             <TabsContent value="review" className="p-6">
               <SummaryTable
-                columns={["PR", "Line", "Item", "WBS", "Review Issue", "Amount + GST"]}
+                columns={["PR", "PR Status", "Line", "Item", "WBS", "Review Issue", "Amount"]}
                 rows={reviewRows}
               />
             </TabsContent>

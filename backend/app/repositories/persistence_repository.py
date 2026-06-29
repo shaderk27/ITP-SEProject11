@@ -19,6 +19,8 @@ from sqlalchemy.orm import Session
 
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import (
+    PurchaseRequest,
+    PurchaseRequestLine,
     ReviewQueueItem,
     StagingPRHeader,
     StagingPRLine,
@@ -133,6 +135,9 @@ def persist_upload_to_db(
             classifier_group_id = classification.get("lab_group_id")
             classifier_lab_id = classification.get("lab_id")
             classification_reason = classification.get("reason") or ""
+            existing_final_line = _find_existing_final_line(
+                db, pr_number, item.line_identity_key
+            )
 
             # Resolve final IDs with General fallback chain
             final_group_id = classifier_group_id or general_group.lab_group_id
@@ -152,6 +157,24 @@ def persist_upload_to_db(
                 or item.pr_category.lower() == "general"
                 or item.pr_category.lower() not in categories_by_name
             )
+            if existing_final_line:
+                final_lab_id = existing_final_line.lab_id
+                existing_lab = _get_lab_by_id(db, final_lab_id)
+                final_group_id = (
+                    existing_lab.lab_group_id
+                    if existing_lab is not None
+                    else classifier_group_id or general_group.lab_group_id
+                )
+                final_category_id = (
+                    existing_final_line.category_id or general_category.category_id
+                )
+                used_fallback_group = False
+                used_fallback_lab = False
+                used_fallback_category = False
+                classification_reason = (
+                    "Existing committed line found. Preserving reviewed "
+                    "lab/category; only source status may update on commit."
+                )
             any_fallback = (
                 used_fallback_group or used_fallback_lab or used_fallback_category
             )
@@ -220,3 +243,41 @@ def _parse_pr_date(raw: str | None):
         except (ValueError, TypeError):
             continue
     return None
+
+
+def _find_existing_final_line(
+    db: Session, source_pr_number: str, line_identity_key: str
+) -> PurchaseRequestLine | None:
+    if not source_pr_number or not line_identity_key:
+        return None
+
+    pr = (
+        db.query(PurchaseRequest)
+        .filter(PurchaseRequest.source_pr_number == source_pr_number)
+        .first()
+    )
+    if pr is None:
+        return None
+
+    for final_line in pr.lines:
+        if final_line.source_staging_line_id is None:
+            continue
+        staging_line = (
+            db.query(StagingPRLine)
+            .filter(StagingPRLine.staging_line_id == final_line.source_staging_line_id)
+            .first()
+        )
+        if not staging_line or not isinstance(staging_line.raw_line_json, dict):
+            continue
+        if (
+            str(staging_line.raw_line_json.get("line_identity_key", ""))
+            == line_identity_key
+        ):
+            return final_line
+    return None
+
+
+def _get_lab_by_id(db: Session, lab_id: int | None) -> Lab | None:
+    if lab_id is None:
+        return None
+    return db.query(Lab).filter(Lab.lab_id == lab_id).first()

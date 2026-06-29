@@ -120,12 +120,6 @@ async def forgot_password(
     service.forgot_password(payload.email)
     return { "message": "If that email exists, a temporary password has been sent." }
 
-# @router.get("/users")
-# async def get_all_users(
-#     service: AuthService = Depends(get_auth_service),
-#     _admin: dict = Depends(require_admin),
-# ):
-#     return service.get_all_users()
 @router.get("/users")
 async def get_all_users(
     role: Optional[str] = Query(None),
@@ -143,6 +137,8 @@ async def get_assignments(
     _admin: dict = Depends(require_admin),
 ):
     return service.get_assignments()
+
+
 @router.put("/users/{user_id}/assign-lab")
 async def assign_lab_ic(
     user_id: int,
@@ -152,11 +148,30 @@ async def assign_lab_ic(
 ):
     return service.assign_lab_to_user(user_id, payload.lab_id)
 
+
 @router.put("/users/{user_id}/assign-labgroup")
-async def assign_team_ic(
+async def assign_team_lead(
     user_id: int,
     payload: AssignLabGroupSchema,
     service: AuthService = Depends(get_auth_service),
     _admin: dict = Depends(require_admin),
 ):
     return service.assign_labgroup_to_user(user_id, payload.lab_group_id)
+
+
+@router.put("/users/{user_id}/unassign-scope")
+async def unassign_user_scope(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.unassign_user_scope(user_id)
+
+
+@router.put("/users/{user_id}/deactivate")
+async def deactivate_user(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    admin: dict = Depends(require_admin),
+):
+    return service.deactivate_user(user_id, current_admin_id=admin["id"])

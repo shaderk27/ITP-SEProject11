@@ -13,6 +13,7 @@ ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
 
 -- Tim (W7-02): users.lab_id column for Lab IC scoping. IF NOT EXISTS = idempotent.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 
 -- ----- 1. Roles -----

@@ -99,8 +99,8 @@ class UploadService:
                 lab_cache = {}
                 group_cache = {}
 
-        # Each entry: {"item": PRLineItem (post-replace), "classification": dict}
-        # Built up during the loop and handed to persist_upload_to_db at the end.
+        # Each entry is handed to persist_upload_to_db after duplicate handling.
+        # Exact duplicate rows are intentionally excluded from DB staging.
         classified_items: list[dict] = []
 
         for item in line_items:
@@ -163,15 +163,20 @@ class UploadService:
                 item.lab = assigned_lab
                 item.lab_group = assigned_group
 
-            # Snapshot for the DB persistence step (post-replace so .lab / .lab_group are final).
-            classified_items.append({"item": item, "classification": classification})
-
-            if assigned_lab == "Unassigned Lab" or not assigned_lab:
-                needs_review_count += 1
-
             existing = self.repository.get_line_record(item.line_identity_key, store)
             decision = self.duplicate_service.decide(item, existing)
-            
+
+            if decision.status != "duplicate":
+                if assigned_lab == "Unassigned Lab" or not assigned_lab:
+                    needs_review_count += 1
+                classified_items.append(
+                    {
+                        "item": item,
+                        "classification": classification,
+                        "duplicate_decision": decision.status,
+                    }
+                )
+
             # 2. Extract the payload for the UI
             if hasattr(item, "to_dict"):
                 final_line_dict = item.to_dict()
@@ -201,12 +206,15 @@ class UploadService:
         # ─── W9-01: persist the parsed batch to the DB pipeline ───────────
         # Skipped when no user/db is available (e.g. legacy/test callers).
         persistence_counts: dict = {}
-        if self.db and current_user:
+        if self.db and current_user and classified_items:
             persistence_counts = persist_upload_to_db(
                 db=self.db,
                 metadata=metadata,
                 classified_items=classified_items,
                 current_user=current_user,
+            )
+            needs_review_count = persistence_counts.get(
+                "queue_items_inserted", needs_review_count
             )
 
         return {

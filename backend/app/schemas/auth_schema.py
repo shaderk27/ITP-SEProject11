@@ -85,15 +85,24 @@ class UpdateProfileRequest(BaseModel):
     new_password: Optional[str] = Field(None, min_length=8, description="Must be at least 8 characters")
 class ForgotPasswordSchema(BaseModel):
     email: str
+    new_password: Optional[str] = Field(
+        None, min_length=8, description="Must be at least 8 characters"
+    )
+
+
 class LabICOut(BaseModel):
     user_id: int
     full_name: str
     email: str
     lab_id: Optional[int]
+
+
 class AssignLabSchema(BaseModel):
     lab_id: int
+
+
 class AssignLabGroupSchema(BaseModel):
     lab_group_id: int
+
     class Config:
         from_attributes = True
-

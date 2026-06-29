@@ -15,6 +15,7 @@ class FakeQuery:
 class FakeDb:
     def __init__(self) -> None:
         self.lab_groups = [
+            SimpleNamespace(lab_group_id=99, lab_group_name="Legacy", wbs_code="WBS"),
             SimpleNamespace(
                 lab_group_id=1, lab_group_name="Chemistry Group", wbs_code="WBS-100"
             ),
@@ -73,6 +74,21 @@ def test_requestor_mapping_is_used_after_text_clues() -> None:
     assert result["lab_group_id"] == 1
     assert result["lab_id"] == 30
     assert "Requestor" in result["reason"]
+
+
+def test_instruction_to_vendor_selects_lab_after_purpose() -> None:
+    result = classify_line_item(
+        FakeDb(),
+        row_text="delivery note says microscope room",
+        requestor_name="Unknown Person",
+        wbs="WBS-200",
+        purpose="General lab purchase",
+        instruction_to_vendor="Deliver to BIO-M bench",
+    )
+
+    assert result["lab_group_id"] == 2
+    assert result["lab_id"] == 20
+    assert "Vendor instruction" in result["reason"]
 
 
 def test_unknown_row_is_left_for_review() -> None:
