@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
 import hashlib
+import re
 
 import pandas as pd
 
@@ -12,6 +13,7 @@ from app.processors.normalizer import normalize_key_part, normalize_text, parse_
 
 REQUIRED_COLUMNS = [
     "PR",
+    "PR Status",
     "PR Sub Date",
     "Requestor",
     "Purpose",
@@ -20,20 +22,15 @@ REQUIRED_COLUMNS = [
     "Qty",
     "Unit Rate",
     "WBS",
-    "Instruction to Vendor",
-    "PR Category",
-    "Lab",
-    "Amount + GST",
 ]
 
 CRITICAL_COLUMNS = [
     "PR",
+    "PR Status",
     "PR Sub Date",
     "Requestor",
     "Purpose",
     "Item Details",
-    "WBS",
-    "Amount + GST",
 ]
 
 
@@ -77,12 +74,12 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
                     }
                 )
 
-        amount = parse_decimal(row[normalised_columns["Amount + GST"]])
+        amount = _resolve_amount(row, normalised_columns)
         if amount is None:
             errors.append(
                 {
-                    "field": f"Row {row_number} - Amount + GST",
-                    "message": "Amount must be a valid number.",
+                    "field": f"Row {row_number} - Amount",
+                    "message": "Amount must be present as Amount + GST or derivable from Qty x Unit Rate.",
                     "severity": "error",
                 }
             )
@@ -107,18 +104,21 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
     for index, row in df.iterrows():
         row_number = int(index) + 2
         pr_number = normalize_text(row[column_map["PR"]])
+        pr_status = normalize_text(row[column_map["PR Status"]])
+        po_number = _optional_text(row, column_map, "PO")
+        po_status = _optional_text(row, column_map, "PO Status")
         requestor = normalize_text(row[column_map["Requestor"]])
         purpose = normalize_text(row[column_map["Purpose"]])
         item_details = normalize_text(row[column_map["Item Details"]])
         wbs = normalize_text(row[column_map["WBS"]])
-        instruction = normalize_text(row[column_map["Instruction to Vendor"]])
-        pr_category = normalize_text(row[column_map["PR Category"]])
-        lab = normalize_text(row[column_map["Lab"]])
+        instruction = _optional_text(row, column_map, "Instruction to Vendor")
+        pr_category = _optional_text(row, column_map, "PR Category")
+        lab = _optional_text(row, column_map, "Lab")
         pr_sub_date = _format_date(row[column_map["PR Sub Date"]])
         grand_total = parse_decimal(row[column_map["Grand Total in SGD"]])
         quantity = parse_decimal(row[column_map["Qty"]])
         unit_rate = parse_decimal(row[column_map["Unit Rate"]])
-        amount_gst = parse_decimal(row[column_map["Amount + GST"]])
+        amount_gst = _resolve_amount(row, column_map)
 
         if amount_gst is None:
             continue
@@ -133,6 +133,9 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
         content_hash = generate_content_hash(
             {
                 "pr_number": pr_number,
+                "pr_status": pr_status,
+                "po_number": po_number,
+                "po_status": po_status,
                 "pr_sub_date": pr_sub_date,
                 "requestor": requestor,
                 "purpose": purpose,
@@ -155,6 +158,9 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                 pr_sub_date=pr_sub_date,
                 requestor=requestor,
                 purpose=purpose,
+                pr_status=pr_status,
+                po_number=po_number,
+                po_status=po_status,
                 grand_total_sgd=grand_total,
                 item_details=item_details,
                 quantity=quantity,
@@ -212,7 +218,13 @@ def _parse_date(value: object) -> date | None:
     text = normalize_text(value)
     if not text:
         return None
-    parsed = pd.to_datetime(text, errors="coerce")
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y", "%d-%m-%y"):
+        if _matches_date_format(text, fmt):
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                pass
+    parsed = pd.to_datetime(text, errors="coerce", dayfirst=True)
     if pd.isna(parsed):
         return None
     return parsed.date()
@@ -220,3 +232,42 @@ def _parse_date(value: object) -> date | None:
 
 def _decimal_to_text(value: Decimal | None) -> str:
     return "" if value is None else str(value)
+
+
+def _matches_date_format(text: str, fmt: str) -> bool:
+    patterns = {
+        "%Y-%m-%d": r"^\d{4}-\d{1,2}-\d{1,2}$",
+        "%d/%m/%Y": r"^\d{1,2}/\d{1,2}/\d{4}$",
+        "%d/%m/%y": r"^\d{1,2}/\d{1,2}/\d{2}$",
+        "%d-%m-%Y": r"^\d{1,2}-\d{1,2}-\d{4}$",
+        "%d-%m-%y": r"^\d{1,2}-\d{1,2}-\d{2}$",
+    }
+    return re.match(patterns[fmt], text) is not None
+
+
+def _optional_text(
+    row: pd.Series,
+    column_map: dict[str, str],
+    column_name: str,
+) -> str:
+    source_column = column_map.get(column_name)
+    if source_column is None:
+        return ""
+    return normalize_text(row[source_column])
+
+
+def _resolve_amount(
+    row: pd.Series,
+    column_map: dict[str, str],
+) -> Decimal | None:
+    amount_column = column_map.get("Amount + GST")
+    if amount_column is not None:
+        amount = parse_decimal(row[amount_column])
+        if amount is not None:
+            return amount
+
+    quantity = parse_decimal(row[column_map["Qty"]])
+    unit_rate = parse_decimal(row[column_map["Unit Rate"]])
+    if quantity is None or unit_rate is None:
+        return None
+    return quantity * unit_rate
