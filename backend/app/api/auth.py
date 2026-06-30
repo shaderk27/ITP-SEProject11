@@ -8,6 +8,7 @@ from app.schemas.auth_schema import (
     ForgotPasswordSchema,
     LoginRequest,
     CreateUserRequest,
+    ResetPasswordSchema,
     RoleResponse,
     UpdateProfileRequest,
     AssignLabGroupSchema,
@@ -15,6 +16,7 @@ from app.schemas.auth_schema import (
 )
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
+from backend.app.dependencies.auth import get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -163,3 +165,16 @@ async def deactivate_user(
     admin: dict = Depends(require_admin),
 ):
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
+
+@router.post("/reset-password")
+async def reset_password(
+    payload: ResetPasswordSchema,
+    service: AuthService = Depends(get_auth_service),
+    current_user: dict = Depends(get_current_user),
+):
+    service.reset_password(
+        current_user["id"],
+        payload.current_password,
+        payload.new_password,
+    )
+    return { "message": "Password reset successfully." }

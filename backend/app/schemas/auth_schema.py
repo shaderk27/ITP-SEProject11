@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ==========================================
 # REQUEST SCHEMAS
@@ -107,6 +107,15 @@ class AssignLabSchema(BaseModel):
 
 class AssignLabGroupSchema(BaseModel):
     lab_group_id: int
+class ResetPasswordSchema(BaseModel):
+    current_password: str
+    new_password: str
 
-    class Config:
-        from_attributes = True
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return v
+class Config:
+    from_attributes = True
