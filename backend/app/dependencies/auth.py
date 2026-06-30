@@ -8,6 +8,7 @@ looks up the user by the `sub` (user_id) claim.
 Returns the User model so endpoints can keep using
 `current_user.role.role_name`, `current_user.lab_group_id`, etc.
 """
+
 from typing import Optional
 
 import jwt

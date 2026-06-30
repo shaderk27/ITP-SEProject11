@@ -5,6 +5,7 @@ duplicate / versioning / history edge cases + audit trail completeness.
 Each test runs in a SAVEPOINT (see conftest.db fixture) so writes don't
 persist to the budget_system DB.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -124,9 +125,7 @@ def test_recommit_preserves_lines_by_identity(db, admin_user, make_staging_batch
         .filter(PurchaseRequest.source_pr_number == "PR-W902-LINES")
         .one()
     )
-    line_a_before = next(
-        line for line in pr.lines if line.item_description == "item A"
-    )
+    line_a_before = next(line for line in pr.lines if line.item_description == "item A")
     staging_pointer_before = line_a_before.source_staging_line_id
 
     # Re-upload: same item A (should be preserved), plus a brand-new item C.
@@ -184,7 +183,9 @@ def test_source_staging_line_id_traceability(db, admin_user, make_staging_batch)
         .filter(StagingPRLine.staging_line_id == final_line.source_staging_line_id)
         .one_or_none()
     )
-    assert staging_line is not None, "source_staging_line_id must point to a real staging row."
+    assert staging_line is not None, (
+        "source_staging_line_id must point to a real staging row."
+    )
     assert staging_line.item_details == "traceable item"
 
 
@@ -222,8 +223,14 @@ def test_correction_writes_review_action_and_audit_log(
     )
     queue_item = (
         db.query(ReviewQueueItem)
-        .join(StagingPRLine, StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id)
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
+        )
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .filter(StagingPRHeader.batch_id == batch.batch_id)
         .one()
     )
@@ -336,9 +343,7 @@ def test_commit_blocked_when_already_committed(db, admin_user, make_staging_batc
     assert exc_info.value.status_code == 409
 
 
-def test_correction_blocked_after_commit(
-    db, admin_user, make_staging_batch, seed_refs
-):
+def test_correction_blocked_after_commit(db, admin_user, make_staging_batch, seed_refs):
     """Correcting a queue item on a batch that is already committed must 409."""
     batch = make_staging_batch(
         source_pr_number="PR-W902-LOCK-CORRECT",
@@ -346,8 +351,14 @@ def test_correction_blocked_after_commit(
     )
     queue_item = (
         db.query(ReviewQueueItem)
-        .join(StagingPRLine, StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id)
-        .join(StagingPRHeader, StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
+        )
+        .join(
+            StagingPRHeader,
+            StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+        )
         .filter(StagingPRHeader.batch_id == batch.batch_id)
         .one()
     )

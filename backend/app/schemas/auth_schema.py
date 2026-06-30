@@ -107,6 +107,8 @@ class AssignLabSchema(BaseModel):
 
 class AssignLabGroupSchema(BaseModel):
     lab_group_id: int
+
+
 class ResetPasswordSchema(BaseModel):
     current_password: str
     new_password: str
@@ -117,5 +119,7 @@ class ResetPasswordSchema(BaseModel):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters.")
         return v
+
+
 class Config:
     from_attributes = True

@@ -11,11 +11,13 @@ from app.repositories.auth_repository import AuthRepository
 def make_service():
     service = AuthService.__new__(AuthService)
     repo = MagicMock(spec=AuthRepository)
-    repo.configure_mock(**{
-        "get_user_by_email.return_value": None,
-        "get_user_by_id.return_value": None,
-        "get_active_reset_token_by_user.return_value": None,
-    })
+    repo.configure_mock(
+        **{
+            "get_user_by_email.return_value": None,
+            "get_user_by_id.return_value": None,
+            "get_active_reset_token_by_user.return_value": None,
+        }
+    )
     service.repository = repo
     service.db = MagicMock()
     return service
@@ -41,6 +43,7 @@ def make_token(used=False, expires_at=None):
 
 # ── 1. Unknown email returns generic success ──────────────────────────────────
 
+
 def test_forgot_password_unknown_email_returns_silently():
     """Unknown email should not raise — avoids leaking whether email exists."""
     service = make_service()
@@ -53,6 +56,7 @@ def test_forgot_password_unknown_email_returns_silently():
 
 
 # ── 2. Inactive user does not receive reset ───────────────────────────────────
+
 
 def test_forgot_password_inactive_user_does_not_send():
     """Inactive users should be silently skipped — no token created, no email sent."""
@@ -68,6 +72,7 @@ def test_forgot_password_inactive_user_does_not_send():
 
 # ── 3. Reset creates temp token ───────────────────────────────────────────────
 
+
 def test_forgot_password_active_user_creates_token_and_sends_email():
     """Active user should have old tokens invalidated, new token created, email sent."""
     service = make_service()
@@ -76,7 +81,9 @@ def test_forgot_password_active_user_creates_token_and_sends_email():
     with patch.object(service, "_send_temp_password_email") as mock_send:
         service.forgot_password("test@sit.edu.sg")
 
-        service.repository.invalidate_reset_tokens.assert_called_once_with(service.db, 1)
+        service.repository.invalidate_reset_tokens.assert_called_once_with(
+            service.db, 1
+        )
         service.repository.create_reset_token.assert_called_once()
         mock_send.assert_called_once()
 
@@ -87,9 +94,11 @@ def test_forgot_password_active_user_creates_token_and_sends_email():
 
 # ── 4. Temp password expiry works ─────────────────────────────────────────────
 
+
 def test_login_rejects_expired_temp_password():
     """An expired temp password token should not allow login."""
     import bcrypt
+
     service = make_service()
 
     temp_password = "TempPass1"
@@ -103,7 +112,9 @@ def test_login_rejects_expired_temp_password():
         expires_at=datetime.now(timezone.utc) - timedelta(hours=1),  # already expired
     )
     expired_token.temp_password = hashed
-    service.repository.get_active_reset_token_by_user.return_value = None  # expired = not returned
+    service.repository.get_active_reset_token_by_user.return_value = (
+        None  # expired = not returned
+    )
 
     response_mock = MagicMock()
     with pytest.raises(HTTPException) as exc:
@@ -114,9 +125,11 @@ def test_login_rejects_expired_temp_password():
 
 # ── 5. Successful reset updates password and clears tokens ────────────────────
 
+
 def test_reset_password_updates_hash_and_clears_tokens():
     """Correct current password should update hash and delete all reset tokens."""
     import bcrypt
+
     service = make_service()
 
     current_password = "OldPass123"
@@ -134,12 +147,15 @@ def test_reset_password_updates_hash_and_clears_tokens():
     new_hash = call_args[2]
     assert bcrypt.checkpw(new_password.encode(), new_hash.encode())
 
-    service.repository.delete_reset_tokens_by_user.assert_called_once_with(service.db, 1)
+    service.repository.delete_reset_tokens_by_user.assert_called_once_with(
+        service.db, 1
+    )
 
 
 def test_reset_password_rejects_wrong_current_password():
     """Wrong current password with no active token should raise 400."""
     import bcrypt
+
     service = make_service()
 
     hashed = bcrypt.hashpw("CorrectPass1".encode(), bcrypt.gensalt()).decode()

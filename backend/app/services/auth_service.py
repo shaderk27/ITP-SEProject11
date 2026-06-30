@@ -129,10 +129,14 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        normal_valid = is_seed_placeholder or self._verify_password(password, user.password_hash)
+        normal_valid = is_seed_placeholder or self._verify_password(
+            password, user.password_hash
+        )
 
         if not normal_valid:
-            token = self.repository.get_active_reset_token_by_user(self.db, user.user_id)
+            token = self.repository.get_active_reset_token_by_user(
+                self.db, user.user_id
+            )
             if not token or not self._verify_password(password, token.temp_password):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -571,7 +575,10 @@ class AuthService:
             "email": user.email,
             "is_active": user.is_active,
         }
-    def reset_password(self, user_id: int, current_password: str, new_password: str) -> None:
+
+    def reset_password(
+        self, user_id: int, current_password: str, new_password: str
+    ) -> None:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -586,12 +593,20 @@ class AuthService:
             # Placeholder accounts can set a new password without verifying the old one
             normal_valid = True
         else:
-            normal_valid = bcrypt.checkpw(current_password.encode(), user.password_hash.encode())
+            normal_valid = bcrypt.checkpw(
+                current_password.encode(), user.password_hash.encode()
+            )
 
         if not normal_valid:
-            token = self.repository.get_active_reset_token_by_user(self.db, user.user_id)
-            if not token or not bcrypt.checkpw(current_password.encode(), token.temp_password.encode()):
-                raise HTTPException(status_code=400, detail="Current password is incorrect.")
+            token = self.repository.get_active_reset_token_by_user(
+                self.db, user.user_id
+            )
+            if not token or not bcrypt.checkpw(
+                current_password.encode(), token.temp_password.encode()
+            ):
+                raise HTTPException(
+                    status_code=400, detail="Current password is incorrect."
+                )
 
         new_hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         self.repository.update_user_password(self.db, user.user_id, new_hashed)

@@ -196,7 +196,9 @@ class AuthRepository:
         token.used = True
         db.commit()
 
-    def get_active_reset_token_by_user(self, db: Session, user_id: int) -> Optional[PasswordResetToken]:
+    def get_active_reset_token_by_user(
+        self, db: Session, user_id: int
+    ) -> Optional[PasswordResetToken]:
         return (
             db.query(PasswordResetToken)
             .filter(
@@ -208,13 +210,15 @@ class AuthRepository:
         )
 
     def delete_reset_tokens_by_user(self, db: Session, user_id: int) -> None:
-        db.query(PasswordResetToken)\
-            .filter(PasswordResetToken.user_id == user_id)\
-            .delete()
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user_id
+        ).delete()
         db.commit()
 
-    def update_user_password(self, db: Session, user_id: int, hashed_password: str) -> None:
-        db.query(User)\
-            .filter(User.user_id == user_id)\
-            .update({"password_hash": hashed_password})
+    def update_user_password(
+        self, db: Session, user_id: int, hashed_password: str
+    ) -> None:
+        db.query(User).filter(User.user_id == user_id).update(
+            {"password_hash": hashed_password}
+        )
         db.commit()

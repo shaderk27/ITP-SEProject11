@@ -65,7 +65,9 @@ async def update_me(
     current_user = service.get_current_user(access_token)
     user_id = current_user.get("id")
     if user_id is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session."
+        )
     return service.update_user_profile(
         user_id=int(user_id),
         full_name=payload.full_name,
@@ -166,6 +168,7 @@ async def deactivate_user(
 ):
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
 
+
 @router.post("/reset-password")
 async def reset_password(
     payload: ResetPasswordSchema,
@@ -177,7 +180,8 @@ async def reset_password(
         payload.current_password,
         payload.new_password,
     )
-    return { "message": "Password reset successfully." }
+    return {"message": "Password reset successfully."}
+
 
 @router.post("/users/{user_id}/send-reset")
 async def admin_send_reset(
@@ -187,6 +191,8 @@ async def admin_send_reset(
 ):
     user = service.repository.get_user_by_id(service.db, user_id)
     if not user:
-        raise HTTPException(status_code=404, detail="User not found.") #ok to show admin
+        raise HTTPException(
+            status_code=404, detail="User not found."
+        )  # ok to show admin
     service.forgot_password(user.email)
     return {"message": f"Temporary password sent to {user.email}."}
