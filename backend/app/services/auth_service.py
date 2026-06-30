@@ -110,33 +110,36 @@ class AuthService:
 
     def login(self, email: str, password: str, response: Response) -> Dict[str, Any]:
         """Authenticate a user, generate a JWT, and attach it as an HTTP-only cookie."""
-        # 1. Fetch user from database
         user = self.repository.get_user_by_email(self.db, email)
-
-        # 2. Check user existence and password validity
         if user and not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is inactive.",
             )
-
         is_seed_placeholder = (
             ALLOW_PLACEHOLDER_PASSWORDS
             and user
             and user.password_hash == "placeholder_no_auth_yet"
         )
 
-        if not user or (
-            not is_seed_placeholder
-            and not self._verify_password(password, user.password_hash)
-        ):
+        if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # 3. Create the payload (include role and lab group for access control decisions)
+        normal_valid = is_seed_placeholder or self._verify_password(password, user.password_hash)
+
+        if not normal_valid:
+            token = self.repository.get_active_reset_token_by_user(self.db, user.user_id)
+            if not token or not self._verify_password(password, token.temp_password):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Incorrect email or password",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            self.repository.mark_token_used(self.db, token)
         token_payload = {
             "sub": str(user.user_id),
             "email": user.email,
@@ -144,21 +147,17 @@ class AuthService:
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
         }
-
         token = self._create_access_token(data=token_payload)
-
-        # 4. Set cookie on the response lifecycle object
         response.set_cookie(
             key=COOKIE_NAME,
             value=token,
-            httponly=True,  # Prevents JavaScript XSS attacks
+            httponly=True,
             max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             expires=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            samesite="lax",  # Protects against CSRF attacks
+            samesite="lax",
             secure=COOKIE_SECURE,
             path="/",
         )
-
         return {
             "message": "Successfully logged in",
             "user": {
