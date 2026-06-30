@@ -68,7 +68,9 @@ def get_lab_groups(
       - Team Lead → only their assigned lab_group_id.
       - Lab IC    → empty list (lab groups aren't in scope for them).
     """
-    role_name = (current_user.role.role_name if current_user.role else "").lower().strip()
+    role_name = (
+        (current_user.role.role_name if current_user.role else "").lower().strip()
+    )
 
     query = db.query(LabGroup)
     if role_name == "teamlead":
