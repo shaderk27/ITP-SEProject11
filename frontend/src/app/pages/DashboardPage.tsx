@@ -80,15 +80,21 @@ export function DashboardPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
 
-  // Auto-lock the dropdown to the Team Lead's own lab group whenever the
-  // user changes (e.g. login/logout switching identities). Admins keep "all".
-  useEffect(() => {
+  // Auto-lock the dropdown to the Team Lead's own lab group whenever the user
+  // changes (e.g. login/logout switching identities). Admins keep "all".
+  // Done during render with a previous-value guard (React's "adjust state when
+  // a prop changes" pattern) instead of an effect, which would fire an extra
+  // cascading render on every identity change.
+  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}`;
+  const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
+  if (userKey !== prevUserKey) {
+    setPrevUserKey(userKey);
     if (user?.role === "teamlead" && user.labGroupId) {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
       setSelectedGroupId("all");
     }
-  }, [user?.role, user?.labGroupId]);
+  }
 
   useEffect(() => {
     let cancelled = false;

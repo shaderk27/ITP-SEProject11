@@ -5,6 +5,7 @@ Spending / utilization numbers the dashboard cards consume.
 Lives separate from /api/records so the dashboard never has to
 download line-by-line data just to render one number.
 """
+
 from decimal import Decimal
 from typing import Any
 
@@ -30,10 +31,10 @@ class SpendingSummary(BaseModel):
     each with a per-lab-group breakdown so the dashboard dropdown can filter
     without a second round-trip."""
 
-    total_actual_spend_sgd: str            # sum of lines where status starts with "Approved"
-    by_lab_group: dict[str, str]           # ^ broken down per lab_group_id
-    total_pending_sgd: str                 # sum of lines where status starts with "Pending"
-    pending_by_lab_group: dict[str, str]   # ^ broken down per lab_group_id
+    total_actual_spend_sgd: str  # sum of lines where status starts with "Approved"
+    by_lab_group: dict[str, str]  # ^ broken down per lab_group_id
+    total_pending_sgd: str  # sum of lines where status starts with "Pending"
+    pending_by_lab_group: dict[str, str]  # ^ broken down per lab_group_id
 
 
 # ─── Endpoint ────────────────────────────────────────────────────────────
@@ -211,12 +212,16 @@ def get_breakdown(
         return BreakdownResponse(lab_groups=[])
 
     # ─── 1. Name lookups (one DB hit each) ────────────────────────────
-    lab_group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
-    lab_names = {l.lab_id: l.lab_name for l in db.query(Lab).all()}
-    category_names = {c.category_id: c.category_name for c in db.query(SpendingCategory).all()}
+    lab_group_names = {
+        g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()
+    }
+    lab_names = {lab.lab_id: lab.lab_name for lab in db.query(Lab).all()}
+    category_names = {
+        c.category_id: c.category_name for c in db.query(SpendingCategory).all()
+    }
     # Lab → lab_group lookup used to roll lines up to their owning group.
     lab_to_group: dict[int, int | None] = {
-        l.lab_id: l.lab_group_id for l in db.query(Lab).all()
+        lab.lab_id: lab.lab_group_id for lab in db.query(Lab).all()
     }
 
     # ─── 2. Spending per (lab, category), split by status ─────────────
@@ -255,7 +260,9 @@ def get_breakdown(
         .group_by(PurchaseRequestLine.lab_id, PurchaseRequestLine.category_id)
     )
     if role_name == "teamlead":
-        spending_query = spending_query.filter(Lab.lab_group_id == current_user.lab_group_id)
+        spending_query = spending_query.filter(
+            Lab.lab_group_id == current_user.lab_group_id
+        )
 
     spending_by_lab_cat: dict[tuple[int, int], dict[str, Decimal]] = {}
     for lab_id, cat_id, approved, pending in spending_query.all():
@@ -276,14 +283,18 @@ def get_breakdown(
         .group_by(Budget.lab_id, Budget.category_id)
     )
     if role_name == "teamlead":
-        budget_query = budget_query.filter(Budget.lab_group_id == current_user.lab_group_id)
+        budget_query = budget_query.filter(
+            Budget.lab_group_id == current_user.lab_group_id
+        )
 
     budget_by_lab_cat: dict[tuple[int, int], Decimal] = {}
     for lab_id, cat_id, amount in budget_query.all():
         budget_by_lab_cat[(lab_id, cat_id)] = _to_decimal(amount)
 
     # ─── 4. Union of (lab, category) cells that exist (budget OR spend)
-    all_cells: set[tuple[int, int]] = set(budget_by_lab_cat.keys()) | set(spending_by_lab_cat.keys())
+    all_cells: set[tuple[int, int]] = set(budget_by_lab_cat.keys()) | set(
+        spending_by_lab_cat.keys()
+    )
 
     # Group cells by lab_group_id → lab_id → list[category_id]
     by_group: dict[int, dict[int, list[int]]] = {}
@@ -335,7 +346,9 @@ def get_breakdown(
                         pending_sgd=str(cat_pending),
                         available_balance_sgd=str(cat_available),
                         utilisation_pct=_pct(cat_approved, cat_budget),
-                        projected_utilisation_pct=_pct(cat_approved + cat_pending, cat_budget),
+                        projected_utilisation_pct=_pct(
+                            cat_approved + cat_pending, cat_budget
+                        ),
                     )
                 )
                 lab_budget += cat_budget
@@ -351,7 +364,9 @@ def get_breakdown(
                     pending_sgd=str(lab_pending),
                     available_balance_sgd=str(lab_budget - lab_approved - lab_pending),
                     utilisation_pct=_pct(lab_approved, lab_budget),
-                    projected_utilisation_pct=_pct(lab_approved + lab_pending, lab_budget),
+                    projected_utilisation_pct=_pct(
+                        lab_approved + lab_pending, lab_budget
+                    ),
                     categories=cats_list,
                 )
             )

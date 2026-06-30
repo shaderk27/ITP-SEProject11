@@ -13,6 +13,7 @@ each test builds its own freshly-created lab_group / lab / category and asserts
 only on *that* group's subtree. The conftest `db` fixture wraps everything in a
 SAVEPOINT, so none of these inserts persist to budget_system.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -198,8 +199,8 @@ def test_breakdown_rolls_up_category_to_lab_to_group(db, admin_user):
     assert Decimal(grp.actual_spend_sgd) == Decimal("400.00")
     assert Decimal(grp.pending_sgd) == Decimal("200.00")
     assert Decimal(grp.available_balance_sgd) == Decimal("900.00")  # 1500-400-200
-    assert grp.utilisation_pct == 26.7              # 400/1500
-    assert grp.projected_utilisation_pct == 40.0    # (400+200)/1500
+    assert grp.utilisation_pct == 26.7  # 400/1500
+    assert grp.projected_utilisation_pct == 40.0  # (400+200)/1500
 
     # Exactly one lab, which mirrors the group totals
     assert len(grp.labs) == 1
