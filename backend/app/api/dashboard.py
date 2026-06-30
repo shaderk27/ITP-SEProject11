@@ -6,16 +6,17 @@ Lives separate from /api/records so the dashboard never has to
 download line-by-line data just to render one number.
 """
 from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
-from app.models.config import Lab, LabGroup
+from app.models.config import Budget, Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequestLine
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
@@ -126,3 +127,252 @@ def _aggregate_by_status(
 
 def _role_name(user: User) -> str:
     return (user.role.role_name if user.role else "").lower().strip()
+
+
+# ─── Breakdown (Lab Group → Lab → Category) ──────────────────────────────
+class BreakdownCategory(BaseModel):
+    category_id: int
+    category_name: str
+    budget_sgd: str
+    actual_spend_sgd: str
+    pending_sgd: str
+    available_balance_sgd: str
+    utilisation_pct: float
+    projected_utilisation_pct: float
+
+
+class BreakdownLab(BaseModel):
+    lab_id: int
+    lab_name: str
+    budget_sgd: str
+    actual_spend_sgd: str
+    pending_sgd: str
+    available_balance_sgd: str
+    utilisation_pct: float
+    projected_utilisation_pct: float
+    categories: list[BreakdownCategory]
+
+
+class BreakdownLabGroup(BaseModel):
+    lab_group_id: int
+    lab_group_name: str
+    budget_sgd: str
+    actual_spend_sgd: str
+    pending_sgd: str
+    available_balance_sgd: str
+    utilisation_pct: float
+    projected_utilisation_pct: float
+    labs: list[BreakdownLab]
+
+
+class BreakdownResponse(BaseModel):
+    lab_groups: list[BreakdownLabGroup]
+
+
+@router.get("/breakdown", response_model=BreakdownResponse)
+def get_breakdown(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BreakdownResponse:
+    """
+    Nested breakdown for the drilldown table: Lab Group → Lab → Category.
+
+    Each level carries the same six metrics:
+      budget, actual_spend, pending, available_balance, utilisation_pct,
+      projected_utilisation_pct.
+
+    Aggregation:
+      - Category row = a single (lab_id, category_id) budget cell.
+      - Lab row     = sum of its categories.
+      - Lab Group   = sum of its labs.
+
+    Inclusion rule: a (lab, category) appears if it has either a budget
+    row OR any spending (so configured budgets show even at 0% util,
+    and orphan spending isn't hidden).
+
+    Per spec rule #4: the "General" Lab Group is excluded entirely — its
+    lines sit in unresolved review.
+
+    Role scoping:
+      - Admin     → every (non-General) lab group.
+      - Team Lead → only their assigned lab_group_id.
+      - Lab IC    → 403.
+    """
+    role_name = _role_name(current_user)
+    if role_name not in ALLOWED_DASHBOARD_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin or Team Lead can view dashboard breakdown.",
+        )
+
+    if role_name == "teamlead" and not current_user.lab_group_id:
+        return BreakdownResponse(lab_groups=[])
+
+    # ─── 1. Name lookups (one DB hit each) ────────────────────────────
+    lab_group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
+    lab_names = {l.lab_id: l.lab_name for l in db.query(Lab).all()}
+    category_names = {c.category_id: c.category_name for c in db.query(SpendingCategory).all()}
+    # Lab → lab_group lookup used to roll lines up to their owning group.
+    lab_to_group: dict[int, int | None] = {
+        l.lab_id: l.lab_group_id for l in db.query(Lab).all()
+    }
+
+    # ─── 2. Spending per (lab, category), split by status ─────────────
+    spending_query = (
+        db.query(
+            PurchaseRequestLine.lab_id,
+            PurchaseRequestLine.category_id,
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            PurchaseRequestLine.pr_status.ilike("approved%"),
+                            PurchaseRequestLine.amount_gst,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            PurchaseRequestLine.pr_status.ilike("pending%"),
+                            PurchaseRequestLine.amount_gst,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+        )
+        .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+        .join(LabGroup, LabGroup.lab_group_id == Lab.lab_group_id)
+        .filter(LabGroup.lab_group_name != "General")
+        .group_by(PurchaseRequestLine.lab_id, PurchaseRequestLine.category_id)
+    )
+    if role_name == "teamlead":
+        spending_query = spending_query.filter(Lab.lab_group_id == current_user.lab_group_id)
+
+    spending_by_lab_cat: dict[tuple[int, int], dict[str, Decimal]] = {}
+    for lab_id, cat_id, approved, pending in spending_query.all():
+        spending_by_lab_cat[(lab_id, cat_id)] = {
+            "approved": _to_decimal(approved),
+            "pending": _to_decimal(pending),
+        }
+
+    # ─── 3. Budgets per (lab, category) ───────────────────────────────
+    budget_query = (
+        db.query(
+            Budget.lab_id,
+            Budget.category_id,
+            func.coalesce(func.sum(Budget.budget_amount), 0),
+        )
+        .join(LabGroup, LabGroup.lab_group_id == Budget.lab_group_id)
+        .filter(LabGroup.lab_group_name != "General")
+        .group_by(Budget.lab_id, Budget.category_id)
+    )
+    if role_name == "teamlead":
+        budget_query = budget_query.filter(Budget.lab_group_id == current_user.lab_group_id)
+
+    budget_by_lab_cat: dict[tuple[int, int], Decimal] = {}
+    for lab_id, cat_id, amount in budget_query.all():
+        budget_by_lab_cat[(lab_id, cat_id)] = _to_decimal(amount)
+
+    # ─── 4. Union of (lab, category) cells that exist (budget OR spend)
+    all_cells: set[tuple[int, int]] = set(budget_by_lab_cat.keys()) | set(spending_by_lab_cat.keys())
+
+    # Group cells by lab_group_id → lab_id → list[category_id]
+    by_group: dict[int, dict[int, list[int]]] = {}
+    for lab_id, cat_id in all_cells:
+        lg_id = lab_to_group.get(lab_id)
+        if lg_id is None:
+            continue
+        if lab_group_names.get(lg_id) == "General":
+            continue
+        if role_name == "teamlead" and lg_id != current_user.lab_group_id:
+            continue
+        by_group.setdefault(lg_id, {}).setdefault(lab_id, []).append(cat_id)
+
+    # ─── 5. Compose nested response, rolling up at each level ─────────
+    result_groups: list[BreakdownLabGroup] = []
+    for lg_id in sorted(by_group.keys()):
+        labs_list: list[BreakdownLab] = []
+        lg_budget = Decimal("0")
+        lg_approved = Decimal("0")
+        lg_pending = Decimal("0")
+
+        for lab_id in sorted(by_group[lg_id].keys()):
+            cats_list: list[BreakdownCategory] = []
+            lab_budget = Decimal("0")
+            lab_approved = Decimal("0")
+            lab_pending = Decimal("0")
+
+            for cat_id in sorted(by_group[lg_id][lab_id]):
+                cat_budget = budget_by_lab_cat.get((lab_id, cat_id), Decimal("0"))
+                spending = spending_by_lab_cat.get((lab_id, cat_id), {})
+                cat_approved = spending.get("approved", Decimal("0"))
+                cat_pending = spending.get("pending", Decimal("0"))
+                cat_available = cat_budget - cat_approved - cat_pending
+
+                cats_list.append(
+                    BreakdownCategory(
+                        category_id=cat_id,
+                        category_name=category_names.get(cat_id, "Unknown"),
+                        budget_sgd=str(cat_budget),
+                        actual_spend_sgd=str(cat_approved),
+                        pending_sgd=str(cat_pending),
+                        available_balance_sgd=str(cat_available),
+                        utilisation_pct=_pct(cat_approved, cat_budget),
+                        projected_utilisation_pct=_pct(cat_approved + cat_pending, cat_budget),
+                    )
+                )
+                lab_budget += cat_budget
+                lab_approved += cat_approved
+                lab_pending += cat_pending
+
+            labs_list.append(
+                BreakdownLab(
+                    lab_id=lab_id,
+                    lab_name=lab_names.get(lab_id, "Unknown"),
+                    budget_sgd=str(lab_budget),
+                    actual_spend_sgd=str(lab_approved),
+                    pending_sgd=str(lab_pending),
+                    available_balance_sgd=str(lab_budget - lab_approved - lab_pending),
+                    utilisation_pct=_pct(lab_approved, lab_budget),
+                    projected_utilisation_pct=_pct(lab_approved + lab_pending, lab_budget),
+                    categories=cats_list,
+                )
+            )
+            lg_budget += lab_budget
+            lg_approved += lab_approved
+            lg_pending += lab_pending
+
+        result_groups.append(
+            BreakdownLabGroup(
+                lab_group_id=lg_id,
+                lab_group_name=lab_group_names.get(lg_id, "Unknown"),
+                budget_sgd=str(lg_budget),
+                actual_spend_sgd=str(lg_approved),
+                pending_sgd=str(lg_pending),
+                available_balance_sgd=str(lg_budget - lg_approved - lg_pending),
+                utilisation_pct=_pct(lg_approved, lg_budget),
+                projected_utilisation_pct=_pct(lg_approved + lg_pending, lg_budget),
+                labs=labs_list,
+            )
+        )
+
+    return BreakdownResponse(lab_groups=result_groups)
+
+
+def _to_decimal(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value or 0))
+
+
+def _pct(numerator: Decimal, denominator: Decimal) -> float:
+    if denominator <= 0:
+        return 0.0
+    return round(float((numerator / denominator) * 100), 1)
