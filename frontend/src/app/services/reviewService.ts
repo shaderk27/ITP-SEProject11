@@ -1,4 +1,3 @@
-import type { User } from "../context/AuthContext";
 import type {
   CommitResponse,
   CorrectionRequest,
@@ -10,23 +9,12 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-/**
- * Header pattern mirrors uploadService.ts so the same demo-login email
- * works for both. When real auth (W7-02) ships, this whole block becomes
- * an Authorization: Bearer token instead.
- */
-function userHeaders(user: User | null): HeadersInit {
-  return {
-    "X-User-Email": user?.email ?? "demo.teamlead@sit.edu.sg",
-    "X-User-Name": user?.name ?? "Demo Team Lead",
-    "X-User-Role": user?.role ?? "teamlead",
-  };
-}
+// All calls ship the `access_token` JWT cookie set by /api/auth/login.
+// Backend resolves the user from that cookie (see dependencies/auth.py).
+const FETCH_OPTS: RequestInit = { credentials: "include" };
 
-export async function listReviewBatches(user: User | null): Promise<ReviewBatchSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/api/review/batches`, {
-    headers: userHeaders(user),
-  });
+export async function listReviewBatches(): Promise<ReviewBatchSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/api/review/batches`, FETCH_OPTS);
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);
@@ -36,10 +24,8 @@ export async function listReviewBatches(user: User | null): Promise<ReviewBatchS
   return response.json();
 }
 
-export async function getBatchDetail(batchId: number, user: User | null): Promise<ReviewBatchDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/review/batches/${batchId}`, {
-    headers: userHeaders(user),
-  });
+export async function getBatchDetail(batchId: number): Promise<ReviewBatchDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/review/batches/${batchId}`, FETCH_OPTS);
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);
@@ -49,10 +35,8 @@ export async function getBatchDetail(batchId: number, user: User | null): Promis
   return response.json();
 }
 
-export async function getQueueItem(itemId: number, user: User | null): Promise<QueueItemDetail> {
-  const response = await fetch(`${API_BASE_URL}/api/review/queue/${itemId}`, {
-    headers: userHeaders(user),
-  });
+export async function getQueueItem(itemId: number): Promise<QueueItemDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/review/queue/${itemId}`, FETCH_OPTS);
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);
@@ -65,14 +49,11 @@ export async function getQueueItem(itemId: number, user: User | null): Promise<Q
 export async function saveCorrection(
   itemId: number,
   body: CorrectionRequest,
-  user: User | null,
 ): Promise<CorrectionResponse> {
   const response = await fetch(`${API_BASE_URL}/api/review/queue/${itemId}/correct`, {
+    ...FETCH_OPTS,
     method: "POST",
-    headers: {
-      ...userHeaders(user),
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
@@ -84,10 +65,10 @@ export async function saveCorrection(
   return response.json();
 }
 
-export async function commitBatch(batchId: number, user: User | null): Promise<CommitResponse> {
+export async function commitBatch(batchId: number): Promise<CommitResponse> {
   const response = await fetch(`${API_BASE_URL}/api/review/batches/${batchId}/commit`, {
+    ...FETCH_OPTS,
     method: "POST",
-    headers: userHeaders(user),
   });
 
   if (!response.ok) {

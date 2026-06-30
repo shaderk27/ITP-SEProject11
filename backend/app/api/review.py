@@ -179,6 +179,7 @@ class CommitResponse(BaseModel):
     batch_id: int
     new_upload_status: str
     prs_created: int
+    prs_updated: int
     lines_created: int
     pr_ids: list[int]
 
@@ -667,12 +668,17 @@ def commit_batch(
       - For Team Lead: batch must contain at least one line in their lab_group.
 
     Side effects (single transaction):
-      - INSERT one purchase_requests row per staging_pr_headers row
+      - For each staging header:
+        * If no purchase_requests row exists with same source_pr_number:
+            INSERT new PR + pr_versions(change_type='created', old_data=NULL)
+        * If one already exists (re-upload):
+            DELETE all its existing purchase_request_lines,
+            UPDATE the PR fields with the new values,
+            INSERT pr_versions(change_type='updated', old_data=<prior snapshot>)
       - INSERT one purchase_request_lines row per staging_pr_lines row
         (carrying source_staging_line_id for traceability)
-      - INSERT one pr_versions row per PR (change_type='created')
       - UPDATE upload_batches.upload_status = 'committed', processed_at = NOW()
-      - INSERT one audit_logs row (BATCH_COMMITTED)
+      - INSERT one audit_logs row (BATCH_COMMITTED) with both created + updated counts
     """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
@@ -747,7 +753,8 @@ def commit_batch(
         )
 
     pr_ids: list[int] = []
-    prs_updated = 0
+    prs_created_count = 0
+    prs_updated_count = 0
     lines_created = 0
     lines_updated = 0
 
@@ -761,14 +768,29 @@ def commit_batch(
         # Use the first line's lab_group as the PR-level lab_group_id.
         # (All lines under one PR typically share a group; refine later if not.)
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
+        # PR Status from source xlsx (e.g. "Approved (SVP)", "Pending Approval",
+        # "Rejected"). Same value on every row of a given PR, so first line wins.
+        pr_status_value = _raw_line_value(lines[0], "pr_status") if lines else ""
+        pr_status_value = pr_status_value or None
 
-        pr = (
+        # UPDATE if a PR with this source_pr_number already exists; otherwise INSERT.
+        # Re-upload semantics (merged W9-02 + W9-04):
+        #   - Header fields (requestor, wbs, totals) refresh from the new source file.
+        #   - Existing committed lines are PRESERVED — reviewer's lab/category sticks.
+        #     Only `source_staging_line_id` is bumped to point at the newest staging row.
+        #   - Lines without a matching `line_identity_key` are inserted as new.
+        #   - `pr_versions` captures the full PR-header snapshot every commit
+        #     (created OR updated), plus source-system status diffs when present.
+        existing_pr = (
             db.query(PurchaseRequest)
             .filter(PurchaseRequest.source_pr_number == header.source_pr_number)
             .first()
         )
-        is_new_pr = pr is None
-        if pr is None:
+
+        if existing_pr is None:
+            change_type = "created"
+            old_data = None
+
             pr = PurchaseRequest(
                 source_pr_number=header.source_pr_number,
                 latest_batch_id=batch.batch_id,
@@ -780,15 +802,50 @@ def commit_batch(
                 instruction_to_vendor=header.instruction_to_vendor,
                 grand_total_sgd=header.grand_total_sgd,
                 lab_group_id=pr_lab_group_id,
+                pr_status=pr_status_value,
             )
             db.add(pr)
             db.flush()
-            pr_ids.append(pr.pr_id)
+            prs_created_count += 1
         else:
-            pr.latest_batch_id = batch.batch_id
-            pr.updated_at = func.now()
-            prs_updated += 1
+            change_type = "updated"
+            existing_line_count = (
+                db.query(func.count(PurchaseRequestLine.pr_line_id))
+                .filter(PurchaseRequestLine.pr_id == existing_pr.pr_id)
+                .scalar()
+                or 0
+            )
+            old_data = {
+                "source_pr_number": existing_pr.source_pr_number,
+                "requestor_name": existing_pr.requestor_name,
+                "wbs_code": existing_pr.wbs_code,
+                "lab_group_id": existing_pr.lab_group_id,
+                "grand_total_sgd": str(existing_pr.grand_total_sgd) if existing_pr.grand_total_sgd is not None else None,
+                "line_count": existing_line_count,
+                "latest_batch_id": existing_pr.latest_batch_id,
+                "pr_status": existing_pr.pr_status,
+            }
 
+            # Refresh PR header fields from the new source file; lines handled below.
+            existing_pr.latest_batch_id = batch.batch_id
+            existing_pr.requestor_name = header.requestor_name
+            existing_pr.req_type = header.req_type
+            existing_pr.request_date = header.pr_sub_date
+            existing_pr.purpose = header.purpose
+            existing_pr.wbs_code = header.wbs_code
+            existing_pr.instruction_to_vendor = header.instruction_to_vendor
+            existing_pr.grand_total_sgd = header.grand_total_sgd
+            existing_pr.lab_group_id = pr_lab_group_id
+            existing_pr.pr_status = pr_status_value
+            existing_pr.updated_at = func.now()
+            db.flush()
+            pr = existing_pr
+            prs_updated_count += 1
+
+        pr_ids.append(pr.pr_id)
+
+        # Line-level preservation (Harry's W9-04 logic):
+        # match each incoming staging line to an existing final line by line_identity_key.
         existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
         status_updates: list[dict] = []
 
@@ -800,11 +857,11 @@ def commit_batch(
                 old_status = _source_status_snapshot(old_staging_line)
                 new_status = _source_status_snapshot(line)
 
-                # Source-system reupload rule:
-                # keep reviewed final Lab/Category/Amount fields intact, but
-                # point traceability to the newest raw source row and version
-                # the source lifecycle status change.
+                # Preserve reviewed final Lab/Category/Amount, only bump traceability pointer.
+                # PR Status is source-system metadata, not reviewer work — refresh
+                # it from the new staging line so it tracks the latest source file.
                 existing_line.source_staging_line_id = line.staging_line_id
+                existing_line.pr_status = _raw_line_value(line, "pr_status") or None
                 lines_updated += 1
                 if old_status != new_status:
                     status_updates.append(
@@ -829,51 +886,47 @@ def commit_batch(
                     lab_id=line.suggested_lab_id,
                     category_id=line.suggested_category_id,
                     source_staging_line_id=line.staging_line_id,
+                    pr_status=_raw_line_value(line, "pr_status") or None,
                 )
             )
             lines_created += 1
 
-        if is_new_pr:
-            # History row for this PR.
-            db.add(
-                PRVersion(
-                    pr_id=pr.pr_id,
-                    batch_id=batch.batch_id,
-                    change_type="created",
-                    old_data=None,
-                    new_data={
-                        "source_pr_number": pr.source_pr_number,
-                        "requestor_name": pr.requestor_name,
-                        "wbs_code": pr.wbs_code,
-                        "lab_group_id": pr.lab_group_id,
-                        "grand_total_sgd": str(pr.grand_total_sgd)
-                        if pr.grand_total_sgd is not None
-                        else None,
-                        "line_count": len(lines),
-                    },
-                    changed_by=current_user.user_id,
-                    change_reason=f"Batch {batch.batch_id} committed",
-                )
+        # One pr_versions row per commit, with full header snapshot on both
+        # 'created' and 'updated' change types, plus source-status diffs if any.
+        db.flush()
+        final_line_count = (
+            db.query(func.count(PurchaseRequestLine.pr_line_id))
+            .filter(PurchaseRequestLine.pr_id == pr.pr_id)
+            .scalar()
+            or 0
+        )
+        new_data = {
+            "source_pr_number": pr.source_pr_number,
+            "requestor_name": pr.requestor_name,
+            "wbs_code": pr.wbs_code,
+            "lab_group_id": pr.lab_group_id,
+            "grand_total_sgd": str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else None,
+            "line_count": final_line_count,
+            "latest_batch_id": pr.latest_batch_id,
+            "pr_status": pr.pr_status,
+        }
+        if status_updates:
+            new_data["status_updates"] = [u["new_status"] for u in status_updates]
+            if old_data is None:
+                old_data = {}
+            old_data["status_updates"] = [u["old_status"] for u in status_updates]
+
+        db.add(
+            PRVersion(
+                pr_id=pr.pr_id,
+                batch_id=batch.batch_id,
+                change_type=change_type,
+                old_data=old_data,
+                new_data=new_data,
+                changed_by=current_user.user_id,
+                change_reason=f"Batch {batch.batch_id} committed",
             )
-        elif status_updates:
-            db.add(
-                PRVersion(
-                    pr_id=pr.pr_id,
-                    batch_id=batch.batch_id,
-                    change_type="source_status_updated",
-                    old_data={
-                        "status_updates": [u["old_status"] for u in status_updates]
-                    },
-                    new_data={
-                        "status_updates": [u["new_status"] for u in status_updates]
-                    },
-                    changed_by=current_user.user_id,
-                    change_reason=(
-                        f"Batch {batch.batch_id} refreshed source PR/PO status "
-                        "without overwriting reviewed classification."
-                    ),
-                )
-            )
+        )
 
     # Mark batch committed.
     batch.upload_status = "committed"
@@ -889,8 +942,8 @@ def commit_batch(
             old_value={"upload_status": "ready_to_commit"},
             new_value={
                 "upload_status": "committed",
-                "prs_created": len(pr_ids),
-                "prs_updated": prs_updated,
+                "prs_created": prs_created_count,
+                "prs_updated": prs_updated_count,
                 "lines_created": lines_created,
                 "lines_updated": lines_updated,
             },
@@ -903,7 +956,8 @@ def commit_batch(
         success=True,
         batch_id=batch.batch_id,
         new_upload_status=batch.upload_status,
-        prs_created=len(pr_ids),
+        prs_created=prs_created_count,
+        prs_updated=prs_updated_count,
         lines_created=lines_created,
         pr_ids=pr_ids,
     )

@@ -4,7 +4,6 @@ import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, X } from "lucide-rea
 import { Card } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { ValidationErrors } from "../components/shared/ValidationErrors";
-import { useAuth } from "../context/AuthContext";
 import { processUploadBatch } from "../services/uploadService";
 
 const ACCEPTED_EXTENSIONS = ["xlsx", "csv"];
@@ -37,7 +36,6 @@ function getUploadFileKey(file: File) {
 
 export function UploadPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [validationErrors, setValidationErrors] = useState<Array<{field: string; message: string; severity: "error" | "warning"}>>([]);
@@ -109,7 +107,7 @@ export function UploadPage() {
     setValidationErrors([]);
 
     try {
-      const result = await processUploadBatch(files, user);
+      const result = await processUploadBatch(files);
       if (!result.success) {
         setValidationErrors(result.validation_errors);
         return;

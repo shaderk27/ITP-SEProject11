@@ -6,6 +6,7 @@ Takes the output of Harry's parser + classifier and writes it to:
   - staging_pr_headers    (1 row per unique PR number in the file)
   - staging_pr_lines      (1 row per parsed line, with classifier guesses)
   - review_queue_items    (1 row per line that needs human review)
+  - audit_logs            (1 row per upload, action_type='UPLOAD_RECEIVED')
 
 Everything happens in a single transaction. If any insert fails,
 SQLAlchemy rolls back the whole batch (via the session lifecycle in get_db).
@@ -19,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import (
+    AuditLog,
     PurchaseRequest,
     PurchaseRequestLine,
     ReviewQueueItem,
@@ -222,7 +224,26 @@ def persist_upload_to_db(
     if queue_items_inserted == 0:
         batch.upload_status = "ready_to_commit"
 
-    # ─── 7. Persist everything atomically ─────────────────────────────────
+    # ─── 7. Audit: record who uploaded what, alongside the staging writes.
+    db.add(
+        AuditLog(
+            user_id=current_user.user_id,
+            action_type="UPLOAD_RECEIVED",
+            entity_name="upload_batches",
+            record_id=str(batch.batch_id),
+            old_value=None,
+            new_value={
+                "filename": metadata.filename,
+                "file_type": batch.file_type,
+                "headers_inserted": headers_inserted,
+                "lines_inserted": lines_inserted,
+                "queue_items_inserted": queue_items_inserted,
+                "upload_status": batch.upload_status,
+            },
+        )
+    )
+
+    # ─── 8. Persist everything atomically ─────────────────────────────────
     db.commit()
 
     return {

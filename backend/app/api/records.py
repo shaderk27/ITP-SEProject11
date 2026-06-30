@@ -37,6 +37,9 @@ class CommittedPRLine(BaseModel):
     lab_name: str
     category_name: str
     source_staging_line_id: int | None
+    # Per-line source-system status (e.g. "Approved (SVP)", "Pending Approval",
+    # "Rejected"). A PR can have lines in different states.
+    pr_status: str | None
 
 
 class CommittedPR(BaseModel):
@@ -49,9 +52,11 @@ class CommittedPR(BaseModel):
     lab_group_name: str
     latest_batch_id: int | None
     updated_at: datetime
-    # All committed PRs share this status; kept as a field so the UI doesn't
-    # need to hardcode it and future statuses (archived/superseded) slot in.
+    # System lifecycle status — always "committed" for rows on this endpoint.
     status: str
+    # Source-system PR Status from the latest xlsx (e.g. "Approved (SVP)",
+    # "Pending Approval", "Rejected"). Null if the column wasn't populated.
+    pr_status: str | None
     lines: list[CommittedPRLine]
 
 
@@ -120,6 +125,7 @@ def list_committed_prs(
             latest_batch_id=pr.latest_batch_id,
             updated_at=pr.updated_at,
             status="committed",
+            pr_status=pr.pr_status,
             lines=[
                 CommittedPRLine(
                     pr_line_id=line.pr_line_id,
@@ -136,6 +142,7 @@ def list_committed_prs(
                     lab_name=lab_names.get(line.lab_id, "General"),
                     category_name=cat_names.get(line.category_id, "General"),
                     source_staging_line_id=line.source_staging_line_id,
+                    pr_status=line.pr_status,
                 )
                 for line in lines_by_pr.get(pr.pr_id, [])
             ],
