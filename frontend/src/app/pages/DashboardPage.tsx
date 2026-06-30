@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DollarSign, TrendingUp, AlertCircle, Wallet, Percent } from "lucide-react";
+import { DollarSign, TrendingUp, AlertCircle, Wallet, Percent, Clock } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
@@ -147,7 +147,7 @@ export function DashboardPage() {
         )}
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-6">
           <KPICard
             title="Total Budget"
             value={formatCurrency(totalBudget)}
@@ -155,15 +155,21 @@ export function DashboardPage() {
             status="info"
           />
           <KPICard
-            title="Available Balance"
-            value={formatCurrency(availableBalance)}
-            icon={Wallet}
-            status="info"
-          />
-          <KPICard
             title="Actual Spend"
             value={formatCurrency(actualSpend)}
             icon={TrendingUp}
+            status="info"
+          />
+          <KPICard
+            title="Pending Amount"
+            value={formatCurrency(pendingSpend)}
+            icon={Clock}
+            status="info"
+          />
+          <KPICard
+            title="Available Balance"
+            value={formatCurrency(availableBalance)}
+            icon={Wallet}
             status="info"
           />
           <KPICard
