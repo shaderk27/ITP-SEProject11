@@ -5,8 +5,8 @@ import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
-import { listLabGroups } from "../services/dashboardService";
-import type { LabGroupSummary } from "../types/dashboard";
+import { getSpendingSummary, listLabGroups } from "../services/dashboardService";
+import type { LabGroupSummary, SpendingSummary } from "../types/dashboard";
 import {
   BarChart,
   Bar,
@@ -45,21 +45,23 @@ const recentUploads = [
 
 export function DashboardPage() {
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
+  const [spending, setSpending] = useState<SpendingSummary | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string>("all");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listLabGroups()
-      .then((groups) => {
+    Promise.all([listLabGroups(), getSpendingSummary()])
+      .then(([groups, spendingSummary]) => {
         if (!cancelled) {
           setLabGroups(groups);
+          setSpending(spendingSummary);
           setLoadError(null);
         }
       })
       .catch((err) => {
         if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : "Failed to load lab groups.");
+          setLoadError(err instanceof Error ? err.message : "Failed to load dashboard data.");
         }
       });
     return () => {
@@ -67,6 +69,8 @@ export function DashboardPage() {
     };
   }, []);
 
+  // Total Budget = raw System Config number, scoped by the Lab Group dropdown.
+  // Always shows the full configured budget (not adjusted for spend/pending).
   const totalBudget = useMemo(() => {
     if (selectedGroupId === "all") {
       return labGroups.reduce((sum, g) => sum + g.budget, 0);
@@ -75,9 +79,31 @@ export function DashboardPage() {
     return match ? match.budget : 0;
   }, [labGroups, selectedGroupId]);
 
-  // Actual Spend wiring comes in W11-01 (spending aggregation). Placeholder 0 until then.
-  const actualSpend = 0;
-  const availableBalance = totalBudget - actualSpend;
+  // Actual Spend = sum of Approved lines only. Backend role-filters; Team
+  // Lead only ever gets their own group's numbers.
+  const actualSpend = useMemo(() => {
+    if (!spending) return 0;
+    if (selectedGroupId === "all") {
+      return Number(spending.total_actual_spend_sgd) || 0;
+    }
+    const raw = spending.by_lab_group[selectedGroupId];
+    return raw ? Number(raw) || 0 : 0;
+  }, [spending, selectedGroupId]);
+
+  // Pending = committed but not yet approved. Only used to reduce Available
+  // Balance; doesn't affect Total Budget or Utilisation %.
+  const pendingSpend = useMemo(() => {
+    if (!spending) return 0;
+    if (selectedGroupId === "all") {
+      return Number(spending.total_pending_sgd) || 0;
+    }
+    const raw = spending.pending_by_lab_group[selectedGroupId];
+    return raw ? Number(raw) || 0 : 0;
+  }, [spending, selectedGroupId]);
+
+  // Available = Total Budget - Approved - Pending.
+  // Utilisation = Approved / Total Budget (pending does NOT affect it).
+  const availableBalance = totalBudget - actualSpend - pendingSpend;
   const utilizationPct = totalBudget > 0 ? (actualSpend / totalBudget) * 100 : 0;
 
   const labGroupOptions = [
