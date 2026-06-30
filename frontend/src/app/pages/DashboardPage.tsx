@@ -75,6 +75,8 @@ export function DashboardPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>(() =>
     user?.labGroupId ? String(user.labGroupId) : "all",
   );
+  // Date Range dropdown: all / fy (current fiscal year) / 7d / 30d / 90d.
+  const [dateRange, setDateRange] = useState("all");
   const [loadError, setLoadError] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -98,7 +100,11 @@ export function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listLabGroups(), getSpendingSummary(), getBreakdown()])
+    Promise.all([
+      listLabGroups(),
+      getSpendingSummary(dateRange),
+      getBreakdown(dateRange),
+    ])
       .then(([groups, spendingSummary, breakdownResp]) => {
         if (!cancelled) {
           setLabGroups(groups);
@@ -115,7 +121,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dateRange]);
 
   // Total Budget = raw System Config number, scoped by the Lab Group dropdown.
   // Always shows the full configured budget (not adjusted for spend/pending).
@@ -201,15 +207,18 @@ export function DashboardPage() {
         searchPlaceholder="Search dashboard..."
         onFilterChange={(filterId, value) => {
           if (filterId === "Lab Group") setSelectedGroupId(value);
+          if (filterId === "Date Range") setDateRange(value);
         }}
         filters={[
           {
             label: "Date Range",
+            value: dateRange,
             options: [
+              { value: "all", label: "All time" },
+              { value: "fy", label: "This fiscal year" },
               { value: "7d", label: "Last 7 days" },
               { value: "30d", label: "Last 30 days" },
               { value: "90d", label: "Last 90 days" },
-              { value: "ytd", label: "Year to date" },
             ],
           },
           {

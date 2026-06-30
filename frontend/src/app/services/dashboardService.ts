@@ -22,10 +22,19 @@ export async function listLabGroups(): Promise<LabGroupSummary[]> {
   }));
 }
 
-export async function getSpendingSummary(): Promise<SpendingSummary> {
-  const response = await fetch(`${API_BASE_URL}/api/dashboard/spending`, {
-    credentials: "include",
-  });
+function dateRangeQuery(dateRange: string): string {
+  return dateRange && dateRange !== "all"
+    ? `?date_range=${encodeURIComponent(dateRange)}`
+    : "";
+}
+
+export async function getSpendingSummary(
+  dateRange: string = "all",
+): Promise<SpendingSummary> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/dashboard/spending${dateRangeQuery(dateRange)}`,
+    { credentials: "include" },
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to load spending summary (${response.status}).`);
@@ -34,10 +43,13 @@ export async function getSpendingSummary(): Promise<SpendingSummary> {
   return response.json();
 }
 
-export async function getBreakdown(): Promise<BreakdownResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/dashboard/breakdown`, {
-    credentials: "include",
-  });
+export async function getBreakdown(
+  dateRange: string = "all",
+): Promise<BreakdownResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/dashboard/breakdown${dateRangeQuery(dateRange)}`,
+    { credentials: "include" },
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to load dashboard breakdown (${response.status}).`);

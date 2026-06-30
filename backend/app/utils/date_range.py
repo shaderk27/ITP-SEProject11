@@ -37,3 +37,32 @@ def date_range_cutoff(preset: str | None, today: date | None = None) -> date | N
     if preset == "ytd":
         return date(today.year, 1, 1)
     return None
+
+
+def fiscal_year_bounds(today: date | None = None) -> tuple[date, date]:
+    """
+    Inclusive (start, end) of the current fiscal year (Apr 1 → Mar 31).
+
+    Mirrors config.get_or_create_current_period: months before April belong to
+    the prior year's FY. e.g. 2026-07-01 → (2026-04-01, 2027-03-31).
+    """
+    today = today or date.today()
+    start_year = today.year if today.month >= 4 else today.year - 1
+    return date(start_year, 4, 1), date(start_year + 1, 3, 31)
+
+
+def date_range_bounds(
+    preset: str | None, today: date | None = None
+) -> tuple[date | None, date | None]:
+    """
+    Inclusive (start, end) bounds for a Date Range preset, used by the dashboard
+    where the fiscal-year option needs an upper bound too.
+
+    - "fy"               → the full current fiscal year span.
+    - 7d / 30d / 90d/ytd → (cutoff, None): a lower bound only, up to today.
+    - "all" / None / etc → (None, None): no filter.
+    """
+    today = today or date.today()
+    if preset == "fy":
+        return fiscal_year_bounds(today)
+    return date_range_cutoff(preset, today), None
