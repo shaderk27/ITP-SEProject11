@@ -1,10 +1,12 @@
-import { DollarSign, TrendingUp, AlertCircle, FileText } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { DollarSign, TrendingUp, AlertCircle, Wallet, Percent } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
-import { useAuth } from "../context/AuthContext";
+import { listLabGroups } from "../services/dashboardService";
+import type { LabGroupSummary } from "../types/dashboard";
 import {
   BarChart,
   Bar,
@@ -42,29 +44,55 @@ const recentUploads = [
 ];
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("all");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Filter data based on user role and assigned labs
-  const getFilteredData = () => {
-    if (user?.role === "admin") {
-      return { budgetData, categoryData, recentUploads };
-    } else if (user?.role === "teamlead") {
-      // Filter for assigned labs
-      return { budgetData, categoryData, recentUploads };
-    } else if (user?.role === "labic") {
-      // Show only their specific lab data
-      return { budgetData, categoryData, recentUploads };
+  useEffect(() => {
+    let cancelled = false;
+    listLabGroups()
+      .then((groups) => {
+        if (!cancelled) {
+          setLabGroups(groups);
+          setLoadError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : "Failed to load lab groups.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const totalBudget = useMemo(() => {
+    if (selectedGroupId === "all") {
+      return labGroups.reduce((sum, g) => sum + g.budget, 0);
     }
-    return { budgetData, categoryData, recentUploads };
-  };
+    const match = labGroups.find((g) => String(g.id) === selectedGroupId);
+    return match ? match.budget : 0;
+  }, [labGroups, selectedGroupId]);
 
-  const filteredData = getFilteredData();
+  // Actual Spend wiring comes in W11-01 (spending aggregation). Placeholder 0 until then.
+  const actualSpend = 0;
+  const availableBalance = totalBudget - actualSpend;
+  const utilizationPct = totalBudget > 0 ? (actualSpend / totalBudget) * 100 : 0;
+
+  const labGroupOptions = [
+    { value: "all", label: "All Lab Groups" },
+    ...labGroups.map((g) => ({ value: String(g.id), label: g.name })),
+  ];
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       {/* Filters */}
       <FilterBar
         searchPlaceholder="Search dashboard..."
+        onFilterChange={(filterId, value) => {
+          if (filterId === "Lab Group") setSelectedGroupId(value);
+        }}
         filters={[
           {
             label: "Date Range",
@@ -77,11 +105,7 @@ export function DashboardPage() {
           },
           {
             label: "Lab Group",
-            options: [
-              { value: "all", label: "All Lab Groups" },
-              { value: "w3", label: "W3 - Food Processing" },
-              { value: "w4", label: "W4 - Materials Testing" },
-            ],
+            options: labGroupOptions,
           },
         ]}
       />
@@ -90,32 +114,37 @@ export function DashboardPage() {
         {/* Role Info */}
         <RoleInfo />
 
+        {loadError && (
+          <Card className="p-4 bg-[#fef2f2] border-[#fecaca]">
+            <p className="text-sm text-[#b91c1c]">{loadError}</p>
+          </Card>
+        )}
+
         {/* KPI Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <KPICard
-            title={user?.role === "labic" ? "Lab Budget" : "Total Budget"}
-            value={user?.role === "labic" ? "$65,000" : "$540,000"}
+            title="Total Budget"
+            value={formatCurrency(totalBudget)}
             icon={DollarSign}
             status="info"
           />
           <KPICard
+            title="Available Balance"
+            value={formatCurrency(availableBalance)}
+            icon={Wallet}
+            status="info"
+          />
+          <KPICard
             title="Actual Spend"
-            value={user?.role === "labic" ? "$72,800" : "$223,800"}
+            value={formatCurrency(actualSpend)}
             icon={TrendingUp}
-            trend={{ value: user?.role === "labic" ? "+12% over budget" : "+8.2% vs last month", isPositive: user?.role === "labic" ? false : true }}
-            status={user?.role === "labic" ? "error" : "success"}
+            status="info"
           />
           <KPICard
-            title="Utilization"
-            value={user?.role === "labic" ? "112%" : "41.4%"}
-            icon={TrendingUp}
-            status={user?.role === "labic" ? "error" : "warning"}
-          />
-          <KPICard
-            title="Active Alerts"
-            value={user?.role === "labic" ? "1" : "3"}
-            icon={AlertCircle}
-            status="error"
+            title="Utilisation %"
+            value={`${utilizationPct.toFixed(1)}%`}
+            icon={Percent}
+            status={utilizationPct >= 95 ? "error" : utilizationPct >= 80 ? "warning" : "info"}
           />
         </div>
 
@@ -262,4 +291,13 @@ export function DashboardPage() {
       </div>
     </div>
   );
+}
+
+function formatCurrency(amount: number): string {
+  return amount.toLocaleString("en-SG", {
+    style: "currency",
+    currency: "SGD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 }

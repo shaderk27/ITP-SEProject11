@@ -14,6 +14,7 @@ export interface CommittedPRLine {
   lab_name: string;
   category_name: string;
   source_staging_line_id: number | null;
+  pr_status: string | null;
 }
 
 export interface CommittedPR {
@@ -27,5 +28,6 @@ export interface CommittedPR {
   latest_batch_id: number | null;
   updated_at: string;
   status: string;
+  pr_status: string | null;
   lines: CommittedPRLine[];
 }

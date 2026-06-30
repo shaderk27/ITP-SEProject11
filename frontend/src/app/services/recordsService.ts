@@ -1,20 +1,11 @@
-import type { User } from "../context/AuthContext";
 import type { CommittedPR } from "../types/records";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-function userHeaders(user: User | null): HeadersInit {
-  return {
-    "X-User-Email": user?.email ?? "demo.teamlead@sit.edu.sg",
-    "X-User-Name": user?.name ?? "Demo Team Lead",
-    "X-User-Role": user?.role ?? "teamlead",
-  };
-}
+const FETCH_OPTS: RequestInit = { credentials: "include" };
 
-export async function listCommittedPRs(user: User | null): Promise<CommittedPR[]> {
-  const response = await fetch(`${API_BASE_URL}/api/records/prs`, {
-    headers: userHeaders(user),
-  });
+export async function listCommittedPRs(): Promise<CommittedPR[]> {
+  const response = await fetch(`${API_BASE_URL}/api/records/prs`, FETCH_OPTS);
 
   if (!response.ok) {
     const detail = await readErrorDetail(response);

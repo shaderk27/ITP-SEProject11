@@ -18,12 +18,13 @@ export function RecordsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchRecords = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await listCommittedPRs(user);
+      const data = await listCommittedPRs();
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
         setExpandedPr(data[0].pr_id);
@@ -55,10 +56,27 @@ export function RecordsPage() {
     new Set(records.map((r) => r.lab_group_name)),
   ).map((name) => ({ value: name.toLowerCase(), label: name }));
 
+  const q = searchQuery.trim().toLowerCase();
+  const filteredRecords = q
+    ? records.filter((pr) => {
+        if (pr.source_pr_number?.toLowerCase().includes(q)) return true;
+        if (pr.requestor_name?.toLowerCase().includes(q)) return true;
+        if (pr.wbs_code?.toLowerCase().includes(q)) return true;
+        if (pr.lab_group_name?.toLowerCase().includes(q)) return true;
+        return pr.lines.some(
+          (line) =>
+            line.item_description?.toLowerCase().includes(q) ||
+            line.lab_name?.toLowerCase().includes(q) ||
+            line.pr_status?.toLowerCase().includes(q),
+        );
+      })
+    : records;
+
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       <FilterBar
-        searchPlaceholder="Search PR, requestor, WBS, item details..."
+        searchPlaceholder="Search PR, requestor, WBS, status, item details..."
+        onSearchChange={setSearchQuery}
         filters={[
           {
             label: "Lab Group",
@@ -85,7 +103,9 @@ export function RecordsPage() {
             <p className="text-sm text-muted-foreground mt-1">
               {loading
                 ? "Loading…"
-                : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
+                : q
+                  ? `${filteredRecords.length} of ${records.length} committed purchase request${records.length === 1 ? "" : "s"} match "${searchQuery.trim()}".`
+                  : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
             </p>
           </div>
           <Button size="sm" variant="outline" onClick={fetchRecords} disabled={loading}>
@@ -108,8 +128,16 @@ export function RecordsPage() {
           </Card>
         )}
 
+        {!loading && !error && records.length > 0 && filteredRecords.length === 0 && (
+          <Card className="p-8 text-center text-muted-foreground">
+            <p className="text-sm">
+              No PRs match "{searchQuery.trim()}". Try a different search term.
+            </p>
+          </Card>
+        )}
+
         <div className="space-y-4">
-          {records.map((pr) => {
+          {filteredRecords.map((pr) => {
             const isExpanded = expandedPr === pr.pr_id;
             return (
               <Card key={pr.pr_id} className="bg-white border-border overflow-hidden">
@@ -153,6 +181,7 @@ export function RecordsPage() {
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Qty</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Unit Rate</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
+                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -174,6 +203,15 @@ export function RecordsPage() {
                               <td className="p-3 text-sm text-right font-medium text-foreground">
                                 {line.currency_code === "SGD" ? "$" : `${line.currency_code} `}
                                 {formatAmount(line.amount_gst)}
+                              </td>
+                              <td className="p-3 text-sm">
+                                {line.pr_status ? (
+                                  <StatusBadge status={prStatusVariant(line.pr_status)}>
+                                    {line.pr_status}
+                                  </StatusBadge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
                               </td>
                             </tr>
                           </Fragment>
@@ -221,4 +259,14 @@ function formatAmount(raw: string): string {
 
 function prettyStatus(raw: string): string {
   return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Maps the source-system PR Status string to a StatusBadge variant.
+// Raw text is displayed as-is; this only picks the color.
+function prStatusVariant(raw: string): "approved" | "pending" | "rejected" | "general" {
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("approved")) return "approved";
+  if (lower.startsWith("rejected")) return "rejected";
+  if (lower.startsWith("pending")) return "pending";
+  return "general";
 }
