@@ -17,6 +17,7 @@ from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
 from app.models.auth import User
+from app.utils.date_range import date_range_cutoff
 
 router = APIRouter(prefix="/api/records", tags=["Records"])
 
@@ -57,12 +58,15 @@ class CommittedPR(BaseModel):
     # Source-system PR Status from the latest xlsx (e.g. "Approved (SVP)",
     # "Pending Approval", "Rejected"). Null if the column wasn't populated.
     pr_status: str | None
+    # PR Sub Date from the xlsx (ISO yyyy-mm-dd). Null if not populated.
+    request_date: str | None
     lines: list[CommittedPRLine]
 
 
 # ─── Endpoint ────────────────────────────────────────────────────────────
 @router.get("/prs", response_model=list[CommittedPR])
 def list_committed_prs(
+    date_range: str = "all",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CommittedPR]:
@@ -73,6 +77,10 @@ def list_committed_prs(
       - Admin     → every committed PR.
       - Team Lead → only PRs whose lab_group_id matches their lab_group_id.
       - Lab IC    → 403 (page hidden in sidebar; backend mirror).
+
+    ``date_range`` (W11-03) filters on ``request_date`` (the xlsx "PR Sub
+    Date"): one of all / 7d / 30d / 90d / ytd. When a range is active, PRs
+    with no request_date are excluded (they fall in no window).
 
     Sorted most-recently-updated first so the freshest data sits at the top.
     """
@@ -88,6 +96,13 @@ def list_committed_prs(
         if not current_user.lab_group_id:
             return []
         query = query.filter(PurchaseRequest.lab_group_id == current_user.lab_group_id)
+
+    cutoff = date_range_cutoff(date_range)
+    if cutoff is not None:
+        query = query.filter(
+            PurchaseRequest.request_date.isnot(None),
+            PurchaseRequest.request_date >= cutoff,
+        )
 
     prs = query.order_by(PurchaseRequest.updated_at.desc()).all()
     if not prs:
@@ -126,6 +141,7 @@ def list_committed_prs(
             updated_at=pr.updated_at,
             status="committed",
             pr_status=pr.pr_status,
+            request_date=pr.request_date.isoformat() if pr.request_date else None,
             lines=[
                 CommittedPRLine(
                     pr_line_id=line.pr_line_id,
