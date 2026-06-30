@@ -11,6 +11,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
+import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -77,6 +78,10 @@ export function DashboardPage() {
   );
   // Date Range dropdown: all / fy (current fiscal year) / 7d / 30d / 90d.
   const [dateRange, setDateRange] = useState("all");
+  // Custom date range (overrides the preset when either is set).
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const customActive = Boolean(startDate || endDate);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -102,8 +107,8 @@ export function DashboardPage() {
     let cancelled = false;
     Promise.all([
       listLabGroups(),
-      getSpendingSummary(dateRange),
-      getBreakdown(dateRange),
+      getSpendingSummary(dateRange, startDate, endDate),
+      getBreakdown(dateRange, startDate, endDate),
     ])
       .then(([groups, spendingSummary, breakdownResp]) => {
         if (!cancelled) {
@@ -121,7 +126,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [dateRange]);
+  }, [dateRange, startDate, endDate]);
 
   // Total Budget = raw System Config number, scoped by the Lab Group dropdown.
   // Always shows the full configured budget (not adjusted for spend/pending).
@@ -207,7 +212,12 @@ export function DashboardPage() {
         searchPlaceholder="Search dashboard..."
         onFilterChange={(filterId, value) => {
           if (filterId === "Lab Group") setSelectedGroupId(value);
-          if (filterId === "Date Range") setDateRange(value);
+          if (filterId === "Date Range") {
+            // Picking a preset clears any custom range so the preset applies.
+            setDateRange(value);
+            setStartDate("");
+            setEndDate("");
+          }
         }}
         filters={[
           {
@@ -228,6 +238,50 @@ export function DashboardPage() {
           },
         ]}
       />
+
+      {/* Custom date range — overrides the preset when set. */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
+        <span className="text-muted-foreground">Custom range:</span>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">From</span>
+          <input
+            type="date"
+            lang="en-GB"
+            value={startDate}
+            max={endDate || undefined}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="rounded-md border border-border px-2 py-1"
+          />
+        </label>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">To</span>
+          <input
+            type="date"
+            lang="en-GB"
+            value={endDate}
+            min={startDate || undefined}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="rounded-md border border-border px-2 py-1"
+          />
+        </label>
+        {customActive && (
+          <>
+            <span className="text-xs text-blue-600">
+              Custom range active — preset ignored
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setStartDate("");
+                setEndDate("");
+              }}
+            >
+              Clear
+            </Button>
+          </>
+        )}
+      </div>
 
       <div className="p-6 space-y-6">
         {/* Role Info */}

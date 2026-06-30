@@ -6,6 +6,7 @@ Lives separate from /api/records so the dashboard never has to
 download line-by-line data just to render one number.
 """
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -42,6 +43,8 @@ class SpendingSummary(BaseModel):
 @router.get("/spending", response_model=SpendingSummary)
 def get_spending_summary(
     date_range: str = "all",
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SpendingSummary:
@@ -76,7 +79,7 @@ def get_spending_summary(
             pending_by_lab_group={},
         )
 
-    start, end = date_range_bounds(date_range)
+    start, end = _resolve_bounds(date_range, start_date, end_date)
     approved_by_group, approved_total = _aggregate_by_status(
         db, "approved%", role_name, current_user.lab_group_id, start, end
     )
@@ -90,6 +93,14 @@ def get_spending_summary(
         total_pending_sgd=str(pending_total),
         pending_by_lab_group=pending_by_group,
     )
+
+
+def _resolve_bounds(date_range, start_date, end_date):
+    """Custom start/end wins; otherwise the preset (date_range_bounds handles
+    'fy' with both ends and the relative windows with a lower bound)."""
+    if start_date is not None or end_date is not None:
+        return start_date, end_date
+    return date_range_bounds(date_range)
 
 
 def _apply_date_bounds(query, start, end):
@@ -203,6 +214,8 @@ class BreakdownResponse(BaseModel):
 @router.get("/breakdown", response_model=BreakdownResponse)
 def get_breakdown(
     date_range: str = "all",
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BreakdownResponse:
@@ -289,7 +302,7 @@ def get_breakdown(
         .group_by(PurchaseRequestLine.lab_id, PurchaseRequestLine.category_id)
     )
     # Date filter applies to spending only; budgets stay full-FY (below).
-    start, end = date_range_bounds(date_range)
+    start, end = _resolve_bounds(date_range, start_date, end_date)
     spending_query = _apply_date_bounds(spending_query, start, end)
     if role_name == "teamlead":
         spending_query = spending_query.filter(

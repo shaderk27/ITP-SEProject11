@@ -17,7 +17,7 @@ from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
 from app.models.auth import User
-from app.utils.date_range import date_range_cutoff
+from app.utils.date_range import date_range_bounds
 
 router = APIRouter(prefix="/api/records", tags=["Records"])
 
@@ -83,8 +83,8 @@ def list_committed_prs(
     Date filtering (W11-03) is on ``request_date`` (the xlsx "PR Sub Date"):
       - ``start_date`` / ``end_date`` — an explicit custom range. If either is
         given it OVERRIDES the preset.
-      - ``date_range`` — a preset (all / 7d / 30d / 90d / ytd), used only when
-        no custom dates are supplied.
+      - ``date_range`` — a preset (all / fy / 7d / 30d / 90d / ytd), used only
+        when no custom dates are supplied.
     When any bound is active, PRs with no request_date drop out (the >= / <=
     comparison fails on NULL).
 
@@ -103,11 +103,12 @@ def list_committed_prs(
             return []
         query = query.filter(PurchaseRequest.lab_group_id == current_user.lab_group_id)
 
-    # Custom range wins; otherwise fall back to the preset (lower bound only).
+    # Custom range wins; otherwise fall back to the preset. date_range_bounds
+    # handles "fy" (both ends) as well as the relative windows (lower bound).
     if start_date is not None or end_date is not None:
         start, end = start_date, end_date
     else:
-        start, end = date_range_cutoff(date_range), None
+        start, end = date_range_bounds(date_range)
     if start is not None:
         query = query.filter(PurchaseRequest.request_date >= start)
     if end is not None:
