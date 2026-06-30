@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker, Mail, UserRound, CheckCircle2, UserPlus } from "lucide-react";
 import { UserManagement } from "../components/config/UserManagement";
 
-// --- NEW: BULLETPROOF DYNAMIC TAG GENERATOR ---
+// --- NEW: DYNAMIC TAG GENERATOR ---
 const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => {
   try {
     const tags = new Set<string>();
@@ -149,7 +149,7 @@ export function SystemConfigPage() {
     } catch (error) { console.error(error); }
   };
 
-  // --- THE FIX: Updated handleDelete to catch and display backend errors! ---
+  // --- Updated handleDelete to catch and display backend errors! ---
   const handleDelete = async (endpoint: string, name: string) => {
     if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
     try {

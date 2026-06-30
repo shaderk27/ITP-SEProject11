@@ -96,7 +96,6 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
 
     return errors
 
-
 def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
     column_map = {normalize_text(column): column for column in df.columns}
     items: list[PRLineItem] = []

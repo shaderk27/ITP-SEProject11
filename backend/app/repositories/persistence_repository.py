@@ -219,7 +219,6 @@ def persist_upload_to_db(
         "queue_items_inserted": queue_items_inserted,
     }
 
-
 def _parse_pr_date(raw: str | None):
     if not raw:
         return None
@@ -229,7 +228,6 @@ def _parse_pr_date(raw: str | None):
         except (ValueError, TypeError):
             continue
     return None
-
 
 def _find_existing_final_line(
     db: Session, source_pr_number: str, line_identity_key: str
@@ -261,7 +259,6 @@ def _find_existing_final_line(
         ):
             return final_line
     return None
-
 
 def _get_lab_by_id(db: Session, lab_id: int | None) -> Lab | None:
     if lab_id is None:

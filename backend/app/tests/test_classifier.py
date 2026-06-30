@@ -106,9 +106,7 @@ def test_instruction_to_vendor_selects_lab_after_purpose() -> None:
     assert result["lab_id"] == 20
     assert "Vendor instruction" in result["reason"]
 
-
 # --- NEW: TESTS FOR VENUE TAGS & SMART CATEGORIES ---
-
 def test_lab_venue_tag_selects_lab_before_purpose() -> None:
     # "SR4A" is a venue tag for Analytical Lab. It should match instantly from the row text!
     result = classify_line_item(
@@ -124,7 +122,6 @@ def test_lab_venue_tag_selects_lab_before_purpose() -> None:
     assert result["lab_id"] == 10
     assert "venue tag" in result["reason"]
 
-
 def test_category_is_selected_by_exact_req_type() -> None:
     result = classify_line_item(
         FakeDb(),
@@ -135,7 +132,6 @@ def test_category_is_selected_by_exact_req_type() -> None:
 
     assert result["category_id"] == 1
     assert "scored highest" in result["reason"]
-
 
 def test_category_position_based_scoring_resolves_ties() -> None:
     # "hardware" is at the start (30pts) and "maintenance" is at the end (10pts). Equipment should win!
@@ -148,7 +144,6 @@ def test_category_position_based_scoring_resolves_ties() -> None:
 
     assert result["category_id"] == 1  # 1 is Equipment
     assert "scored highest" in result["reason"]
-
 
 def test_unknown_row_is_left_for_review() -> None:
     result = classify_line_item(

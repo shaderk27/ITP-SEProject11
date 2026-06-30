@@ -38,7 +38,6 @@ def extract_core_clues(text: str) -> set:
     clean_text = re.sub(r"[^\w\s]", "", text.lower())
     return set(clean_text.split()) - STOP_WORDS
 
-
 def classify_line_item(
     db: Session,
     row_text: str,
@@ -93,7 +92,6 @@ def classify_line_item(
     if not lab_match and not matched_group:
         lab_reason = "Insufficient lab context clues."
 
-
     # 2. --- CATEGORY MATCHING (Uses Req Type Only) ---
     category_match = None
     cat_reason = ""
@@ -119,7 +117,6 @@ def classify_line_item(
         "reason": combined_reason,
     }
 
-
 def _match_lab_group_by_wbs(lab_groups: list, wbs: str):
     wbs_clean = (wbs or "").lower().strip()
     if not wbs_clean:
@@ -140,13 +137,11 @@ def _match_lab_group_by_wbs(lab_groups: list, wbs: str):
         return max(partial_matches, key=lambda group: len(group.wbs_code or ""))
     return None
 
-
 def _filter_labs_by_group(labs: list, group):
     if not group:
         return labs
     group_id = getattr(group, "lab_group_id", None)
     return [lab for lab in labs if getattr(lab, "lab_group_id", None) == group_id]
-
 
 def _match_lab_by_venue_tags(labs: list, text_lower: str):
     if not text_lower:
@@ -166,7 +161,6 @@ def _match_lab_by_venue_tags(labs: list, text_lower: str):
                     best_match = lab
                     
     return best_match
-
 
 def _match_lab_by_text(labs: list, text: str):
     text_lower = (text or "").lower()
@@ -189,7 +183,6 @@ def _match_lab_by_text(labs: list, text: str):
 
     return best_match_lab
 
-
 def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
     lab_by_id = {getattr(lab, "lab_id", None): lab for lab in labs}
     for mapping in db.query(RequesterLabMapping).all():
@@ -198,8 +191,7 @@ def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
             return lab_by_id.get(getattr(mapping, "default_lab_id", None))
     return None
 
-
-# --- UPGRADED: Position-Based Scoring Category Matcher ---
+# --- Position-Based Scoring Category Matcher ---
 def _match_category_by_text(categories: list, text: str):
     text_lower = (text or "").lower()
     if not text_lower:
@@ -233,9 +225,9 @@ def _match_category_by_text(categories: list, text: str):
         name = (getattr(cat, "category_name", "") or "").lower().strip()
         if name == "general":
             continue
-            
+
         current_cat_score = 0
-        
+
         # 1. Score the exact Category Name
         if name:
             points = score_word(name)
@@ -255,6 +247,5 @@ def _match_category_by_text(categories: list, text: str):
         if current_cat_score > highest_score:
             highest_score = current_cat_score
             best_match = cat
-
 
     return best_match
