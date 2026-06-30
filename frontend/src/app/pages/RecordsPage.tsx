@@ -20,12 +20,20 @@ export function RecordsPage() {
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [dateRange, setDateRange] = useState("all");
+  // Custom date range (overrides the preset when either is set).
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const customActive = Boolean(startDate || endDate);
 
-  const fetchRecords = async (range: string = dateRange) => {
+  const fetchRecords = async (
+    range: string = dateRange,
+    start: string = startDate,
+    end: string = endDate,
+  ) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await listCommittedPRs(range);
+      const data = await listCommittedPRs(range, start, end);
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
         setExpandedPr(data[0].pr_id);
@@ -40,9 +48,9 @@ export function RecordsPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchRecords(dateRange);
+    fetchRecords(dateRange, startDate, endDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.email, dateRange]);
+  }, [user?.email, dateRange, startDate, endDate]);
 
   const handleExport = () => {
     // Real CSV/Excel export is future work; for now confirm the click.
@@ -79,7 +87,12 @@ export function RecordsPage() {
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
         onFilterChange={(filterId, value) => {
-          if (filterId === "Date Range") setDateRange(value);
+          if (filterId === "Date Range") {
+            // Picking a preset clears any custom range so the preset applies.
+            setDateRange(value);
+            setStartDate("");
+            setEndDate("");
+          }
         }}
         filters={[
           {
@@ -88,6 +101,7 @@ export function RecordsPage() {
           },
           {
             label: "Date Range",
+            value: dateRange,
             options: [
               { value: "all", label: "All time" },
               { value: "30d", label: "Last 30 days" },
@@ -99,6 +113,50 @@ export function RecordsPage() {
         showExport
         onExport={() => setShowExportDialog(true)}
       />
+
+      {/* Custom date range — overrides the preset when set. */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
+        <span className="text-muted-foreground">Custom range:</span>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">From</span>
+          <input
+            type="date"
+            lang="en-GB"
+            value={startDate}
+            max={endDate || undefined}
+            onChange={(e) => setStartDate(e.target.value)}
+            className="rounded-md border border-border px-2 py-1"
+          />
+        </label>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">To</span>
+          <input
+            type="date"
+            lang="en-GB"
+            value={endDate}
+            min={startDate || undefined}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="rounded-md border border-border px-2 py-1"
+          />
+        </label>
+        {customActive && (
+          <>
+            <span className="text-xs text-blue-600">
+              Custom range active — preset ignored
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setStartDate("");
+                setEndDate("");
+              }}
+            >
+              Clear
+            </Button>
+          </>
+        )}
+      </div>
 
       <div className="p-6">
         <div className="mb-6 flex items-start justify-between gap-4">
