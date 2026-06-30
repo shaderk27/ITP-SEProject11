@@ -104,6 +104,7 @@ export function RecordsPage() {
             value: dateRange,
             options: [
               { value: "all", label: "All time" },
+              { value: "fy", label: "This fiscal year" },
               { value: "30d", label: "Last 30 days" },
               { value: "90d", label: "Last 90 days" },
               { value: "ytd", label: "Year to date" },

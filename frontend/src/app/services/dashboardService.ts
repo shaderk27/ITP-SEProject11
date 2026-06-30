@@ -22,17 +22,29 @@ export async function listLabGroups(): Promise<LabGroupSummary[]> {
   }));
 }
 
-function dateRangeQuery(dateRange: string): string {
-  return dateRange && dateRange !== "all"
-    ? `?date_range=${encodeURIComponent(dateRange)}`
-    : "";
+function dateRangeQuery(
+  dateRange: string,
+  startDate: string,
+  endDate: string,
+): string {
+  const params = new URLSearchParams();
+  if (startDate || endDate) {
+    // Custom range overrides the preset.
+    if (startDate) params.set("start_date", startDate);
+    if (endDate) params.set("end_date", endDate);
+  } else if (dateRange && dateRange !== "all") {
+    params.set("date_range", dateRange);
+  }
+  return params.toString() ? `?${params.toString()}` : "";
 }
 
 export async function getSpendingSummary(
   dateRange: string = "all",
+  startDate: string = "",
+  endDate: string = "",
 ): Promise<SpendingSummary> {
   const response = await fetch(
-    `${API_BASE_URL}/api/dashboard/spending${dateRangeQuery(dateRange)}`,
+    `${API_BASE_URL}/api/dashboard/spending${dateRangeQuery(dateRange, startDate, endDate)}`,
     { credentials: "include" },
   );
 
@@ -45,9 +57,11 @@ export async function getSpendingSummary(
 
 export async function getBreakdown(
   dateRange: string = "all",
+  startDate: string = "",
+  endDate: string = "",
 ): Promise<BreakdownResponse> {
   const response = await fetch(
-    `${API_BASE_URL}/api/dashboard/breakdown${dateRangeQuery(dateRange)}`,
+    `${API_BASE_URL}/api/dashboard/breakdown${dateRangeQuery(dateRange, startDate, endDate)}`,
     { credentials: "include" },
   );
 
