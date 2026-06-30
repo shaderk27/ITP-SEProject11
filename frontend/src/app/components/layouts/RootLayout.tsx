@@ -77,9 +77,11 @@ export function RootLayout() {
 
   // --- Profile Modal States ---
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [profileForm, setProfileForm] = useState({ full_name: "", current_password: "", new_password: "" });
+  const [profileForm, setProfileForm] = useState({ full_name: "", current_password: "", new_password: "", confirm_password: "" });
   const [isSaving, setIsSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
   
   const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
@@ -95,8 +97,10 @@ export function RootLayout() {
 
   // --- Handlers ---
   const openProfileModal = () => {
-    setProfileForm({ full_name: user.fullName || "", current_password: "", new_password: "" });
+    setProfileForm({ full_name: user.fullName || "", current_password: "", new_password: "", confirm_password: "" });
     setProfileError("");
+    setPasswordError("");
+    setProfileSuccess("");
     setIsProfileModalOpen(true);
   };
 
@@ -104,34 +108,69 @@ export function RootLayout() {
     e.preventDefault();
     setIsSaving(true);
     setProfileError("");
+    setProfileSuccess("");
 
     try {
-      // Only attach password fields to the payload if the user typed a new password
-      const payload = {
-        full_name: profileForm.full_name,
-        ...(profileForm.new_password ? { 
-          current_password: profileForm.current_password,
-          new_password: profileForm.new_password 
-        } : {})
-      };
-
       const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ full_name: profileForm.full_name }),
       });
 
       if (res.ok) {
-        // Instantly update the bottom-left corner UI without refreshing!
         updateUser({ fullName: profileForm.full_name });
-        setIsProfileModalOpen(false);
+        setProfileSuccess("Profile updated successfully.");
       } else {
         const errorData = await res.json();
-        setProfileError(errorData.detail || "Failed to update profile");
+        setProfileError(errorData.detail || "Failed to update profile.");
       }
-    } catch (err) {
+    } catch {
       setProfileError("A network error occurred. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError("");
+
+    // Frontend validation
+    if (!profileForm.current_password)
+      return setPasswordError("Current password is required.");
+    if (profileForm.new_password.length < 8)
+      return setPasswordError("New password must be at least 8 characters.");
+    if (profileForm.new_password === profileForm.current_password)
+      return setPasswordError("New password must differ from your current password.");
+    if (profileForm.new_password !== profileForm.confirm_password)
+      return setPasswordError("Passwords do not match.");
+
+    setIsSaving(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          current_password: profileForm.current_password,
+          new_password: profileForm.new_password,
+        }),
+      });
+
+      if (res.ok) {
+        setProfileForm((prev) => ({ ...prev, current_password: "", new_password: "", confirm_password: "" }));
+        setProfileSuccess("Password reset successfully.");
+      } else {
+        const errorData = await res.json();
+        if (res.status === 400) {
+          setPasswordError("Current password is incorrect.");
+        } else {
+          setPasswordError(errorData.detail || "Failed to reset password.");
+        }
+      }
+    } catch {
+      setPasswordError("A network error occurred. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -269,90 +308,139 @@ export function RootLayout() {
               </button>
             </div>
             
-            <form onSubmit={handleProfileSubmit} className="p-6 space-y-5">
-              
-              {/* Error Message Display */}
-              {profileError && (
-                <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg">
-                  {profileError}
+            <div className="p-6 space-y-6">
+
+              {/* Success message */}
+              {profileSuccess && (
+                <div className="p-3 text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg">
+                  {profileSuccess}
                 </div>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <UserIcon className="h-4 w-4 text-gray-400" />
-                  </div>
-                  <input 
-                    type="text" 
-                    required 
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all" 
-                    value={profileForm.full_name} 
-                    onChange={(e) => setProfileForm({...profileForm, full_name: e.target.value})} 
-                  />
-                </div>
-              </div>
+              {/* ── Section 1: Profile ── */}
+              <form onSubmit={handleProfileSubmit} className="space-y-4">
+                <h4 className="text-sm font-semibold text-gray-800">Profile</h4>
 
-              <div className="pt-4 border-t border-gray-100">
-                <h4 className="text-sm font-semibold text-gray-800 mb-3">Change Password <span className="text-gray-400 font-normal">(Optional)</span></h4>
-                
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Current Password</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Lock className="h-4 w-4 text-gray-400" />
-                      </div>
-                      <input 
-                        type="password" 
-                        placeholder="Required if setting a new password"
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm" 
-                        value={profileForm.current_password} 
-                        onChange={(e) => setProfileForm({...profileForm, current_password: e.target.value})} 
-                      />
-                    </div>
+                {profileError && (
+                  <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg">
+                    {profileError}
                   </div>
+                )}
 
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">New Password</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Lock className="h-4 w-4 text-gray-400" />
-                      </div>
-                      <input 
-                        type="password" 
-                        placeholder="Must be at least 8 characters"
-                        className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm" 
-                        value={profileForm.new_password} 
-                        onChange={(e) => setProfileForm({...profileForm, new_password: e.target.value})} 
-                      />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <UserIcon className="h-4 w-4 text-gray-400" />
                     </div>
-                    {/* Real-time frontend validation warning */}
-                    {profileForm.new_password.length > 0 && profileForm.new_password.length < 8 && (
-                      <p className="text-xs text-amber-600 mt-1.5 font-medium">Password must be at least 8 characters</p>
-                    )}
+                    <input
+                      type="text"
+                      required
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all"
+                      value={profileForm.full_name}
+                      onChange={(e) => setProfileForm({ ...profileForm, full_name: e.target.value })}
+                    />
                   </div>
                 </div>
-              </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                <button 
-                  type="button" 
-                  onClick={() => setIsProfileModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit" 
-                  disabled={isSaving || (profileForm.new_password.length > 0 && (profileForm.new_password.length < 8 || !profileForm.current_password))}
-                  className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e40af] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isSaving ? "Saving..." : "Save Changes"}
-                </button>
-              </div>
-            </form>
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e40af] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSaving ? "Saving..." : "Save Name"}
+                  </button>
+                </div>
+              </form>
+
+              {/* ── Section 2: Password ── */}
+              <form onSubmit={handlePasswordReset} className="space-y-4 pt-4 border-t border-gray-100">
+                <h4 className="text-sm font-semibold text-gray-800">
+                  Change Password <span className="text-gray-400 font-normal">(Optional)</span>
+                </h4>
+
+                {passwordError && (
+                  <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg">
+                    {passwordError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Current Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      placeholder="Enter current password"
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm"
+                      value={profileForm.current_password}
+                      onChange={(e) => setProfileForm({ ...profileForm, current_password: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">New Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder="Min. 8 characters"
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm"
+                      value={profileForm.new_password}
+                      onChange={(e) => setProfileForm({ ...profileForm, new_password: e.target.value })}
+                    />
+                  </div>
+                  {profileForm.new_password.length > 0 && profileForm.new_password.length < 8 && (
+                    <p className="text-xs text-amber-600 mt-1.5 font-medium">Password must be at least 8 characters</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Confirm New Password</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Lock className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder="Re-enter new password"
+                      className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm"
+                      value={profileForm.confirm_password}
+                      onChange={(e) => setProfileForm({ ...profileForm, confirm_password: e.target.value })}
+                    />
+                  </div>
+                  {profileForm.confirm_password.length > 0 && profileForm.new_password !== profileForm.confirm_password && (
+                    <p className="text-xs text-amber-600 mt-1.5 font-medium">Passwords do not match</p>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsProfileModalOpen(false)}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSaving || !profileForm.current_password || profileForm.new_password.length < 8 || profileForm.new_password !== profileForm.confirm_password}
+                    className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e40af] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isSaving ? "Saving..." : "Reset Password"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         </div>
       )}

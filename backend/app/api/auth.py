@@ -17,6 +17,7 @@ from app.schemas.auth_schema import (
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
 from backend.app.dependencies.auth import get_current_user
+from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -170,10 +171,10 @@ async def deactivate_user(
 async def reset_password(
     payload: ResetPasswordSchema,
     service: AuthService = Depends(get_auth_service),
-    current_user: dict = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     service.reset_password(
-        current_user["id"],
+        current_user.user_id,
         payload.current_password,
         payload.new_password,
     )

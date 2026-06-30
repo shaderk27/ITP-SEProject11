@@ -18,16 +18,12 @@ import { AccessDenied } from "./pages/error/AccessDenied";
 import { NotFound } from "./pages/error/NotFound";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
 
-
 export const router = createBrowserRouter([
   {
     path: "/login",
     Component: LoginPage,
   },
-  {
-    path: "/forgot-password",
-    Component: ForgotPasswordPage,
-  },
+
   {
     path: "/403",
     element: <AccessDenied />,
@@ -132,7 +128,6 @@ export const router = createBrowserRouter([
         Component: ChatbotPage, // Open to all logged-in roles
       },
       {
-        
         path: "users/create",
         element: (
           <ProtectedRoute
@@ -142,7 +137,10 @@ export const router = createBrowserRouter([
             <CreateUserPage />
           </ProtectedRoute>
         ),
-        
+      },
+      {
+        path: "forgot-password",
+        Component: ForgotPasswordPage,
       },
     ],
   },
