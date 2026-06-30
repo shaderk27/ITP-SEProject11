@@ -43,9 +43,8 @@ jobs:
 
       - name: Lint
         run: npm run lint -- --max-warnings=-1
-      #we dont have proper tests yet
-      #- name: Run tests
-      #  run: npm run test -- --coverage --watchAll=false
+      - name: Run tests
+        run: npm run test -- --coverage --watchAll=false
 
       - name: Build
         run: npm run build
@@ -104,12 +103,12 @@ jobs:
       - name: Type check with mypy
         run: mypy app/
 
-      #- name: Run tests
-      #  run: pytest tests/ -v
-      #  env:
-      #    DATABASE_URL: postgresql://testuser:testpassword@localhost:5432/testdb
-      #    SECRET_KEY: test-secret-key-for-ci
-      #    ENVIRONMENT: test
+      - name: Run tests
+        run: pytest tests/ -v
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          ENVIRONMENT: test
 
   security:
     name: Security Scan
