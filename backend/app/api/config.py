@@ -240,7 +240,7 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found.")
 
-    # --- THE FIX: Graceful Rejection on Foreign Key Violations ---
+    # --- Graceful Rejection on Foreign Key Violations ---
     try:
         db.delete(cat)
         db.commit()

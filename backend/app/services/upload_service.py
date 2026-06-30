@@ -196,8 +196,7 @@ class UploadService:
             final_line_dict["labGroup"] = assigned_group
             final_line_dict["lab_group_name"] = assigned_group
             
-            # --- THE FIX: BRUTE-FORCE THE CATEGORY NAME ---
-            # This ensures the React UI renders the correct category pill regardless of what key it checks!
+
             final_line_dict["category"] = assigned_category
             final_line_dict["pr_category"] = assigned_category 
             final_line_dict["category_name"] = assigned_category

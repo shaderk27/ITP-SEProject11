@@ -91,7 +91,7 @@ def persist_upload_to_db(
         header = StagingPRHeader(
             batch_id=batch.batch_id,
             source_pr_number=pr_number,
-            req_type=None,
+            req_type=first_item.req_type,
             pr_sub_date=_parse_pr_date(first_item.pr_sub_date),
             requestor_name=first_item.requestor or None,
             purpose=first_item.purpose or None,

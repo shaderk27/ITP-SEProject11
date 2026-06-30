@@ -205,9 +205,6 @@ def _match_category_by_text(categories: list, text: str):
     if not text_lower:
         return None
 
-    print(f"\n[DEBUG-CLASSIFIER] =======================================")
-    print(f"[DEBUG-CLASSIFIER] Analyzing 'Req Type' Column: '{text_lower}'")
-
     best_match = None
     highest_score = 0
 
@@ -237,7 +234,6 @@ def _match_category_by_text(categories: list, text: str):
         if name == "general":
             continue
             
-        print(f"[DEBUG-CLASSIFIER] -> Scoring Category: '{name}'")
         current_cat_score = 0
         
         # 1. Score the exact Category Name
@@ -245,7 +241,6 @@ def _match_category_by_text(categories: list, text: str):
             points = score_word(name)
             if points > 0:
                 current_cat_score += (points + 5) # +5 Bonus for exactly matching the category title
-                print(f"[DEBUG-CLASSIFIER]    *** DIRECT MATCH! '{name}' (+{points + 5} pts) ***")
                 
         # 2. Score the Custom Description Tags
         desc = getattr(cat, "description", "") or ""
@@ -255,19 +250,11 @@ def _match_category_by_text(categories: list, text: str):
                 points = score_word(tag)
                 if points > 0:
                     current_cat_score += points
-                    print(f"[DEBUG-CLASSIFIER]    *** TAG MATCH! '{tag}' (+{points} pts) ***")
-
-        print(f"[DEBUG-CLASSIFIER]    Total Score for '{name}': {current_cat_score}")
 
         # Declare the highest-scoring category the winner
         if current_cat_score > highest_score:
             highest_score = current_cat_score
             best_match = cat
 
-    if best_match:
-        print(f"[DEBUG-CLASSIFIER] WINNER: {best_match.category_name} (Score: {highest_score})")
-    else:
-        print(f"[DEBUG-CLASSIFIER] WINNER: None (Falling back to General)")
-    print(f"[DEBUG-CLASSIFIER] =======================================\n")
 
     return best_match
