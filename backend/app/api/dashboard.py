@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
-from app.models.config import Lab
+from app.models.config import Lab, LabGroup
 from app.models.staging import PurchaseRequestLine
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
@@ -90,13 +90,23 @@ def get_spending_summary(
 def _aggregate_by_status(
     db: Session, status_pattern: str, role_name: str, user_lab_group_id: int | None
 ) -> tuple[dict[str, str], Decimal]:
+    """
+    Sum line amounts grouped by lab_group, filtered by pr_status pattern.
+
+    Per spec rule #4: lines whose lab has no real Lab Group (orphan) OR whose
+    lab_group is the "General" catch-all do NOT count toward any real Lab
+    Group's reservation. They sit in unresolved review until a Team Lead
+    re-classifies them.
+    """
     query = (
         db.query(
             Lab.lab_group_id,
             func.coalesce(func.sum(PurchaseRequestLine.amount_gst), 0),
         )
-        .outerjoin(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+        .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+        .join(LabGroup, LabGroup.lab_group_id == Lab.lab_group_id)
         .filter(PurchaseRequestLine.pr_status.ilike(status_pattern))
+        .filter(LabGroup.lab_group_name != "General")
         .group_by(Lab.lab_group_id)
     )
     if role_name == "teamlead":
@@ -105,6 +115,8 @@ def _aggregate_by_status(
     by_group: dict[str, str] = {}
     total = Decimal("0")
     for lab_group_id, amount in query.all():
+        # lab_group_id will never be NULL here (INNER joins ensure it),
+        # but stringify defensively.
         key = str(lab_group_id) if lab_group_id is not None else "0"
         amount_decimal = amount if isinstance(amount, Decimal) else Decimal(str(amount))
         by_group[key] = str(amount_decimal)
