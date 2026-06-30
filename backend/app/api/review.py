@@ -768,6 +768,10 @@ def commit_batch(
         # Use the first line's lab_group as the PR-level lab_group_id.
         # (All lines under one PR typically share a group; refine later if not.)
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
+        # PR Status from source xlsx (e.g. "Approved (SVP)", "Pending Approval",
+        # "Rejected"). Same value on every row of a given PR, so first line wins.
+        pr_status_value = _raw_line_value(lines[0], "pr_status") if lines else ""
+        pr_status_value = pr_status_value or None
 
         # UPDATE if a PR with this source_pr_number already exists; otherwise INSERT.
         # Re-upload semantics (merged W9-02 + W9-04):
@@ -798,6 +802,7 @@ def commit_batch(
                 instruction_to_vendor=header.instruction_to_vendor,
                 grand_total_sgd=header.grand_total_sgd,
                 lab_group_id=pr_lab_group_id,
+                pr_status=pr_status_value,
             )
             db.add(pr)
             db.flush()
@@ -818,6 +823,7 @@ def commit_batch(
                 "grand_total_sgd": str(existing_pr.grand_total_sgd) if existing_pr.grand_total_sgd is not None else None,
                 "line_count": existing_line_count,
                 "latest_batch_id": existing_pr.latest_batch_id,
+                "pr_status": existing_pr.pr_status,
             }
 
             # Refresh PR header fields from the new source file; lines handled below.
@@ -830,6 +836,7 @@ def commit_batch(
             existing_pr.instruction_to_vendor = header.instruction_to_vendor
             existing_pr.grand_total_sgd = header.grand_total_sgd
             existing_pr.lab_group_id = pr_lab_group_id
+            existing_pr.pr_status = pr_status_value
             existing_pr.updated_at = func.now()
             db.flush()
             pr = existing_pr
@@ -851,7 +858,10 @@ def commit_batch(
                 new_status = _source_status_snapshot(line)
 
                 # Preserve reviewed final Lab/Category/Amount, only bump traceability pointer.
+                # PR Status is source-system metadata, not reviewer work — refresh
+                # it from the new staging line so it tracks the latest source file.
                 existing_line.source_staging_line_id = line.staging_line_id
+                existing_line.pr_status = _raw_line_value(line, "pr_status") or None
                 lines_updated += 1
                 if old_status != new_status:
                     status_updates.append(
@@ -876,6 +886,7 @@ def commit_batch(
                     lab_id=line.suggested_lab_id,
                     category_id=line.suggested_category_id,
                     source_staging_line_id=line.staging_line_id,
+                    pr_status=_raw_line_value(line, "pr_status") or None,
                 )
             )
             lines_created += 1
@@ -897,6 +908,7 @@ def commit_batch(
             "grand_total_sgd": str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else None,
             "line_count": final_line_count,
             "latest_batch_id": pr.latest_batch_id,
+            "pr_status": pr.pr_status,
         }
         if status_updates:
             new_data["status_updates"] = [u["new_status"] for u in status_updates]

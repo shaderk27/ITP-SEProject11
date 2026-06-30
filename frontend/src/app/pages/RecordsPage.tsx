@@ -66,7 +66,8 @@ export function RecordsPage() {
         return pr.lines.some(
           (line) =>
             line.item_description?.toLowerCase().includes(q) ||
-            line.lab_name?.toLowerCase().includes(q),
+            line.lab_name?.toLowerCase().includes(q) ||
+            line.pr_status?.toLowerCase().includes(q),
         );
       })
     : records;
@@ -74,7 +75,7 @@ export function RecordsPage() {
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       <FilterBar
-        searchPlaceholder="Search PR, requestor, WBS, item details..."
+        searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
         filters={[
           {
@@ -180,6 +181,7 @@ export function RecordsPage() {
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Qty</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Unit Rate</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
+                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Status</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -201,6 +203,15 @@ export function RecordsPage() {
                               <td className="p-3 text-sm text-right font-medium text-foreground">
                                 {line.currency_code === "SGD" ? "$" : `${line.currency_code} `}
                                 {formatAmount(line.amount_gst)}
+                              </td>
+                              <td className="p-3 text-sm">
+                                {line.pr_status ? (
+                                  <StatusBadge status={prStatusVariant(line.pr_status)}>
+                                    {line.pr_status}
+                                  </StatusBadge>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
+                                )}
                               </td>
                             </tr>
                           </Fragment>
@@ -248,4 +259,14 @@ function formatAmount(raw: string): string {
 
 function prettyStatus(raw: string): string {
   return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Maps the source-system PR Status string to a StatusBadge variant.
+// Raw text is displayed as-is; this only picks the color.
+function prStatusVariant(raw: string): "approved" | "pending" | "rejected" | "general" {
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("approved")) return "approved";
+  if (lower.startsWith("rejected")) return "rejected";
+  if (lower.startsWith("pending")) return "pending";
+  return "general";
 }
