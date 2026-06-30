@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DollarSign, TrendingUp, AlertCircle, Wallet, Percent, Clock } from "lucide-react";
+import { DollarSign, TrendingUp, AlertCircle, Wallet, Percent, Clock, Activity } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
@@ -120,9 +120,14 @@ export function DashboardPage() {
   }, [spending, selectedGroupId]);
 
   // Available = Total Budget - Approved - Pending.
-  // Utilisation = Approved / Total Budget (pending does NOT affect it).
+  // Utilisation        = Approved / Total Budget (already-spent share).
+  // Projected Util     = (Approved + Pending) / Total Budget (worst-case share
+  //                      if every pending line gets approved). Useful as a
+  //                      proactive "you're about to run out" indicator.
   const availableBalance = totalBudget - actualSpend - pendingSpend;
   const utilizationPct = totalBudget > 0 ? (actualSpend / totalBudget) * 100 : 0;
+  const projectedUtilizationPct =
+    totalBudget > 0 ? ((actualSpend + pendingSpend) / totalBudget) * 100 : 0;
 
   // "All Lab Groups" only makes sense for users who can see more than one
   // (Admin). Team Lead is locked to their own group, so we omit it.
@@ -168,7 +173,7 @@ export function DashboardPage() {
         )}
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6">
           <KPICard
             title="Total Budget"
             value={formatCurrency(totalBudget)}
@@ -198,6 +203,18 @@ export function DashboardPage() {
             value={`${utilizationPct.toFixed(1)}%`}
             icon={Percent}
             status={utilizationPct >= 95 ? "error" : utilizationPct >= 80 ? "warning" : "info"}
+          />
+          <KPICard
+            title="Projected Utilisation %"
+            value={`${projectedUtilizationPct.toFixed(1)}%`}
+            icon={Activity}
+            status={
+              projectedUtilizationPct >= 95
+                ? "error"
+                : projectedUtilizationPct >= 80
+                  ? "warning"
+                  : "info"
+            }
           />
         </div>
 
