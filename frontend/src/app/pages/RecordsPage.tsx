@@ -19,12 +19,13 @@ export function RecordsPage() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [dateRange, setDateRange] = useState("all");
 
-  const fetchRecords = async () => {
+  const fetchRecords = async (range: string = dateRange) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await listCommittedPRs();
+      const data = await listCommittedPRs(range);
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
         setExpandedPr(data[0].pr_id);
@@ -39,9 +40,9 @@ export function RecordsPage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchRecords();
+    fetchRecords(dateRange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.email]);
+  }, [user?.email, dateRange]);
 
   const handleExport = () => {
     // Real CSV/Excel export is future work; for now confirm the click.
@@ -77,6 +78,9 @@ export function RecordsPage() {
       <FilterBar
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
+        onFilterChange={(filterId, value) => {
+          if (filterId === "Date Range") setDateRange(value);
+        }}
         filters={[
           {
             label: "Lab Group",
@@ -178,6 +182,7 @@ export function RecordsPage() {
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground">Lab</th>
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground">Category</th>
+                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">PR Date</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Qty</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Unit Rate</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
@@ -194,6 +199,9 @@ export function RecordsPage() {
                               <td className="p-3 text-sm text-foreground">{line.item_description || "—"}</td>
                               <td className="p-3 text-sm text-muted-foreground">{line.lab_name}</td>
                               <td className="p-3 text-sm text-muted-foreground">{line.category_name}</td>
+                              <td className="p-3 text-sm text-muted-foreground">
+                                {pr.request_date ? formatDateOnly(pr.request_date) : "—"}
+                              </td>
                               <td className="p-3 text-sm text-right text-muted-foreground">
                                 {line.qty ?? "—"}
                               </td>
@@ -249,6 +257,18 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+// Date-only formatter for PR Sub Date. Parses the yyyy-mm-dd parts as a local
+// date so a UTC-midnight ISO string never shifts to the previous day.
+function formatDateOnly(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
 }
 
 function formatAmount(raw: string): string {

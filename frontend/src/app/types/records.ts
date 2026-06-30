@@ -29,5 +29,7 @@ export interface CommittedPR {
   updated_at: string;
   status: string;
   pr_status: string | null;
+  // PR Sub Date from the xlsx (ISO yyyy-mm-dd) or null.
+  request_date: string | null;
   lines: CommittedPRLine[];
 }
