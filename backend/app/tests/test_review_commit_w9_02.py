@@ -101,37 +101,62 @@ def test_recommit_same_pr_updates_in_place(db, admin_user, make_staging_batch):
     assert versions[1].new_data["grand_total_sgd"] == "2500.00"
 
 
-def test_recommit_replaces_all_lines(db, admin_user, make_staging_batch):
-    """A re-uploaded PR with a different set of lines must REPLACE the
-    existing lines, not append to them."""
+def test_recommit_preserves_lines_by_identity(db, admin_user, make_staging_batch):
+    """Re-upload semantics (merged W9-02 + W9-04):
+
+    - Lines with the same line_identity_key as an existing committed line
+      are PRESERVED — the reviewer's lab/category work is not wiped.
+    - The existing line's source_staging_line_id is repointed at the new
+      staging row (traceability follows the latest source).
+    - Lines that don't match anything existing are inserted as new.
+    """
     batch_1 = make_staging_batch(
         source_pr_number="PR-W902-LINES",
         lines=[
-            ("old item A", Decimal("50.00")),
-            ("old item B", Decimal("50.00")),
+            ("item A", Decimal("50.00")),
+            ("item B", Decimal("50.00")),
         ],
     )
     commit_batch(batch_1.batch_id, db=db, current_user=admin_user)
-
-    batch_2 = make_staging_batch(
-        source_pr_number="PR-W902-LINES",
-        lines=[("new single item", Decimal("999.00"))],
-    )
-    commit_batch(batch_2.batch_id, db=db, current_user=admin_user)
 
     pr = (
         db.query(PurchaseRequest)
         .filter(PurchaseRequest.source_pr_number == "PR-W902-LINES")
         .one()
     )
+    line_a_before = next(
+        line for line in pr.lines if line.item_description == "item A"
+    )
+    staging_pointer_before = line_a_before.source_staging_line_id
+
+    # Re-upload: same item A (should be preserved), plus a brand-new item C.
+    batch_2 = make_staging_batch(
+        source_pr_number="PR-W902-LINES",
+        lines=[
+            ("item A", Decimal("50.00")),
+            ("item C", Decimal("123.00")),
+        ],
+    )
+    commit_batch(batch_2.batch_id, db=db, current_user=admin_user)
+
+    db.refresh(pr)
     final_lines = (
         db.query(PurchaseRequestLine)
         .filter(PurchaseRequestLine.pr_id == pr.pr_id)
         .all()
     )
-    assert len(final_lines) == 1, "Old lines must be deleted on re-upload."
-    assert final_lines[0].item_description == "new single item"
-    assert final_lines[0].amount_gst == Decimal("999.00")
+    descriptions = sorted(line.item_description for line in final_lines)
+    # item A preserved (matched by identity), item B preserved (kept, not in new
+    # file but Harry's design doesn't drop it), item C inserted as new.
+    assert descriptions == ["item A", "item B", "item C"]
+
+    # The original item A row is the same row (same pr_line_id), but its
+    # source_staging_line_id now points at batch_2's staging row.
+    line_a_after = next(
+        line for line in final_lines if line.item_description == "item A"
+    )
+    assert line_a_after.pr_line_id == line_a_before.pr_line_id
+    assert line_a_after.source_staging_line_id != staging_pointer_before
 
 
 def test_source_staging_line_id_traceability(db, admin_user, make_staging_batch):
@@ -254,6 +279,9 @@ def test_upload_writes_audit_log(db, admin_user, seed_refs):
                 pr_sub_date="2026-06-01",
                 requestor="Tester",
                 purpose="Upload audit test",
+                pr_status="",
+                po_number="",
+                po_status="",
                 grand_total_sgd=Decimal("10.00"),
                 item_details="one item",
                 quantity=Decimal("1"),

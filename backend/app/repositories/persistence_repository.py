@@ -11,8 +11,8 @@ Takes the output of Harry's parser + classifier and writes it to:
 Everything happens in a single transaction. If any insert fails,
 SQLAlchemy rolls back the whole batch (via the session lifecycle in get_db).
 """
+
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     AuditLog,
+    PurchaseRequest,
+    PurchaseRequestLine,
     ReviewQueueItem,
     StagingPRHeader,
     StagingPRLine,
@@ -57,8 +59,14 @@ def persist_upload_to_db(
       HTTPException 500 if required "General" seed rows are missing.
     """
     # ─── Cache lookups for fallback values ────────────────────────────────
-    general_group = db.query(LabGroup).filter(LabGroup.lab_group_name == "General").first()
-    general_category = db.query(SpendingCategory).filter(SpendingCategory.category_name == "General").first()
+    general_group = (
+        db.query(LabGroup).filter(LabGroup.lab_group_name == "General").first()
+    )
+    general_category = (
+        db.query(SpendingCategory)
+        .filter(SpendingCategory.category_name == "General")
+        .first()
+    )
 
     if not general_group or not general_category:
         raise HTTPException(
@@ -76,20 +84,21 @@ def persist_upload_to_db(
     }
     # lowercased category_name → category_id (so we can map raw file categories)
     categories_by_name: dict[str, int] = {
-        c.category_name.lower(): c.category_id
-        for c in db.query(SpendingCategory).all()
+        c.category_name.lower(): c.category_id for c in db.query(SpendingCategory).all()
     }
 
     # ─── 1. Create the upload_batches row ─────────────────────────────────
-    file_ext = metadata.filename.rsplit(".", 1)[-1] if "." in metadata.filename else "unknown"
+    file_ext = (
+        metadata.filename.rsplit(".", 1)[-1] if "." in metadata.filename else "unknown"
+    )
     batch = UploadBatch(
         uploaded_by=current_user.user_id,
         filename=metadata.filename,
         file_type=file_ext.lower()[:20],
-        upload_status="review_pending",   # may flip to ready_to_commit at end
+        upload_status="review_pending",  # may flip to ready_to_commit at end
     )
     db.add(batch)
-    db.flush()   # populates batch.batch_id without committing yet
+    db.flush()  # populates batch.batch_id without committing yet
 
     # ─── 2. Group line items by PR number ─────────────────────────────────
     items_by_pr: dict[str, list[dict[str, Any]]] = {}
@@ -107,7 +116,7 @@ def persist_upload_to_db(
         header = StagingPRHeader(
             batch_id=batch.batch_id,
             source_pr_number=pr_number,
-            req_type=None,                        # PRLineItem doesn't carry this; safe to leave NULL
+            req_type=None,  # PRLineItem doesn't carry this; safe to leave NULL
             pr_sub_date=_parse_pr_date(first_item.pr_sub_date),
             requestor_name=first_item.requestor or None,
             purpose=first_item.purpose or None,
@@ -117,7 +126,7 @@ def persist_upload_to_db(
             raw_header_json=first_item.to_dict(),
         )
         db.add(header)
-        db.flush()    # populates header.staging_header_id
+        db.flush()  # populates header.staging_header_id
         headers_inserted += 1
 
         # ─── 4. Per line: write staging line + maybe a review queue item ──
@@ -128,10 +137,15 @@ def persist_upload_to_db(
             classifier_group_id = classification.get("lab_group_id")
             classifier_lab_id = classification.get("lab_id")
             classification_reason = classification.get("reason") or ""
+            existing_final_line = _find_existing_final_line(
+                db, pr_number, item.line_identity_key
+            )
 
             # Resolve final IDs with General fallback chain
             final_group_id = classifier_group_id or general_group.lab_group_id
-            final_lab_id = classifier_lab_id or general_labs_by_group.get(final_group_id)
+            final_lab_id = classifier_lab_id or general_labs_by_group.get(
+                final_group_id
+            )
             final_category_id = (
                 categories_by_name.get((item.pr_category or "").lower())
                 or general_category.category_id
@@ -145,7 +159,27 @@ def persist_upload_to_db(
                 or item.pr_category.lower() == "general"
                 or item.pr_category.lower() not in categories_by_name
             )
-            any_fallback = used_fallback_group or used_fallback_lab or used_fallback_category
+            if existing_final_line:
+                final_lab_id = existing_final_line.lab_id
+                existing_lab = _get_lab_by_id(db, final_lab_id)
+                final_group_id = (
+                    existing_lab.lab_group_id
+                    if existing_lab is not None
+                    else classifier_group_id or general_group.lab_group_id
+                )
+                final_category_id = (
+                    existing_final_line.category_id or general_category.category_id
+                )
+                used_fallback_group = False
+                used_fallback_lab = False
+                used_fallback_category = False
+                classification_reason = (
+                    "Existing committed line found. Preserving reviewed "
+                    "lab/category; only source status may update on commit."
+                )
+            any_fallback = (
+                used_fallback_group or used_fallback_lab or used_fallback_category
+            )
 
             classification_status = "unclear" if any_fallback else "confident"
             review_status = "pending_review" if any_fallback else "not_required"
@@ -157,7 +191,8 @@ def persist_upload_to_db(
                 qty=item.quantity,
                 unit_rate=item.unit_rate,
                 raw_pr_category=item.pr_category or None,
-                raw_lab_text=item.lab or None,   # Harry's resolved lab name, before review
+                raw_lab_text=item.lab
+                or None,  # Harry's resolved lab name, before review
                 amount_gst=item.amount_gst,
                 suggested_lab_group_id=final_group_id,
                 suggested_lab_id=final_lab_id,
@@ -169,7 +204,7 @@ def persist_upload_to_db(
                 raw_line_json=item.to_dict(),
             )
             db.add(line)
-            db.flush()    # populates line.staging_line_id
+            db.flush()  # populates line.staging_line_id
             lines_inserted += 1
 
             # ─── 5. Queue for review if needed ────────────────────────────
@@ -178,7 +213,8 @@ def persist_upload_to_db(
                     staging_line_id=line.staging_line_id,
                     queue_status="open",
                     priority="normal",
-                    review_reason=classification_reason or "Auto-classifier left one or more fields as General.",
+                    review_reason=classification_reason
+                    or "Auto-classifier left one or more fields as General.",
                     # assigned_to_user_id stays NULL — auto-assignment is a later iteration
                 )
                 db.add(queue_item)
@@ -228,3 +264,41 @@ def _parse_pr_date(raw: str | None):
         except (ValueError, TypeError):
             continue
     return None
+
+
+def _find_existing_final_line(
+    db: Session, source_pr_number: str, line_identity_key: str
+) -> PurchaseRequestLine | None:
+    if not source_pr_number or not line_identity_key:
+        return None
+
+    pr = (
+        db.query(PurchaseRequest)
+        .filter(PurchaseRequest.source_pr_number == source_pr_number)
+        .first()
+    )
+    if pr is None:
+        return None
+
+    for final_line in pr.lines:
+        if final_line.source_staging_line_id is None:
+            continue
+        staging_line = (
+            db.query(StagingPRLine)
+            .filter(StagingPRLine.staging_line_id == final_line.source_staging_line_id)
+            .first()
+        )
+        if not staging_line or not isinstance(staging_line.raw_line_json, dict):
+            continue
+        if (
+            str(staging_line.raw_line_json.get("line_identity_key", ""))
+            == line_identity_key
+        ):
+            return final_line
+    return None
+
+
+def _get_lab_by_id(db: Session, lab_id: int | None) -> Lab | None:
+    if lab_id is None:
+        return None
+    return db.query(Lab).filter(Lab.lab_id == lab_id).first()

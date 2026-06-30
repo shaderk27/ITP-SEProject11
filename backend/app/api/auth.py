@@ -1,10 +1,17 @@
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Response, Cookie, HTTPException, status
+from fastapi import APIRouter, Depends, Query, Response, Cookie, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.auth_schema import LoginRequest, CreateUserRequest, RoleResponse, UpdateProfileRequest
+from app.schemas.auth_schema import (
+    LoginRequest,
+    CreateUserRequest,
+    RoleResponse,
+    UpdateProfileRequest,
+    AssignLabGroupSchema,
+    AssignLabSchema,
+)
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
 
@@ -44,6 +51,7 @@ async def me(
 ):
     return service.get_current_user(access_token)
 
+
 @router.put("/me")
 async def update_me(
     payload: UpdateProfileRequest,
@@ -52,13 +60,14 @@ async def update_me(
 ):
     current_user = service.get_current_user(access_token)
     user_id = current_user.get("id")
-    
+
     return service.update_user_profile(
-        user_id=user_id, 
-        full_name=payload.full_name, 
+        user_id=user_id,
+        full_name=payload.full_name,
         current_password=payload.current_password,
-        new_password=payload.new_password
+        new_password=payload.new_password,
     )
+
 
 @router.post("/logout")
 async def logout(response: Response):
@@ -90,9 +99,12 @@ async def get_all_roles(service: AuthService = Depends(get_auth_service)):
 
 @router.get("/users")
 async def get_all_users(
+    role: Optional[str] = Query(None),
     service: AuthService = Depends(get_auth_service),
     _admin: dict = Depends(require_admin),
 ):
+    if role:
+        return service.get_users_by_role(role)
     return service.get_all_users()
 
 
@@ -102,3 +114,41 @@ async def get_assignments(
     _admin: dict = Depends(require_admin),
 ):
     return service.get_assignments()
+
+
+@router.put("/users/{user_id}/assign-lab")
+async def assign_lab_ic(
+    user_id: int,
+    payload: AssignLabSchema,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.assign_lab_to_user(user_id, payload.lab_id)
+
+
+@router.put("/users/{user_id}/assign-labgroup")
+async def assign_team_lead(
+    user_id: int,
+    payload: AssignLabGroupSchema,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.assign_labgroup_to_user(user_id, payload.lab_group_id)
+
+
+@router.put("/users/{user_id}/unassign-scope")
+async def unassign_user_scope(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.unassign_user_scope(user_id)
+
+
+@router.put("/users/{user_id}/deactivate")
+async def deactivate_user(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    admin: dict = Depends(require_admin),
+):
+    return service.deactivate_user(user_id, current_admin_id=admin["id"])

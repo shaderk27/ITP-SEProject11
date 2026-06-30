@@ -92,10 +92,20 @@ def _match_lab_group_by_wbs(lab_groups: list, wbs: str):
     wbs_clean = (wbs or "").lower().strip()
     if not wbs_clean:
         return None
+    exact_matches = []
+    partial_matches = []
     for group in lab_groups:
         code = (getattr(group, "wbs_code", "") or "").lower().strip()
-        if code and (code in wbs_clean or wbs_clean in code):
-            return group
+        if not code:
+            continue
+        if code == wbs_clean:
+            exact_matches.append(group)
+        elif code in wbs_clean or wbs_clean in code:
+            partial_matches.append(group)
+    if exact_matches:
+        return max(exact_matches, key=lambda group: len(group.wbs_code or ""))
+    if partial_matches:
+        return max(partial_matches, key=lambda group: len(group.wbs_code or ""))
     return None
 
 

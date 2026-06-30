@@ -1,69 +1,141 @@
--- W7-02/03 minimal auth seed.
--- Uses only the current W7-compatible auth/config tables.
+-- W7-02/03 local auth seed.
+-- Keep this aligned with backend/seeds/dev_seed.sql. It must not create a
+-- second set of lab groups/labs with older WBS aliases.
 
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
+ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
-INSERT INTO roles (role_id, role_name)
-OVERRIDING SYSTEM VALUE
+-- Roles.
+INSERT INTO roles (role_name)
 VALUES
-    (1, 'admin'),
-    (2, 'teamlead'),
-    (3, 'labic')
-ON CONFLICT (role_id) DO UPDATE
-SET role_name = EXCLUDED.role_name;
+  ('admin'),
+  ('teamlead'),
+  ('labic')
+ON CONFLICT (role_name) DO NOTHING;
 
-INSERT INTO lab_groups (lab_group_id, lab_group_name, wbs_code, description)
-OVERRIDING SYSTEM VALUE
-VALUES
-    (1, 'Food, Chemical and Biotechnology', 'FCB', 'Development lab group for local auth and access checks'),
-    (2, 'Infocomm Technology', 'ICT', 'Development lab group for local auth and access checks')
-ON CONFLICT (lab_group_id) DO UPDATE
-SET
-    lab_group_name = EXCLUDED.lab_group_name,
-    wbs_code = EXCLUDED.wbs_code,
-    description = EXCLUDED.description;
+-- Canonical lab groups used by upload classification and review scoping.
+INSERT INTO lab_groups (lab_group_name, wbs_code, description)
+SELECT 'General', 'GENERAL', 'Fallback group for spending without a confident lab-group match'
+WHERE NOT EXISTS (SELECT 1 FROM lab_groups WHERE lab_group_name = 'General');
 
-INSERT INTO labs (lab_id, lab_group_id, lab_code, lab_name, venue, is_general)
-OVERRIDING SYSTEM VALUE
-VALUES
-    (1, 1, 'FCB-LAB-1', 'FCB Teaching Lab 1', 'SIT FCB Block', FALSE),
-    (2, 1, 'FCB-LAB-2', 'FCB Research Lab 2', 'SIT FCB Block', FALSE),
-    (3, 2, 'ICT-LAB-1', 'ICT Project Lab 1', 'SIT ICT Block', FALSE)
-ON CONFLICT (lab_id) DO UPDATE
-SET
-    lab_group_id = EXCLUDED.lab_group_id,
-    lab_code = EXCLUDED.lab_code,
-    lab_name = EXCLUDED.lab_name,
-    venue = EXCLUDED.venue,
-    is_general = EXCLUDED.is_general;
+INSERT INTO lab_groups (lab_group_name, wbs_code, description)
+SELECT 'FCB', 'WBS-FCB-001', 'Food, Chemistry and Biology'
+WHERE NOT EXISTS (SELECT 1 FROM lab_groups WHERE lab_group_name = 'FCB');
 
+INSERT INTO lab_groups (lab_group_name, wbs_code, description)
+SELECT 'ICT', 'WBS-ICT-002', 'Information and Communication Technology'
+WHERE NOT EXISTS (SELECT 1 FROM lab_groups WHERE lab_group_name = 'ICT');
+
+-- Per-group General lab fallback.
+INSERT INTO labs (lab_group_id, lab_code, lab_name, is_general)
+SELECT
+  lg.lab_group_id,
+  'GEN-' || lg.lab_group_name,
+  'General',
+  true
+FROM lab_groups lg
+WHERE NOT EXISTS (
+  SELECT 1 FROM labs l
+  WHERE l.lab_group_id = lg.lab_group_id
+    AND l.is_general = true
+);
+
+-- Demo concrete labs used by current samples.
+INSERT INTO labs (lab_group_id, lab_code, lab_name, is_general)
+SELECT
+  (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'ICT'),
+  'E2-02-02',
+  'ICT Embedded Lab',
+  false
+WHERE NOT EXISTS (SELECT 1 FROM labs WHERE lab_code = 'E2-02-02');
+
+INSERT INTO labs (lab_group_id, lab_code, lab_name, is_general)
+SELECT
+  (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'FCB'),
+  'W3-01-021',
+  'W3 Food Processing Lab',
+  false
+WHERE NOT EXISTS (SELECT 1 FROM labs WHERE lab_code = 'W3-01-021');
+
+-- Demo users. Password hashes are placeholders unless replaced by auth setup.
 INSERT INTO users (
-    user_id,
-    role_id,
-    full_name,
-    email,
-    staff_id,
-    password_hash,
-    lab_group_id,
-    lab_id
+  role_id,
+  full_name,
+  email,
+  staff_id,
+  password_hash,
+  lab_group_id,
+  lab_id,
+  is_active
 )
-OVERRIDING SYSTEM VALUE
 VALUES
-    (1, 1, 'Development Admin', 'admin@example.com', 'DEV-ADMIN', 'placeholder_no_auth_yet', NULL, NULL),
-    (2, 2, 'Development Team Lead', 'teamlead.fcb@example.com', 'DEV-TL-FCB', 'placeholder_no_auth_yet', 1, NULL),
-    (3, 3, 'Development Lab IC', 'labic.fcb@example.com', 'DEV-LIC-FCB', 'placeholder_no_auth_yet', NULL, 1)
-ON CONFLICT (user_id) DO UPDATE
+  (
+    (SELECT role_id FROM roles WHERE role_name = 'admin'),
+    'Development Admin',
+    'admin@example.com',
+    'DEV-ADMIN',
+    'placeholder_no_auth_yet',
+    NULL,
+    NULL,
+    TRUE
+  ),
+  (
+    (SELECT role_id FROM roles WHERE role_name = 'teamlead'),
+    'Development Team Lead',
+    'teamlead.fcb@example.com',
+    'DEV-TL-FCB',
+    'placeholder_no_auth_yet',
+    (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'FCB'),
+    NULL,
+    TRUE
+  ),
+  (
+    (SELECT role_id FROM roles WHERE role_name = 'labic'),
+    'Development Lab IC',
+    'labic.fcb@example.com',
+    'DEV-LIC-FCB',
+    'placeholder_no_auth_yet',
+    NULL,
+    (SELECT lab_id FROM labs WHERE lab_code = 'W3-01-021'),
+    TRUE
+  ),
+  (
+    (SELECT role_id FROM roles WHERE role_name = 'labic'),
+    'ICT Lab IC',
+    'labic.ict@example.com',
+    'DEV-LIC-ICT',
+    'placeholder_no_auth_yet',
+    NULL,
+    (SELECT lab_id FROM labs WHERE lab_code = 'E2-02-02'),
+    TRUE
+  ),
+  (
+    (SELECT role_id FROM roles WHERE role_name = 'labic'),
+    'Unassigned Lab IC',
+    'labic.non@example.com',
+    'DEV-LIC-NON',
+    'placeholder_no_auth_yet',
+    NULL,
+    NULL,
+    TRUE
+  ),
+  (
+    (SELECT role_id FROM roles WHERE role_name = 'teamlead'),
+    'Unassigned Team Lead',
+    'teamlead.non@example.com',
+    'DEV-TL-NON',
+    'placeholder_no_auth_yet',
+    NULL,
+    NULL,
+    TRUE
+  )
+ON CONFLICT (email) DO UPDATE
 SET
-    role_id = EXCLUDED.role_id,
-    full_name = EXCLUDED.full_name,
-    email = EXCLUDED.email,
-    staff_id = EXCLUDED.staff_id,
-    password_hash = EXCLUDED.password_hash,
-    lab_group_id = EXCLUDED.lab_group_id,
-    lab_id = EXCLUDED.lab_id;
-
-SELECT setval(pg_get_serial_sequence('roles', 'role_id'), (SELECT MAX(role_id) FROM roles));
-SELECT setval(pg_get_serial_sequence('lab_groups', 'lab_group_id'), (SELECT MAX(lab_group_id) FROM lab_groups));
-SELECT setval(pg_get_serial_sequence('labs', 'lab_id'), (SELECT MAX(lab_id) FROM labs));
-SELECT setval(pg_get_serial_sequence('users', 'user_id'), (SELECT MAX(user_id) FROM users));
+  role_id = EXCLUDED.role_id,
+  full_name = EXCLUDED.full_name,
+  staff_id = EXCLUDED.staff_id,
+  password_hash = EXCLUDED.password_hash,
+  lab_group_id = EXCLUDED.lab_group_id,
+  lab_id = EXCLUDED.lab_id,
+  is_active = EXCLUDED.is_active;

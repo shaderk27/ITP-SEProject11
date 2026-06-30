@@ -53,6 +53,7 @@ export function ReviewQueuePage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchBatches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);
@@ -61,6 +62,7 @@ export function ReviewQueuePage() {
   useEffect(() => {
     if (expandedBatch === null) return;
     if (details[expandedBatch]) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "loading" } }));
     getBatchDetail(expandedBatch)
       .then((data) => {

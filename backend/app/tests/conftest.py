@@ -131,6 +131,10 @@ def make_staging_batch(db: Session, admin_user, seed_refs) -> Callable:
         db.flush()
 
         for i, (desc, amount) in enumerate(lines, start=1):
+            # line_identity_key drives Harry's W9-04 preserve-by-identity logic.
+            # Deriving from source_pr_number + description means a re-upload of
+            # the same line (regardless of staging row id) is treated as a match.
+            line_identity_key = f"{source_pr_number}::{desc}"
             line = StagingPRLine(
                 staging_header_id=header.staging_header_id,
                 source_line_no=i,
@@ -143,6 +147,13 @@ def make_staging_batch(db: Session, admin_user, seed_refs) -> Callable:
                 suggested_category_id=seed_refs["category_id"],
                 classification_status="confident",
                 review_status="not_required",
+                raw_line_json={
+                    "line_identity_key": line_identity_key,
+                    "item_details": desc,
+                    "pr_status": "",
+                    "po_number": "",
+                    "po_status": "",
+                },
             )
             db.add(line)
             db.flush()

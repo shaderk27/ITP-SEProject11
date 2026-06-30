@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, FileDown, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -38,6 +38,7 @@ export function RecordsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRecords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email]);

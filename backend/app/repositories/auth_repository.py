@@ -1,6 +1,7 @@
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
+from app.models.config import Lab, LabGroup
 from app.models.auth import User, Role
 
 
@@ -16,7 +17,9 @@ class AuthRepository:
     def get_user_by_id(self, db: Session, user_id: int) -> Optional[User]:
         return db.execute(
             select(User)
-            .options(joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+            )
             .where(User.user_id == user_id)
         ).scalar_one_or_none()
 
@@ -80,10 +83,29 @@ class AuthRepository:
         """Retrieve all users with role and scope relationships."""
         return (
             db.query(User)
-            .options(joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+            )
             .order_by(User.user_id)
             .all()
         )
+
+    def get_users_by_role_id(
+        self, db: Session, role_id: int, active_only: bool = True
+    ) -> List[User]:
+        """Fetch all users assigned to a given role."""
+        query = db.query(User).filter(User.role_id == role_id)
+        if active_only:
+            query = query.filter(User.is_active.is_(True))
+        return query.all()
+
+    def get_lab_by_id(self, db: Session, lab_id: int) -> Optional[Lab]:
+        """Fetch a lab by primary key."""
+        return db.query(Lab).filter(Lab.lab_id == lab_id).first()
+
+    def get_lab_group_by_id(self, db: Session, lab_group_id: int) -> Optional[LabGroup]:
+        """Fetch a lab group by primary key."""
+        return db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
 
     def get_user_by_role_and_lab_group(
         self, db: Session, role_id: int, lab_group_id: int
@@ -92,6 +114,7 @@ class AuthRepository:
         return (
             db.query(User)
             .filter(User.role_id == role_id, User.lab_group_id == lab_group_id)
+            .filter(User.is_active.is_(True))
             .first()
         )
 
@@ -102,6 +125,7 @@ class AuthRepository:
         return (
             db.query(User)
             .filter(User.role_id == role_id, User.lab_id == lab_id)
+            .filter(User.is_active.is_(True))
             .first()
         )
 
@@ -119,6 +143,7 @@ class AuthRepository:
             )
             .join(Role, Role.role_id == User.role_id)
             .filter((User.lab_group_id.isnot(None)) | (User.lab_id.isnot(None)))
+            .filter(User.is_active.is_(True))
             .all()
         )
         return [

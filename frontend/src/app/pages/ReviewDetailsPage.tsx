@@ -37,6 +37,7 @@ export function ReviewDetailsPage() {
 
   useEffect(() => {
     if (!Number.isFinite(queueId)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError(`Invalid review queue id: ${id}`);
       setLoading(false);
       return;
@@ -68,6 +69,7 @@ export function ReviewDetailsPage() {
     if (!stillValid) {
       // Default to the General lab in this group, if one exists.
       const general = labsForGroup.find((l) => l.is_general);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLabId(general?.lab_id ?? labsForGroup[0]?.lab_id ?? null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,9 +326,9 @@ export function ReviewDetailsPage() {
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-sm text-foreground mt-1 whitespace-pre-line">{value || "—"}</p>
+      <p className="text-sm text-foreground mt-1 whitespace-pre-line break-words">{value || "—"}</p>
     </div>
   );
 }
