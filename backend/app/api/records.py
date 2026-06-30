@@ -6,7 +6,7 @@ record). Foundation for W9-02's 'Historical retrieval test' requirement
 and a stepping stone for W11-03 reporting work.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -67,6 +67,8 @@ class CommittedPR(BaseModel):
 @router.get("/prs", response_model=list[CommittedPR])
 def list_committed_prs(
     date_range: str = "all",
+    start_date: date | None = None,
+    end_date: date | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CommittedPR]:
@@ -78,9 +80,13 @@ def list_committed_prs(
       - Team Lead → only PRs whose lab_group_id matches their lab_group_id.
       - Lab IC    → 403 (page hidden in sidebar; backend mirror).
 
-    ``date_range`` (W11-03) filters on ``request_date`` (the xlsx "PR Sub
-    Date"): one of all / 7d / 30d / 90d / ytd. When a range is active, PRs
-    with no request_date are excluded (they fall in no window).
+    Date filtering (W11-03) is on ``request_date`` (the xlsx "PR Sub Date"):
+      - ``start_date`` / ``end_date`` — an explicit custom range. If either is
+        given it OVERRIDES the preset.
+      - ``date_range`` — a preset (all / 7d / 30d / 90d / ytd), used only when
+        no custom dates are supplied.
+    When any bound is active, PRs with no request_date drop out (the >= / <=
+    comparison fails on NULL).
 
     Sorted most-recently-updated first so the freshest data sits at the top.
     """
@@ -97,12 +103,15 @@ def list_committed_prs(
             return []
         query = query.filter(PurchaseRequest.lab_group_id == current_user.lab_group_id)
 
-    cutoff = date_range_cutoff(date_range)
-    if cutoff is not None:
-        query = query.filter(
-            PurchaseRequest.request_date.isnot(None),
-            PurchaseRequest.request_date >= cutoff,
-        )
+    # Custom range wins; otherwise fall back to the preset (lower bound only).
+    if start_date is not None or end_date is not None:
+        start, end = start_date, end_date
+    else:
+        start, end = date_range_cutoff(date_range), None
+    if start is not None:
+        query = query.filter(PurchaseRequest.request_date >= start)
+    if end is not None:
+        query = query.filter(PurchaseRequest.request_date <= end)
 
     prs = query.order_by(PurchaseRequest.updated_at.desc()).all()
     if not prs:
