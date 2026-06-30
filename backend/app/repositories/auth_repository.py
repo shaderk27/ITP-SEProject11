@@ -208,8 +208,11 @@ class AuthRepository:
             )
             .first()
         )
-    def get_last_reset_token_by_user(#check if password is allowed for resetting
-        self, db: Session, user_id: int#allows if used before, but not if expired
+
+    def get_last_reset_token_by_user(  # check if password is allowed for resetting
+        self,
+        db: Session,
+        user_id: int,  # allows if used before, but not if expired
     ) -> Optional[PasswordResetToken]:
         return (
             db.query(PasswordResetToken)

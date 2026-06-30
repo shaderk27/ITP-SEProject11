@@ -598,9 +598,7 @@ class AuthService:
             )
 
         if not normal_valid:
-            token = self.repository.get_last_reset_token_by_user(
-                self.db, user.user_id
-            )
+            token = self.repository.get_last_reset_token_by_user(self.db, user.user_id)
             if not token or not bcrypt.checkpw(
                 current_password.encode(), token.temp_password.encode()
             ):
