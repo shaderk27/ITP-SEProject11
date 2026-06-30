@@ -3,7 +3,9 @@ import type { LabGroupSummary, SpendingSummary } from "../types/dashboard";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export async function listLabGroups(): Promise<LabGroupSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/api/config/labgroups`);
+  const response = await fetch(`${API_BASE_URL}/api/config/labgroups`, {
+    credentials: "include",
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to load lab groups (${response.status}).`);

@@ -5,6 +5,7 @@ import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
+import { useAuth } from "../context/AuthContext";
 import { getSpendingSummary, listLabGroups } from "../services/dashboardService";
 import type { LabGroupSummary, SpendingSummary } from "../types/dashboard";
 import {
@@ -44,10 +45,27 @@ const recentUploads = [
 ];
 
 export function DashboardPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
   const [spending, setSpending] = useState<SpendingSummary | null>(null);
-  const [selectedGroupId, setSelectedGroupId] = useState<string>("all");
+  // For Admin defaults to "all"; for Team Lead we auto-set to their lab_group
+  // once it's known (see effect below).
+  const [selectedGroupId, setSelectedGroupId] = useState<string>(() =>
+    user?.labGroupId ? String(user.labGroupId) : "all",
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  // Auto-lock the dropdown to the Team Lead's own lab group whenever the
+  // user changes (e.g. login/logout switching identities). Admins keep "all".
+  useEffect(() => {
+    if (user?.role === "teamlead" && user.labGroupId) {
+      setSelectedGroupId(String(user.labGroupId));
+    } else if (user?.role === "admin") {
+      setSelectedGroupId("all");
+    }
+  }, [user?.role, user?.labGroupId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,8 +124,10 @@ export function DashboardPage() {
   const availableBalance = totalBudget - actualSpend - pendingSpend;
   const utilizationPct = totalBudget > 0 ? (actualSpend / totalBudget) * 100 : 0;
 
+  // "All Lab Groups" only makes sense for users who can see more than one
+  // (Admin). Team Lead is locked to their own group, so we omit it.
   const labGroupOptions = [
-    { value: "all", label: "All Lab Groups" },
+    ...(isAdmin ? [{ value: "all", label: "All Lab Groups" }] : []),
     ...labGroups.map((g) => ({ value: String(g.id), label: g.name })),
   ];
 
@@ -131,6 +151,7 @@ export function DashboardPage() {
           },
           {
             label: "Lab Group",
+            value: selectedGroupId,
             options: labGroupOptions,
           },
         ]}

@@ -43,7 +43,7 @@ export function SystemConfigPage() {
   const fetchConfigData = async () => {
     try {
       const [groupsRes, labsRes, catsRes, orphanedRes, labicRes, teamleadRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/config/labgroups`),
+        fetch(`${API_BASE_URL}/api/config/labgroups`, { credentials: "include" }),
         fetch(`${API_BASE_URL}/api/config/labs`),
         fetch(`${API_BASE_URL}/api/config/categories`),
         fetch(`${API_BASE_URL}/api/config/labs/orphaned`),

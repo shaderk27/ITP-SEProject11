@@ -18,6 +18,8 @@ from app.models.config import (
     CategoryCreate,
 )
 from app.database import get_db
+from app.dependencies.auth import get_current_user
+from app.models.auth import User
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
@@ -56,8 +58,27 @@ def get_or_create_current_period(db: Session) -> int:
 # LAB GROUPS API
 # ==============================
 @router.get("/labgroups", response_model=List[LabGroupOut])
-def get_lab_groups(db: Session = Depends(get_db)):
-    groups = db.query(LabGroup).all()
+def get_lab_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Role scoping:
+      - Admin     → every lab group.
+      - Team Lead → only their assigned lab_group_id.
+      - Lab IC    → empty list (lab groups aren't in scope for them).
+    """
+    role_name = (current_user.role.role_name if current_user.role else "").lower().strip()
+
+    query = db.query(LabGroup)
+    if role_name == "teamlead":
+        if not current_user.lab_group_id:
+            return []
+        query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
+    elif role_name not in {"admin", "teamlead"}:
+        return []
+
+    groups = query.all()
     result = []
     for g in groups:
         total_budget = (
