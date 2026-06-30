@@ -16,7 +16,7 @@ from app.schemas.auth_schema import (
 )
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
-from backend.app.dependencies.auth import get_current_user
+from app.dependencies.auth import get_current_user
 from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -64,12 +64,11 @@ async def update_me(
 ):
     current_user = service.get_current_user(access_token)
     user_id = current_user.get("id")
-
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session.")
     return service.update_user_profile(
-        user_id=user_id,
+        user_id=int(user_id),
         full_name=payload.full_name,
-        current_password=payload.current_password,
-        new_password=payload.new_password,
     )
 
 
@@ -179,3 +178,15 @@ async def reset_password(
         payload.new_password,
     )
     return { "message": "Password reset successfully." }
+
+@router.post("/users/{user_id}/send-reset")
+async def admin_send_reset(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    user = service.repository.get_user_by_id(service.db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.") #ok to show admin
+    service.forgot_password(user.email)
+    return {"message": f"Temporary password sent to {user.email}."}

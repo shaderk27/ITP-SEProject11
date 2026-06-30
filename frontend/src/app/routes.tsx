@@ -23,7 +23,10 @@ export const router = createBrowserRouter([
     path: "/login",
     Component: LoginPage,
   },
-
+  {
+    path: "/forgot-password",
+    Component: ForgotPasswordPage,
+  },
   {
     path: "/403",
     element: <AccessDenied />,
@@ -137,10 +140,6 @@ export const router = createBrowserRouter([
             <CreateUserPage />
           </ProtectedRoute>
         ),
-      },
-      {
-        path: "forgot-password",
-        Component: ForgotPasswordPage,
       },
     ],
   },
