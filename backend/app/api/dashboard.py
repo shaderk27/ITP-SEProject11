@@ -24,7 +24,7 @@ from app.utils.date_range import date_range_bounds
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
-ALLOWED_DASHBOARD_ROLES = {"admin", "teamlead"}
+ALLOWED_DASHBOARD_ROLES = {"admin", "teamlead", "labic"}
 
 
 # ─── Response shapes ─────────────────────────────────────────────────────
@@ -71,7 +71,10 @@ def get_spending_summary(
             detail="Only Admin or Team Lead can view dashboard spending.",
         )
 
-    if role_name == "teamlead" and not current_user.lab_group_id:
+    # Team Lead with no group / Lab IC with no lab → nothing in scope.
+    if (role_name == "teamlead" and not current_user.lab_group_id) or (
+        role_name == "labic" and not current_user.lab_id
+    ):
         return SpendingSummary(
             total_actual_spend_sgd="0",
             by_lab_group={},
@@ -81,10 +84,10 @@ def get_spending_summary(
 
     start, end = _resolve_bounds(date_range, start_date, end_date)
     approved_by_group, approved_total = _aggregate_by_status(
-        db, "approved%", role_name, current_user.lab_group_id, start, end
+        db, "approved%", current_user, start, end
     )
     pending_by_group, pending_total = _aggregate_by_status(
-        db, "pending%", role_name, current_user.lab_group_id, start, end
+        db, "pending%", current_user, start, end
     )
 
     return SpendingSummary(
@@ -122,11 +125,25 @@ def _apply_date_bounds(query, start, end):
     return query
 
 
+def _apply_role_scope(query, current_user):
+    """
+    Restrict a PurchaseRequestLine query by the caller's role:
+      - Team Lead → labs in their lab group (needs Lab joined).
+      - Lab IC    → only their single assigned lab.
+      - Admin     → unrestricted.
+    """
+    role_name = _role_name(current_user)
+    if role_name == "teamlead":
+        return query.filter(Lab.lab_group_id == current_user.lab_group_id)
+    if role_name == "labic":
+        return query.filter(PurchaseRequestLine.lab_id == current_user.lab_id)
+    return query
+
+
 def _aggregate_by_status(
     db: Session,
     status_pattern: str,
-    role_name: str,
-    user_lab_group_id: int | None,
+    current_user: User,
     start=None,
     end=None,
 ) -> tuple[dict[str, str], Decimal]:
@@ -150,8 +167,7 @@ def _aggregate_by_status(
         .group_by(Lab.lab_group_id)
     )
     query = _apply_date_bounds(query, start, end)
-    if role_name == "teamlead":
-        query = query.filter(Lab.lab_group_id == user_lab_group_id)
+    query = _apply_role_scope(query, current_user)
 
     by_group: dict[str, str] = {}
     total = Decimal("0")
@@ -250,7 +266,9 @@ def get_breakdown(
             detail="Only Admin or Team Lead can view dashboard breakdown.",
         )
 
-    if role_name == "teamlead" and not current_user.lab_group_id:
+    if (role_name == "teamlead" and not current_user.lab_group_id) or (
+        role_name == "labic" and not current_user.lab_id
+    ):
         return BreakdownResponse(lab_groups=[])
 
     # ─── 1. Name lookups (one DB hit each) ────────────────────────────
@@ -304,10 +322,7 @@ def get_breakdown(
     # Date filter applies to spending only; budgets stay full-FY (below).
     start, end = _resolve_bounds(date_range, start_date, end_date)
     spending_query = _apply_date_bounds(spending_query, start, end)
-    if role_name == "teamlead":
-        spending_query = spending_query.filter(
-            Lab.lab_group_id == current_user.lab_group_id
-        )
+    spending_query = _apply_role_scope(spending_query, current_user)
 
     spending_by_lab_cat: dict[tuple[int, int], dict[str, Decimal]] = {}
     for lab_id, cat_id, approved, pending in spending_query.all():
@@ -331,6 +346,8 @@ def get_breakdown(
         budget_query = budget_query.filter(
             Budget.lab_group_id == current_user.lab_group_id
         )
+    elif role_name == "labic":
+        budget_query = budget_query.filter(Budget.lab_id == current_user.lab_id)
 
     budget_by_lab_cat: dict[tuple[int, int], Decimal] = {}
     for lab_id, cat_id, amount in budget_query.all():
