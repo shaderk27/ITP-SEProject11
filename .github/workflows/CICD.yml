@@ -45,7 +45,7 @@ jobs:
         run: npm run lint -- --max-warnings=-1
       
       - name: Run frontend tests
-        run: ./node_modules/.bin/vitest run --coverage
+        run: npx vitest run --coverage
 
       - name: Build
         run: npm run build
