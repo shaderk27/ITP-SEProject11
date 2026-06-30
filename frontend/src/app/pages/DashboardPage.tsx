@@ -50,14 +50,6 @@ const budgetData = [
   { month: "Jun", budget: 45000, actual: 0 },
 ];
 
-const categoryData = [
-  { category: "Equipment", amount: 28500 },
-  { category: "Supplies", amount: 18200 },
-  { category: "Services", amount: 15300 },
-  { category: "Training", amount: 8900 },
-  { category: "Other", amount: 5600 },
-];
-
 const recentUploads = [
   { id: "UP-2024-152", date: "2026-05-20", records: 45, status: "processed" },
   { id: "UP-2024-151", date: "2026-05-18", records: 28, status: "review" },
@@ -179,6 +171,26 @@ export function DashboardPage() {
       (g) => String(g.lab_group_id) === selectedGroupId,
     );
   }, [breakdown, selectedGroupId]);
+
+  // Spending by Category chart: approved spend summed per category_name across
+  // the visible lab groups. Every category present in the breakdown is kept
+  // (configured-but-unspent categories show as a $0 bar), sorted biggest-first.
+  const categoryData = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const group of filteredBreakdown) {
+      for (const lab of group.labs) {
+        for (const cat of lab.categories) {
+          totals.set(
+            cat.category_name,
+            (totals.get(cat.category_name) ?? 0) + Number(cat.actual_spend_sgd),
+          );
+        }
+      }
+    }
+    return Array.from(totals, ([category, amount]) => ({ category, amount })).sort(
+      (a, b) => b.amount - a.amount,
+    );
+  }, [filteredBreakdown]);
 
   const toggleGroup = (id: number) => {
     setExpandedGroups((prev) => {
@@ -464,7 +476,12 @@ export function DashboardPage() {
               <BarChart data={categoryData} layout="vertical" barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis type="number" stroke="#6b7280" />
-                <YAxis dataKey="category" type="category" stroke="#6b7280" />
+                <YAxis
+                  dataKey="category"
+                  type="category"
+                  stroke="#6b7280"
+                  width={100}
+                />
                 <Tooltip />
                 <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]} />
               </BarChart>
