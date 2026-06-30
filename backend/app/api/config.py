@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
 from datetime import date
+from sqlalchemy.exc import IntegrityError
 
 from app.models.config import (
     LabGroup,
@@ -22,7 +23,6 @@ from app.dependencies.auth import get_current_user
 from app.models.auth import User
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
-
 
 # ==============================
 # AUTOMATIC FY PERIOD GENERATOR
@@ -52,7 +52,6 @@ def get_or_create_current_period(db: Session) -> int:
     db.refresh(new_period)
 
     return new_period.period_id
-
 
 # ==============================
 # LAB GROUPS API
@@ -101,7 +100,6 @@ def get_lab_groups(
         )
     return result
 
-
 @router.post("/labgroups", response_model=LabGroupOut)
 def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     new_group = LabGroup(
@@ -136,7 +134,6 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
         "budget": 0,
         "threshold": 80,
     }
-
 
 @router.put("/labgroups/{group_id}", response_model=LabGroupOut)
 def update_lab_group(
@@ -174,7 +171,6 @@ def update_lab_group(
         "threshold": 80,
     }
 
-
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
     # 1. Unassign the group from all Budgets first explicitly
@@ -200,7 +196,6 @@ def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
         "message": "Lab group deleted and all associated labs and budgets unassigned.",
     }
 
-
 # ==============================
 # CATEGORIES API
 # ==============================
@@ -216,7 +211,6 @@ def get_categories(db: Session = Depends(get_db)):
         for c in cats
     ]
 
-
 @router.post("/categories", response_model=CategoryOut)
 def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
     new_cat = SpendingCategory(
@@ -230,7 +224,6 @@ def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
         "name": new_cat.category_name,
         "description": new_cat.description or "",
     }
-
 
 @router.put("/categories/{cat_id}", response_model=CategoryOut)
 def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(get_db)):
@@ -250,7 +243,6 @@ def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(g
         "description": db_cat.description or "",
     }
 
-
 @router.delete("/categories/{cat_id}")
 def delete_category(cat_id: int, db: Session = Depends(get_db)):
     cat = (
@@ -258,11 +250,21 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
         .filter(SpendingCategory.category_id == cat_id)
         .first()
     )
-    if cat:
+    
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found.")
+
+    # --- Graceful Rejection on Foreign Key Violations ---
+    try:
         db.delete(cat)
         db.commit()
-    return {"success": True}
-
+        return {"success": True}
+    except IntegrityError:
+        db.rollback() # VERY IMPORTANT: Rollback the broken transaction!
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete '{cat.category_name}' because it is currently assigned to one or more labs. Please remove the budgets for this category first."
+        )
 
 # ==============================
 # LABS API
@@ -274,7 +276,6 @@ def get_orphaned_labs(db: Session = Depends(get_db)):
         {"lab_id": lab.lab_id, "lab_name": lab.lab_name, "lab_code": lab.lab_code or ""}
         for lab in orphaned_labs
     ]
-
 
 @router.get("/labs", response_model=List[LabOut])
 def get_labs(db: Session = Depends(get_db)):
@@ -299,7 +300,6 @@ def get_labs(db: Session = Depends(get_db)):
             }
         )
     return result
-
 
 @router.post("/labs", response_model=LabOut)
 def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
@@ -340,7 +340,6 @@ def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
         "budgets": lab_in.budgets,
     }
 
-
 @router.put("/labs/{lab_id}", response_model=LabOut)
 def update_lab(lab_id: int, lab_in: LabCreate, db: Session = Depends(get_db)):
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
@@ -380,7 +379,6 @@ def update_lab(lab_id: int, lab_in: LabCreate, db: Session = Depends(get_db)):
         "budgets": lab_in.budgets,
     }
 
-
 @router.delete("/labs/{lab_id}")
 def delete_lab(lab_id: int, db: Session = Depends(get_db)):
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
@@ -388,7 +386,6 @@ def delete_lab(lab_id: int, db: Session = Depends(get_db)):
         db.delete(lab)
         db.commit()
     return {"success": True}
-
 
 @router.put("/labs/{lab_id}/unassign")
 def unassign_lab_from_group(lab_id: int, db: Session = Depends(get_db)):

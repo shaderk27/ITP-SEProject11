@@ -295,6 +295,7 @@ def test_upload_writes_audit_log(db, admin_user, seed_refs):
                 unit_rate=Decimal("10.00"),
                 wbs="WBS-TEST",
                 instruction_to_vendor="",
+                req_type="Standard",
                 pr_category="General",
                 amount_gst=Decimal("10.00"),
                 line_identity_key="key1",
