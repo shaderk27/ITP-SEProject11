@@ -99,7 +99,7 @@ export function ProcessingSummaryPage() {
         .filter((record) => {
           const lab = record.line.lab || "";
           const labGroup = record.line.lab_group || "";
-          return lab === "Unassigned Lab" || labGroup === "Pending Lab Group";
+          return lab === "Unassigned Lab" || labGroup === "Pending Lab Group" || record.line.category === "General";
         })
         .map((record) => [
           record.line.pr_number,
@@ -257,6 +257,9 @@ export function ProcessingSummaryPage() {
 }
 
 function SummaryTable({ columns, rows }: { columns: string[]; rows: string[][] }) {
+  // We identify classification columns by their header name instead of hardcoding category names!
+  const badgeColumns = ["Lab Group", "Lab", "Category"];
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -270,21 +273,26 @@ function SummaryTable({ columns, rows }: { columns: string[]; rows: string[][] }
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.join("|")} className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
-              {row.map((cell, index) => (
-                <td key={`${cell}-${index}`} className="p-3 text-sm text-muted-foreground">
-                  {isClassificationCell(cell) ? <StatusBadge status={cell === "General" ? "general" : "info"}>{cell}</StatusBadge> : cell}
-                </td>
-              ))}
+          {rows.map((row, rowIndex) => (
+            <tr key={`${row[0]}-${rowIndex}`} className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
+              {row.map((cell, index) => {
+                const isBadgeColumn = badgeColumns.includes(columns[index]);
+                const isGeneral = cell === "General" || cell === "Pending Mapping" || cell === "Unassigned Lab";
+                
+                return (
+                  <td key={`${cell}-${index}`} className="p-3 text-sm text-muted-foreground">
+                    {isBadgeColumn ? (
+                      <StatusBadge status={isGeneral ? "general" : "info"}>{cell}</StatusBadge>
+                    ) : (
+                      cell
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
       </table>
     </div>
   );
-}
-
-function isClassificationCell(value: string) {
-  return ["FCB", "EPD", "General", "W3L1 Food PP", "W4L2", "Consumables", "Maintenance"].includes(value);
 }
