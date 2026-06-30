@@ -718,7 +718,7 @@ export function SystemConfigPage() {
                     onChange={(e) => setNewLabForm({...newLabForm, venue: String(e.target.value)})}
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Comma-separated tags for location matching (auto-fills intelligently as you type).
+                    Tags for location mapping & matching (Separate each tag with a comma).
                   </p>
                 </div>
                 
