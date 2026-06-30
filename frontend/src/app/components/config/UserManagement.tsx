@@ -77,7 +77,8 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     }
   };
 
-  const hasScope = (user: UserData) => Boolean(user.lab_group_name || user.lab_name);
+  const hasScope = (user: UserData) =>
+    Boolean(user.lab_group_name || user.lab_name);
 
   const readErrorDetail = async (res: Response, fallback: string) => {
     try {
@@ -94,10 +95,13 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`${API}/api/auth/users/${user.id}/unassign-scope`, {
-        method: "PUT",
-        credentials: "include",
-      });
+      const res = await fetch(
+        `${API}/api/auth/users/${user.id}/unassign-scope`,
+        {
+          method: "PUT",
+          credentials: "include",
+        },
+      );
       if (!res.ok) {
         alert(await readErrorDetail(res, "Failed to clear assignment."));
         return;
@@ -112,7 +116,9 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
   const handleDeactivateUser = async (user: UserData) => {
     if (!user.is_active) return;
     if (hasScope(user)) {
-      alert("Unassign this user from their Lab or Lab Group before deactivating the account.");
+      alert(
+        "Unassign this user from their Lab or Lab Group before deactivating the account.",
+      );
       return;
     }
 
@@ -147,12 +153,17 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     setResetError(null);
 
     try {
-      const res = await fetch(`${API}/api/auth/users/${resetTargetUser.id}/send-reset`, {
-        method: "POST",
-        credentials: "include",
-      });
+      const res = await fetch(
+        `${API}/api/auth/users/${resetTargetUser.id}/send-reset`,
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      );
       if (res.ok) {
-        setResetSuccess(`A temporary password has been sent to ${resetTargetUser.email}.`);
+        setResetSuccess(
+          `A temporary password has been sent to ${resetTargetUser.email}.`,
+        );
       } else {
         const msg = await readErrorDetail(res, "Failed to send reset email.");
         setResetError(msg);
@@ -165,14 +176,18 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
   };
 
   if (isLoading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading users...</div>;
+    return (
+      <div className="p-6 text-sm text-muted-foreground">Loading users...</div>
+    );
   }
 
   return (
     <Card className="bg-white border-border">
       <div className="p-6 border-b border-border flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">User Management</h3>
+          <h3 className="text-lg font-semibold text-foreground">
+            User Management
+          </h3>
           <p className="text-sm text-muted-foreground mt-1">
             View users and their assigned role scope
           </p>
@@ -229,9 +244,13 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                   {user.full_name}
                 </td>
                 <td className="p-4 text-sm text-muted-foreground">
-                  {user.staff_id ?? <span className="text-gray-300 italic">—</span>}
+                  {user.staff_id ?? (
+                    <span className="text-gray-300 italic">—</span>
+                  )}
                 </td>
-                <td className="p-4 text-sm text-muted-foreground">{user.email}</td>
+                <td className="p-4 text-sm text-muted-foreground">
+                  {user.email}
+                </td>
                 <td className="p-4">
                   <StatusBadge status={getRoleBadgeStatus(user.role) as any}>
                     {user.role === "teamlead"
@@ -245,7 +264,9 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                   {getScopeLabel(user)}
                 </td>
                 <td className="p-4">
-                  <StatusBadge status={user.is_active ? "approved" : "rejected"}>
+                  <StatusBadge
+                    status={user.is_active ? "approved" : "rejected"}
+                  >
                     {user.is_active ? "Active" : "Inactive"}
                   </StatusBadge>
                 </td>
@@ -254,9 +275,19 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!user.is_active}
-                      title={user.is_active ? "Send password reset email" : "User is inactive"}
-                      onClick={() => { setResetTargetUser(user); setResetSuccess(null); setResetError(null); }}
+                      disabled={!user.is_active || user.role === "admin"}
+                      title={
+                        user.role === "admin"
+                          ? "Admin passwords cannot be reset by another admin"
+                          : user.is_active
+                            ? "Send password reset email"
+                            : "User is inactive"
+                      }
+                      onClick={() => {
+                        setResetTargetUser(user);
+                        setResetSuccess(null);
+                        setResetError(null);
+                      }}
                     >
                       <KeyRound className="h-3 w-3" />
                     </Button>
@@ -295,7 +326,10 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
             ))}
             {users.length === 0 && !error && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-sm text-muted-foreground">
+                <td
+                  colSpan={7}
+                  className="p-6 text-center text-sm text-muted-foreground"
+                >
                   No users found.
                 </td>
               </tr>
@@ -308,7 +342,9 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm px-4">
           <div className="bg-white w-full max-w-md rounded-xl shadow-xl overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <h3 className="text-lg font-semibold text-gray-800">Reset Password</h3>
+              <h3 className="text-lg font-semibold text-gray-800">
+                Reset Password
+              </h3>
               <button
                 onClick={() => setResetTargetUser(null)}
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-md transition-colors"
@@ -325,8 +361,10 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
               ) : (
                 <p className="text-sm text-gray-600">
                   This will send a temporary password to{" "}
-                  <span className="font-medium text-gray-800">{resetTargetUser.email}</span>.
-                  The temporary password expires in 1 hour.
+                  <span className="font-medium text-gray-800">
+                    {resetTargetUser.email}
+                  </span>
+                  . The temporary password expires in 1 hour.
                 </p>
               )}
 

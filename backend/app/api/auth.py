@@ -191,8 +191,10 @@ async def admin_send_reset(
 ):
     user = service.repository.get_user_by_id(service.db, user_id)
     if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.role.role_name == "admin":
         raise HTTPException(
-            status_code=404, detail="User not found."
-        )  # ok to show admin
+            status_code=403, detail="Admin passwords cannot be reset by another admin."
+        )
     service.forgot_password(user.email)
     return {"message": f"Temporary password sent to {user.email}."}
