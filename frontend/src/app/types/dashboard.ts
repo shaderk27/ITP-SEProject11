@@ -25,7 +25,8 @@ export interface BreakdownMetrics {
 }
 
 export interface BreakdownCategory extends BreakdownMetrics {
-  category_id: number;
+  // null when a committed line's category could not be resolved ("Uncategorised").
+  category_id: number | null;
   category_name: string;
 }
 

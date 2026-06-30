@@ -131,7 +131,9 @@ def _role_name(user: User) -> str:
 
 # ─── Breakdown (Lab Group → Lab → Category) ──────────────────────────────
 class BreakdownCategory(BaseModel):
-    category_id: int
+    # Nullable: a committed line whose category could not be resolved aggregates
+    # into a single "Uncategorised" row rather than crashing the whole endpoint.
+    category_id: int | None
     category_name: str
     budget_sgd: str
     actual_spend_sgd: str
@@ -309,7 +311,11 @@ def get_breakdown(
             lab_approved = Decimal("0")
             lab_pending = Decimal("0")
 
-            for cat_id in sorted(by_group[lg_id][lab_id]):
+            # Sort with NULL category last; mixing int and None raises TypeError
+            # under Python 3's sorted(), so key it explicitly.
+            for cat_id in sorted(
+                by_group[lg_id][lab_id], key=lambda c: (c is None, c or 0)
+            ):
                 cat_budget = budget_by_lab_cat.get((lab_id, cat_id), Decimal("0"))
                 spending = spending_by_lab_cat.get((lab_id, cat_id), {})
                 cat_approved = spending.get("approved", Decimal("0"))
@@ -319,7 +325,11 @@ def get_breakdown(
                 cats_list.append(
                     BreakdownCategory(
                         category_id=cat_id,
-                        category_name=category_names.get(cat_id, "Unknown"),
+                        category_name=(
+                            "Uncategorised"
+                            if cat_id is None
+                            else category_names.get(cat_id, "Unknown")
+                        ),
                         budget_sgd=str(cat_budget),
                         actual_spend_sgd=str(cat_approved),
                         pending_sgd=str(cat_pending),
