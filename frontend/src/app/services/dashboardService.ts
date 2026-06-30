@@ -1,4 +1,8 @@
-import type { LabGroupSummary, SpendingSummary } from "../types/dashboard";
+import type {
+  BreakdownResponse,
+  LabGroupSummary,
+  SpendingSummary,
+} from "../types/dashboard";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -25,6 +29,18 @@ export async function getSpendingSummary(): Promise<SpendingSummary> {
 
   if (!response.ok) {
     throw new Error(`Failed to load spending summary (${response.status}).`);
+  }
+
+  return response.json();
+}
+
+export async function getBreakdown(): Promise<BreakdownResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/dashboard/breakdown`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load dashboard breakdown (${response.status}).`);
   }
 
   return response.json();

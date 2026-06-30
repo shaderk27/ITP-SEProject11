@@ -1,13 +1,32 @@
-import { useEffect, useMemo, useState } from "react";
-import { DollarSign, TrendingUp, AlertCircle, Wallet, Percent, Clock, Activity } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  DollarSign,
+  TrendingUp,
+  AlertCircle,
+  Wallet,
+  Percent,
+  Clock,
+  Activity,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
-import { getSpendingSummary, listLabGroups } from "../services/dashboardService";
-import type { LabGroupSummary, SpendingSummary } from "../types/dashboard";
+import {
+  getBreakdown,
+  getSpendingSummary,
+  listLabGroups,
+} from "../services/dashboardService";
+import type {
+  BreakdownLabGroup,
+  BreakdownResponse,
+  LabGroupSummary,
+  SpendingSummary,
+} from "../types/dashboard";
 import {
   BarChart,
   Bar,
@@ -50,12 +69,16 @@ export function DashboardPage() {
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
   const [spending, setSpending] = useState<SpendingSummary | null>(null);
+  const [breakdown, setBreakdown] = useState<BreakdownResponse | null>(null);
   // For Admin defaults to "all"; for Team Lead we auto-set to their lab_group
   // once it's known (see effect below).
   const [selectedGroupId, setSelectedGroupId] = useState<string>(() =>
     user?.labGroupId ? String(user.labGroupId) : "all",
   );
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Track which lab_group / lab rows are expanded in the drilldown table.
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
+  const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
 
   // Auto-lock the dropdown to the Team Lead's own lab group whenever the
   // user changes (e.g. login/logout switching identities). Admins keep "all".
@@ -69,11 +92,12 @@ export function DashboardPage() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listLabGroups(), getSpendingSummary()])
-      .then(([groups, spendingSummary]) => {
+    Promise.all([listLabGroups(), getSpendingSummary(), getBreakdown()])
+      .then(([groups, spendingSummary, breakdownResp]) => {
         if (!cancelled) {
           setLabGroups(groups);
           setSpending(spendingSummary);
+          setBreakdown(breakdownResp);
           setLoadError(null);
         }
       })
@@ -128,6 +152,34 @@ export function DashboardPage() {
   const utilizationPct = totalBudget > 0 ? (actualSpend / totalBudget) * 100 : 0;
   const projectedUtilizationPct =
     totalBudget > 0 ? ((actualSpend + pendingSpend) / totalBudget) * 100 : 0;
+
+  // Drilldown rows respect the Lab Group dropdown filter so the table mirrors
+  // whatever scope the KPI cards above are showing.
+  const filteredBreakdown: BreakdownLabGroup[] = useMemo(() => {
+    if (!breakdown) return [];
+    if (selectedGroupId === "all") return breakdown.lab_groups;
+    return breakdown.lab_groups.filter(
+      (g) => String(g.lab_group_id) === selectedGroupId,
+    );
+  }, [breakdown, selectedGroupId]);
+
+  const toggleGroup = (id: number) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleLab = (id: number) => {
+    setExpandedLabs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // "All Lab Groups" only makes sense for users who can see more than one
   // (Admin). Team Lead is locked to their own group, so we omit it.
@@ -217,6 +269,102 @@ export function DashboardPage() {
             }
           />
         </div>
+
+        {/* Drilldown: Lab Group → Lab → Category */}
+        <Card className="p-6 bg-white border-border">
+          <h3 className="text-lg font-semibold mb-4 text-foreground">
+            Budget Breakdown
+          </h3>
+          {!breakdown ? (
+            <p className="text-sm text-muted-foreground">Loading breakdown…</p>
+          ) : filteredBreakdown.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No budget or spending data in this scope yet. Set budgets in System Config and commit a batch to see numbers here.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-[#f8f9fa]">
+                  <tr className="border-b border-border">
+                    <th className="text-left p-3 text-xs font-medium text-muted-foreground">Name</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Budget</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Actual Spend</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Pending</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Available</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Util %</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Proj %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredBreakdown.map((group) => {
+                    const groupOpen = expandedGroups.has(group.lab_group_id);
+                    return (
+                      <Fragment key={`g-${group.lab_group_id}`}>
+                        <tr
+                          className="border-b border-border hover:bg-[#f8f9fa] cursor-pointer"
+                          onClick={() => toggleGroup(group.lab_group_id)}
+                        >
+                          <td className="p-3 text-sm font-semibold text-foreground">
+                            <span className="inline-flex items-center gap-2">
+                              {groupOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                              {group.lab_group_name}
+                            </span>
+                          </td>
+                          <td className="p-3 text-sm text-right font-medium text-foreground">{formatCurrency(Number(group.budget_sgd))}</td>
+                          <td className="p-3 text-sm text-right text-foreground">{formatCurrency(Number(group.actual_spend_sgd))}</td>
+                          <td className="p-3 text-sm text-right text-foreground">{formatCurrency(Number(group.pending_sgd))}</td>
+                          <td className="p-3 text-sm text-right font-medium text-foreground">{formatCurrency(Number(group.available_balance_sgd))}</td>
+                          <td className={`p-3 text-sm text-right font-medium ${pctColor(group.utilisation_pct)}`}>{group.utilisation_pct.toFixed(1)}%</td>
+                          <td className={`p-3 text-sm text-right font-medium ${pctColor(group.projected_utilisation_pct)}`}>{group.projected_utilisation_pct.toFixed(1)}%</td>
+                        </tr>
+                        {groupOpen &&
+                          group.labs.map((lab) => {
+                            const labOpen = expandedLabs.has(lab.lab_id);
+                            return (
+                              <Fragment key={`l-${lab.lab_id}`}>
+                                <tr
+                                  className="border-b border-border bg-[#fafafa] hover:bg-[#f3f4f6] cursor-pointer"
+                                  onClick={() => toggleLab(lab.lab_id)}
+                                >
+                                  <td className="p-3 pl-10 text-sm text-foreground">
+                                    <span className="inline-flex items-center gap-2">
+                                      {labOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                      {lab.lab_name}
+                                    </span>
+                                  </td>
+                                  <td className="p-3 text-sm text-right text-foreground">{formatCurrency(Number(lab.budget_sgd))}</td>
+                                  <td className="p-3 text-sm text-right text-foreground">{formatCurrency(Number(lab.actual_spend_sgd))}</td>
+                                  <td className="p-3 text-sm text-right text-foreground">{formatCurrency(Number(lab.pending_sgd))}</td>
+                                  <td className="p-3 text-sm text-right text-foreground">{formatCurrency(Number(lab.available_balance_sgd))}</td>
+                                  <td className={`p-3 text-sm text-right ${pctColor(lab.utilisation_pct)}`}>{lab.utilisation_pct.toFixed(1)}%</td>
+                                  <td className={`p-3 text-sm text-right ${pctColor(lab.projected_utilisation_pct)}`}>{lab.projected_utilisation_pct.toFixed(1)}%</td>
+                                </tr>
+                                {labOpen &&
+                                  lab.categories.map((cat) => (
+                                    <tr
+                                      key={`c-${lab.lab_id}-${cat.category_id}`}
+                                      className="border-b border-border bg-[#f5f5f5]"
+                                    >
+                                      <td className="p-3 pl-16 text-sm text-muted-foreground">{cat.category_name}</td>
+                                      <td className="p-3 text-sm text-right text-muted-foreground">{formatCurrency(Number(cat.budget_sgd))}</td>
+                                      <td className="p-3 text-sm text-right text-muted-foreground">{formatCurrency(Number(cat.actual_spend_sgd))}</td>
+                                      <td className="p-3 text-sm text-right text-muted-foreground">{formatCurrency(Number(cat.pending_sgd))}</td>
+                                      <td className="p-3 text-sm text-right text-muted-foreground">{formatCurrency(Number(cat.available_balance_sgd))}</td>
+                                      <td className={`p-3 text-sm text-right ${pctColor(cat.utilisation_pct)}`}>{cat.utilisation_pct.toFixed(1)}%</td>
+                                      <td className={`p-3 text-sm text-right ${pctColor(cat.projected_utilisation_pct)}`}>{cat.projected_utilisation_pct.toFixed(1)}%</td>
+                                    </tr>
+                                  ))}
+                              </Fragment>
+                            );
+                          })}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
 
         {/* Charts Row */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -370,4 +518,12 @@ function formatCurrency(amount: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   });
+}
+
+// Threshold colors for utilisation / projected utilisation cells.
+// Matches the KPI card thresholds: ≥95% = error (red), ≥80% = warning (yellow).
+function pctColor(pct: number): string {
+  if (pct >= 95) return "text-[#dc2626]";
+  if (pct >= 80) return "text-[#d97706]";
+  return "text-foreground";
 }
