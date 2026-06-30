@@ -5,13 +5,67 @@ import { Button } from "../components/ui/button";
 import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker, Mail, UserRound, CheckCircle2, UserPlus } from "lucide-react";
 import { UserManagement } from "../components/config/UserManagement";
 
+// --- NEW: BULLETPROOF DYNAMIC TAG GENERATOR ---
+const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => {
+  try {
+    const tags = new Set<string>();
+    
+    // Safely convert to strings and trim
+    const code = rawCode ? String(rawCode).trim() : "";
+    const name = rawName ? String(rawName).trim() : "";
+
+    // 1. Process the Lab Name safely
+    if (name) {
+      tags.add(name);
+      if (name.toLowerCase().endsWith(" lab")) {
+        tags.add(name.substring(0, name.length - 4).trim());
+      }
+    }
+
+    // 2. Process the Lab Code safely
+    if (code) {
+      const codeRegex = /^([A-Z]\d+)-(\d+)-([A-Z0-9]+)$/i;
+      const match = code.match(codeRegex);
+
+      if (match) {
+        const block = match[1].toUpperCase();
+        const levelRaw = match[2];
+        const room = match[3].toUpperCase();
+        const levelShort = parseInt(levelRaw, 10).toString();
+
+        // Standard format
+        tags.add(`Block ${block}, Level ${levelRaw}, Room ${room}`);
+        
+        // Short variations
+        tags.add(`${block}L${levelShort}`); 
+        tags.add(`${block}L${levelShort}R${room}`); 
+        tags.add(`${block}-L${levelShort}-${room}`); 
+        tags.add(code.toUpperCase()); 
+
+        if (name) {
+          const shortName = name.toLowerCase().endsWith(" lab") ? name.substring(0, name.length - 4).trim() : name;
+          tags.add(`${block}L${levelShort} ${shortName}`); 
+        }
+      } else {
+        tags.add(code.toUpperCase());
+      }
+    }
+
+    return Array.from(tags).join(", ");
+  } catch (err) {
+    console.error("Autofill generation failed, falling back to manual entry:", err);
+    return ""; // If anything fails, return empty so it doesn't lock the user out of typing!
+  }
+};
+// ---------------------------------------------
+
 export function SystemConfigPage() {
   const [labGroups, setLabGroups] = useState<any[]>([]);
   const [labs, setLabs] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [orphanedLabs, setOrphanedLabs] = useState<any[]>([]);
-  const [labicUsers, setLabicUsers] = useState<any[]>([]); // users with role = labic
-  const [teamleadUsers, setTeamleadUsers] = useState<any[]>([]); // users with role = teamlead
+  const [labicUsers, setLabicUsers] = useState<any[]>([]); 
+  const [teamleadUsers, setTeamleadUsers] = useState<any[]>([]); 
   const [selectedLabIds, setSelectedLabIds] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -95,13 +149,25 @@ export function SystemConfigPage() {
     } catch (error) { console.error(error); }
   };
 
+  // --- THE FIX: Updated handleDelete to catch and display backend errors! ---
   const handleDelete = async (endpoint: string, name: string) => {
     if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE" });
-      if (res.ok) fetchConfigData();
-    } catch (error) { console.error(error); }
+      
+      if (res.ok) {
+        fetchConfigData();
+      } else {
+        // Reads the detail message sent from your FastAPI exception
+        const errorMsg = await readErrorDetail(res, `Failed to delete ${name}.`);
+        alert(errorMsg);
+      }
+    } catch (error) { 
+      console.error(error); 
+      alert("A network error occurred while trying to delete.");
+    }
   };
+  // --------------------------------------------------------------------------
 
   const handleUnassignLab = async (labId: number, labName: string) => {
     if (!window.confirm(`Remove "${labName}" from this Lab Group?`)) return;
@@ -125,9 +191,15 @@ export function SystemConfigPage() {
 
   const openEditLab = (lab: any) => {
     setEditingLabId(lab.id);
+    // Explicitly fallback all nullable fields to "" so React never locks the input
     setNewLabForm({ 
-      lab_code: lab.code, lab_name: lab.name, lab_group_id: lab.group_id, 
-      ic_name: lab.ic_name || "", ic_email: lab.ic_email || "", venue: lab.venue || "", budgets: lab.budgets || {} 
+      lab_code: lab.code || "", 
+      lab_name: lab.name || "", 
+      lab_group_id: lab.group_id || "", 
+      ic_name: lab.ic_name || "", 
+      ic_email: lab.ic_email || "", 
+      venue: lab.venue || "", 
+      budgets: lab.budgets || {} 
     });
     setIsLabModalOpen(true);
   };
@@ -312,7 +384,7 @@ export function SystemConfigPage() {
                           </tr>
                           
                           {/* THE EXPANDING NESTED LABS TABLE */}
-                                                    {isExpanded && (
+                          {isExpanded && (
                             <tr className="bg-gray-50 border-b border-border shadow-inner">
                               <td colSpan={7} className="p-0">
                                 <div className="p-4 pl-16 pr-8">
@@ -506,7 +578,7 @@ export function SystemConfigPage() {
       
       {/* LAB GROUP MODAL */}
       {isGroupModalOpen && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="w-full max-w-xl bg-white shadow-xl overflow-hidden">
             <div className="flex justify-between items-start gap-4 p-6 border-b border-border bg-[#f8f9fa]">
               <h3 className="text-lg font-bold">{editingGroupId ? "Edit Lab Group" : "Add New Lab Group"}</h3>
@@ -521,12 +593,12 @@ export function SystemConfigPage() {
               const payload = { ...newGroupForm, assigned_lab_ids: selectedLabIds };
               
               handleSave(endpoint, method, payload, resetGroupModal); 
-            }} className="space-y-4">
+            }} className="space-y-4 p-6">
               <div><label className="text-sm font-medium">Group Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.name} onChange={(e) => setNewGroupForm({...newGroupForm, name: e.target.value})} /></div>
               <div><label className="text-sm font-medium">WBS Prefix</label><input type="text" className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.wbs_code} onChange={(e) => setNewGroupForm({...newGroupForm, wbs_code: e.target.value})} /></div>
               <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newGroupForm.description} onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})} /></div>
               
-              {/* THE NEW ORPHANED LABS CHECKLIST (Visible during Creation AND Editing) */}
+              {/* THE NEW ORPHANED LABS CHECKLIST */}
               {orphanedLabs.length > 0 && (
                 <div className="mt-4 p-4 border rounded-md bg-gray-50 border-blue-100">
                   <h4 className="text-sm font-semibold text-blue-900 mb-1">Unassigned Labs Detected ({orphanedLabs.length})</h4>
@@ -559,7 +631,7 @@ export function SystemConfigPage() {
 
       {/* CATEGORY MODAL */}
       {isCategoryModalOpen && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="w-full max-w-xl bg-white shadow-xl overflow-hidden">
             <div className="flex justify-between items-start gap-4 p-6 border-b border-border bg-[#f8f9fa]">
               <h3 className="text-lg font-bold">{editingCategoryId ? "Edit Category" : "Add Spending Category"}</h3>
@@ -570,7 +642,7 @@ export function SystemConfigPage() {
               const endpoint = editingCategoryId ? `/api/config/categories/${editingCategoryId}` : "/api/config/categories";
               const method = editingCategoryId ? "PUT" : "POST";
               handleSave(endpoint, method, newCategoryForm, resetCategoryModal); 
-            }} className="space-y-4">
+            }} className="space-y-4 p-6">
               <div><label className="text-sm font-medium">Category Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" placeholder="e.g. Consumables" value={newCategoryForm.name} onChange={(e) => setNewCategoryForm({...newCategoryForm, name: e.target.value})} /></div>
               <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newCategoryForm.description} onChange={(e) => setNewCategoryForm({...newCategoryForm, description: e.target.value})} /></div>
               <div className="flex justify-end gap-2 pt-4"><Button type="button" variant="outline" onClick={resetCategoryModal}>Cancel</Button><Button type="submit" className="bg-[#1e3a8a] text-white">{editingCategoryId ? "Save Changes" : "Create"}</Button></div>
@@ -579,11 +651,11 @@ export function SystemConfigPage() {
         </div>
       )}
 
-      {/* LAB MODAL */}
+      {/* LAB MODAL (SMART AUTOFILL & MULTI-LINE TEXTAREA) */}
       {isLabModalOpen && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-2xl bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-2xl bg-white shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center p-6 border-b border-border bg-[#f8f9fa]">
               <h3 className="text-xl font-bold">{editingLabId ? "Edit Lab" : "Add New Lab"}</h3>
               <Button variant="ghost" size="sm" onClick={resetLabModal}><X className="h-5 w-5" /></Button>
             </div>
@@ -592,21 +664,63 @@ export function SystemConfigPage() {
               const endpoint = editingLabId ? `/api/config/labs/${editingLabId}` : "/api/config/labs";
               const method = editingLabId ? "PUT" : "POST";
               handleSave(endpoint, method, { ...newLabForm, lab_group_id: Number(newLabForm.lab_group_id) }, resetLabModal); 
-            }} className="space-y-4">
+            }} className="space-y-4 p-6">
               <div className="grid grid-cols-2 gap-4">
+                
+                {/* SMART LAB CODE INPUT */}
                 <div>
                   <label className="text-sm font-medium text-gray-700">Lab Code</label>
-                  <input type="text" required className="w-full mt-1 p-2 border rounded-md uppercase" value={newLabForm.lab_code} onChange={(e) => { const code = e.target.value.toUpperCase(); const parts = code.split('-'); let autoVenue = newLabForm.venue; if (parts.length === 3) { autoVenue = `Block ${parts[0]}, Level ${parts[1]}, Room ${parts[2]}`; } setNewLabForm({...newLabForm, lab_code: code, venue: autoVenue}); }} />
+                  <input 
+                    type="text" 
+                    required 
+                    className="w-full mt-1 p-2 border rounded-md uppercase" 
+                    value={newLabForm.lab_code || ""} 
+                    onChange={(e) => { 
+                      const code = String(e.target.value).toUpperCase(); 
+                      const autoVenue = generateVenueTags(code, newLabForm.lab_name);
+                      setNewLabForm({...newLabForm, lab_code: code, venue: autoVenue}); 
+                    }} 
+                  />
                 </div>
-                <div><label className="text-sm font-medium text-gray-700">Lab Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" value={newLabForm.lab_name} onChange={(e) => setNewLabForm({...newLabForm, lab_name: e.target.value})} /></div>
+
+                {/* SMART LAB NAME INPUT */}
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Lab Name</label>
+                  <input 
+                    type="text" 
+                    required 
+                    className="w-full mt-1 p-2 border rounded-md" 
+                    value={newLabForm.lab_name || ""} 
+                    onChange={(e) => { 
+                      const name = String(e.target.value);
+                      const autoVenue = generateVenueTags(newLabForm.lab_code, name);
+                      setNewLabForm({...newLabForm, lab_name: name, venue: autoVenue}); 
+                    }} 
+                  />
+                </div>
+
                 <div className="col-span-2">
                   <label className="text-sm font-medium text-gray-700">Lab Group</label>
-                  <select required className="w-full mt-1 p-2 border rounded-md bg-white" value={newLabForm.lab_group_id} onChange={(e) => setNewLabForm({...newLabForm, lab_group_id: e.target.value})}>
+                  <select required className="w-full mt-1 p-2 border rounded-md bg-white" value={newLabForm.lab_group_id || ""} onChange={(e) => setNewLabForm({...newLabForm, lab_group_id: e.target.value})}>
                     <option value="" disabled>Select a Lab Group</option>
                     {labGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
                   </select>
                 </div>
-                <div className="col-span-2"><label className="text-sm font-medium text-gray-700">Venue</label><input type="text" readOnly className="w-full mt-1 p-2 border rounded-md bg-gray-100 text-gray-500" value={newLabForm.venue} /></div>
+                
+                {/* UNLOCKED & MULTI-LINE VENUE TEXTAREA */}
+                <div className="col-span-2">
+                  <label className="text-sm font-medium text-gray-700">Venue / Location Tags</label>
+                  <textarea 
+                    rows={3}
+                    className="w-full mt-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all resize-y" 
+                    placeholder="e.g. Block W2, Level 05, Room 12, SR4A..."
+                    value={newLabForm.venue || ""} 
+                    onChange={(e) => setNewLabForm({...newLabForm, venue: String(e.target.value)})}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Comma-separated tags for location matching (auto-fills intelligently as you type).
+                  </p>
+                </div>
                 
                 <div className="col-span-2 mt-4 pt-4 border-t border-gray-200">
                   <h4 className="font-semibold text-gray-800 mb-4">Set Lab Budgets by Category</h4>
@@ -636,11 +750,12 @@ export function SystemConfigPage() {
           </Card>
         </div>
       )}
+
       {/* ASSIGN LAB IC MODAL */}
       {isAssignLabICModalOpen && assignTargetLab && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md bg-white p-6 shadow-xl">
-            <div className="flex justify-between items-center mb-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md bg-white shadow-xl overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-border bg-[#f8f9fa]">
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Assign Lab IC</h3>
                 <p className="text-sm text-muted-foreground mt-0.5">{assignTargetLab.code} — {assignTargetLab.name}</p>
@@ -708,11 +823,12 @@ export function SystemConfigPage() {
           </Card>
         </div>
       )}
+
       {/* ASSIGN TEAM LEAD MODAL */}
       {isAssignTeamLeadModalOpen && assignTargetGroup && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-md bg-white p-6 shadow-xl">
-            <div className="flex justify-between items-center mb-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-md bg-white shadow-xl overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-border bg-[#f8f9fa]">
               <div>
                 <h3 className="text-lg font-semibold text-foreground">Assign Team Lead</h3>
                 <p className="text-sm text-muted-foreground mt-0.5">{assignTargetGroup.name}</p>

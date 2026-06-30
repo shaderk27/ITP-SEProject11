@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
 from datetime import date
+from sqlalchemy.exc import IntegrityError
 
 from app.models.config import (
     LabGroup,
@@ -235,10 +236,21 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
         .filter(SpendingCategory.category_id == cat_id)
         .first()
     )
-    if cat:
+    
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found.")
+
+    # --- THE FIX: Graceful Rejection on Foreign Key Violations ---
+    try:
         db.delete(cat)
         db.commit()
-    return {"success": True}
+        return {"success": True}
+    except IntegrityError:
+        db.rollback() # VERY IMPORTANT: Rollback the broken transaction!
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot delete '{cat.category_name}' because it is currently assigned to one or more labs. Please remove the budgets for this category first."
+        )
 
 
 # ==============================

@@ -51,13 +51,15 @@ class PRLineItem:
     unit_rate: Decimal | None
     wbs: str
     instruction_to_vendor: str
-    pr_category: str
+    req_type: str
+    pr_category: str  # RESTORED
     amount_gst: Decimal
     line_identity_key: str
     content_hash: str
     # Fields with default values MUST be at the end
     lab: str = "Unassigned Lab"
     lab_group: str = "Pending Lab Group"
+    category: str = "General"
 
     def to_dict(self) -> dict:
         data = asdict(self)
