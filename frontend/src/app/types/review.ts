@@ -126,6 +126,7 @@ export interface CommitResponse {
   batch_id: number;
   new_upload_status: string;
   prs_created: number;
+  prs_updated: number;
   lines_created: number;
   pr_ids: number[];
 }

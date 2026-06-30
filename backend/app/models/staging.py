@@ -194,6 +194,9 @@ class PurchaseRequest(Base):
     instruction_to_vendor = Column(Text)
     grand_total_sgd = Column(Numeric(14, 2))
     lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id"))
+    # Source-system procurement status (e.g. "Approved (SVP)", "Pending Approval",
+    # "Rejected"). Refreshes on every commit/re-commit from the latest xlsx row.
+    pr_status = Column(String(50))
     created_at = Column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -226,6 +229,10 @@ class PurchaseRequestLine(Base):
     currency_code = Column(String(10), nullable=False, default="SGD")
     lab_id = Column(BigInteger, ForeignKey("labs.lab_id"))
     category_id = Column(BigInteger, ForeignKey("spending_categories.category_id"))
+    # Per-line source-system status (a PR can have lines in different states,
+    # e.g. one Approved + one Rejected). Refreshes on every commit/re-commit
+    # even when Harry's preserve-by-identity keeps the reviewed Lab/Category.
+    pr_status = Column(String(50))
     # Traceability back to the staging row this was promoted from.
     source_staging_line_id = Column(
         BigInteger, ForeignKey("staging_pr_lines.staging_line_id")

@@ -20,6 +20,7 @@ import app.models.config as config_models
 
 Lab = getattr(config_models, "Lab", None)
 LabGroup = getattr(config_models, "LabGroup", None)
+SpendingCategory = getattr(config_models, "SpendingCategory", None)
 
 
 class UploadService:
@@ -41,8 +42,6 @@ class UploadService:
         uploader_email: str,
         uploader_name: str,
         uploader_role: str,
-        # Optional so existing tests/callers without a real user keep working.
-        # When provided, the parsed upload is persisted to the DB pipeline (W9-01).
         current_user: User | None = None,
     ) -> dict:
         batch_id = f"UP-{uuid4().hex[:8].upper()}"
@@ -59,13 +58,7 @@ class UploadService:
         except Exception as error:
             return self._failed_result(
                 metadata,
-                [
-                    {
-                        "field": "File",
-                        "message": f"Format error: {error}",
-                        "severity": "error",
-                    }
-                ],
+                [{"field": "File", "message": f"Format error: {error}", "severity": "error"}],
             )
 
         validation_errors = validate_dataframe(dataframe)
@@ -79,49 +72,54 @@ class UploadService:
         records = {"inserted": [], "updated": [], "duplicate": []}
         needs_review_count = 0
 
-        # Classification lookup cache for uploaded line enrichment.
+        # Lookups for classification mapping
         lab_cache = {}
         group_cache = {}
-        if self.db and Lab:
+        category_cache = {}
+        
+        if self.db:
             try:
-                all_labs = self.db.query(Lab).all()
-
                 if LabGroup:
                     for g in self.db.query(LabGroup).all():
                         g_id = getattr(g, "lab_group_id", None)
-                        g_name = getattr(g, "lab_group_name", "Pending Lab Group")
                         if g_id is not None:
-                            group_cache[g_id] = g_name
+                            group_cache[g_id] = getattr(g, "lab_group_name", "Pending Lab Group")
 
-                for lab in all_labs:
-                    group_name = "Pending Lab Group"
-                    fk_id = getattr(lab, "lab_group_id", None)
-                    if fk_id is not None and fk_id in group_cache:
-                        group_name = group_cache[fk_id]
+                if Lab:
+                    for lab in self.db.query(Lab).all():
+                        group_name = "Pending Lab Group"
+                        fk_id = getattr(lab, "lab_group_id", None)
+                        if fk_id is not None and fk_id in group_cache:
+                            group_name = group_cache[fk_id]
 
-                    l_id = getattr(lab, "lab_id", None)
-                    if l_id is not None:
-                        lab_cache[l_id] = {
-                            "lab_name": getattr(lab, "lab_name", "Unknown Lab"),
-                            "lab_group_name": group_name,
-                        }
+                        l_id = getattr(lab, "lab_id", None)
+                        if l_id is not None:
+                            lab_cache[l_id] = {
+                                "lab_name": getattr(lab, "lab_name", "Unknown Lab"),
+                                "lab_group_name": group_name,
+                            }
+                            
+                if SpendingCategory:
+                    for c in self.db.query(SpendingCategory).all():
+                        c_id = getattr(c, "category_id", None)
+                        if c_id is not None:
+                            category_cache[c_id] = getattr(c, "category_name", "General")
+                            
             except Exception:
-                lab_cache = {}
-                group_cache = {}
+                pass
 
-        # Each entry is handed to persist_upload_to_db after duplicate handling.
-        # Exact duplicate rows are intentionally excluded from DB staging.
         classified_items: list[dict] = []
 
         for item in line_items:
             assigned_lab = "Unassigned Lab"
             assigned_group = "Pending Lab Group"
+            assigned_category = "General"
             classification_reason = "Manual review required."
-            # Always have a classification dict to hand to persistence, even if
-            # the classifier never ran (no db) or threw.
+            
             classification: dict = {
                 "lab_id": None,
                 "lab_group_id": None,
+                "category_id": None,
                 "reason": classification_reason,
             }
 
@@ -136,52 +134,48 @@ class UploadService:
                         [str(v) for v in item_dict.values() if v is not None]
                     ).lower()
 
-                    req_name = item_dict.get("requestor", "")
                     classification = classify_line_item(
                         self.db,
                         row_text,
-                        req_name,
+                        item_dict.get("requestor", ""),
                         wbs=item_dict.get("wbs", ""),
                         purpose=item_dict.get("purpose", ""),
-                        instruction_to_vendor=item_dict.get(
-                            "instruction_to_vendor", ""
-                        ),
+                        instruction_to_vendor=item_dict.get("instruction_to_vendor", ""),
+                        req_type=item_dict.get("req_type", ""), 
+                        pr_category=item_dict.get("pr_category", ""), 
                     )
+                    
                     lab_id = classification.get("lab_id")
                     group_id = classification.get("lab_group_id")
-                    classification_reason = classification.get(
-                        "reason", classification_reason
-                    )
+                    cat_id = classification.get("category_id")
+                    classification_reason = classification.get("reason", classification_reason)
 
                     if lab_id and lab_id in lab_cache:
                         assigned_lab = lab_cache[lab_id]["lab_name"]
                         assigned_group = lab_cache[lab_id]["lab_group_name"]
                     elif group_id and group_id in group_cache:
                         assigned_group = group_cache[group_id]
+                        
+                    if cat_id and cat_id in category_cache:
+                        assigned_category = category_cache[cat_id]
+                        
                 except Exception:
-                    classification_reason = (
-                        "Classification unavailable. Manual review required."
-                    )
-                    classification = {
-                        "lab_id": None,
-                        "lab_group_id": None,
-                        "reason": classification_reason,
-                    }
+                    classification_reason = "Classification unavailable. Manual review required."
 
-            # Uploaded flow stores the resolved classification labels with each line.
             if dataclasses.is_dataclass(item):
                 item = dataclasses.replace(
-                    item, lab=assigned_lab, lab_group=assigned_group
+                    item, lab=assigned_lab, lab_group=assigned_group, category=assigned_category
                 )
             else:
                 item.lab = assigned_lab
                 item.lab_group = assigned_group
+                item.category = assigned_category
 
             existing = self.repository.get_line_record(item.line_identity_key, store)
             decision = self.duplicate_service.decide(item, existing)
 
             if decision.status != "duplicate":
-                if assigned_lab == "Unassigned Lab" or not assigned_lab:
+                if assigned_lab == "Unassigned Lab" or not assigned_lab or assigned_category == "General":
                     needs_review_count += 1
                 classified_items.append(
                     {
@@ -191,7 +185,6 @@ class UploadService:
                     }
                 )
 
-            # 2. Extract the payload for the UI
             if hasattr(item, "to_dict"):
                 final_line_dict = item.to_dict()
             elif dataclasses.is_dataclass(item):
@@ -199,10 +192,15 @@ class UploadService:
             else:
                 final_line_dict = getattr(item, "__dict__", {}).copy()
 
-            # 3. THE UI INJECTION: Force-feed the frontend in every format!
             final_line_dict["lab_group"] = assigned_group
             final_line_dict["labGroup"] = assigned_group
             final_line_dict["lab_group_name"] = assigned_group
+            
+
+            final_line_dict["category"] = assigned_category
+            final_line_dict["pr_category"] = assigned_category 
+            final_line_dict["category_name"] = assigned_category
+            
             final_line_dict["classification_reason"] = classification_reason
 
             records[decision.status].append(
@@ -221,8 +219,6 @@ class UploadService:
 
         self.repository.save_store(store)
 
-        # ─── W9-01: persist the parsed batch to the DB pipeline ───────────
-        # Skipped when no user/db is available (e.g. legacy/test callers).
         persistence_counts: dict = {}
         if self.db and current_user and classified_items:
             persistence_counts = persist_upload_to_db(
@@ -231,9 +227,7 @@ class UploadService:
                 classified_items=classified_items,
                 current_user=current_user,
             )
-            needs_review_count = persistence_counts.get(
-                "queue_items_inserted", needs_review_count
-            )
+            needs_review_count = persistence_counts.get("queue_items_inserted", needs_review_count)
 
         return {
             "success": True,
@@ -247,23 +241,17 @@ class UploadService:
                 "needs_review": needs_review_count,
                 "rejected": 0,
             },
-            "validation_errors": validation_errors,
+            "validation_errors": [],
             "records": records,
         }
 
-    def _failed_result(
-        self, metadata: UploadMetadata, errors: list[dict[str, str]]
-    ) -> dict:
+    def _failed_result(self, metadata: UploadMetadata, errors: list[dict[str, str]]) -> dict:
         return {
             "success": False,
             "metadata": metadata.to_dict(),
             "counts": {
-                "total_lines": 0,
-                "accepted": 0,
-                "duplicate_skipped": 0,
-                "reupload_updated": 0,
-                "needs_review": 0,
-                "rejected": len(errors),
+                "total_lines": 0, "accepted": 0, "duplicate_skipped": 0,
+                "reupload_updated": 0, "needs_review": 0, "rejected": len(errors),
             },
             "validation_errors": errors,
             "records": {"inserted": [], "updated": [], "duplicate": []},

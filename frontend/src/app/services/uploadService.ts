@@ -1,23 +1,16 @@
-import type { User } from "../context/AuthContext";
 import type { UploadProcessResult } from "../types/upload";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-function userHeaders(user: User | null) {
-  return {
-    "X-User-Email": user?.email ?? "demo.teamlead@sit.edu.sg",
-    "X-User-Name": user?.name ?? "Demo Team Lead",
-    "X-User-Role": user?.role ?? "teamlead",
-  };
-}
+const FETCH_OPTS: RequestInit = { credentials: "include" };
 
-export async function processUpload(file: File, user: User | null): Promise<UploadProcessResult> {
+export async function processUpload(file: File): Promise<UploadProcessResult> {
   const formData = new FormData();
   formData.append("file", file);
 
   const response = await fetch(`${API_BASE_URL}/api/uploads/process`, {
+    ...FETCH_OPTS,
     method: "POST",
-    headers: userHeaders(user),
     body: formData,
   });
 
@@ -28,13 +21,13 @@ export async function processUpload(file: File, user: User | null): Promise<Uplo
   return response.json();
 }
 
-export async function processUploadBatch(files: File[], user: User | null): Promise<UploadProcessResult> {
+export async function processUploadBatch(files: File[]): Promise<UploadProcessResult> {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
 
   const response = await fetch(`${API_BASE_URL}/api/uploads/process-batch`, {
+    ...FETCH_OPTS,
     method: "POST",
-    headers: userHeaders(user),
     body: formData,
   });
 

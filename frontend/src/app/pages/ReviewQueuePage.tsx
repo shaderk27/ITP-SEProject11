@@ -35,7 +35,7 @@ export function ReviewQueuePage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await listReviewBatches(user);
+      const data = await listReviewBatches();
       setBatches(data);
       // Reset detail cache when batch list refreshes; otherwise stale data lingers.
       setDetails({});
@@ -64,7 +64,7 @@ export function ReviewQueuePage() {
     if (details[expandedBatch]) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "loading" } }));
-    getBatchDetail(expandedBatch, user)
+    getBatchDetail(expandedBatch)
       .then((data) => {
         setDetails((prev) => ({ ...prev, [expandedBatch]: { kind: "ready", data } }));
         // Auto-expand the first PR for convenience.
@@ -96,9 +96,17 @@ export function ReviewQueuePage() {
     setCommittingBatch(batch.batch_id);
     setCommitSuccess(null);
     try {
-      const result = await commitBatch(batch.batch_id, user);
+      const result = await commitBatch(batch.batch_id);
+      const parts: string[] = [];
+      if (result.prs_created > 0) {
+        parts.push(`${result.prs_created} new PR${result.prs_created === 1 ? "" : "s"}`);
+      }
+      if (result.prs_updated > 0) {
+        parts.push(`${result.prs_updated} updated PR${result.prs_updated === 1 ? "" : "s"}`);
+      }
+      const prSummary = parts.length > 0 ? parts.join(" + ") : "0 PRs";
       setCommitSuccess(
-        `Batch #${result.batch_id} committed: ${result.prs_created} PR${result.prs_created === 1 ? "" : "s"}` +
+        `Batch #${result.batch_id} committed: ${prSummary}` +
           ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.`,
       );
       await fetchBatches();

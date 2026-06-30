@@ -15,6 +15,11 @@ ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
+-- Irfan (W9-02 follow-up): source-system PR Status surfaced on PR Records page.
+ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50);
+-- Irfan (W11-03): per-line status (a PR can have lines in different states).
+ALTER TABLE purchase_request_lines ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50);
+
 
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
