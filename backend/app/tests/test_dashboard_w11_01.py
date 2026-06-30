@@ -20,7 +20,6 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
 
 from app.api.dashboard import get_breakdown, get_spending_summary
 from app.models.auth import Role, User
@@ -135,6 +134,23 @@ def _make_teamlead(db, group: LabGroup) -> User:
         email=f"w11t.lead.{suffix}@example.test",
         password_hash="placeholder_no_auth_yet",
         lab_group_id=group.lab_group_id,
+    )
+    db.add(user)
+    db.flush()
+    return user
+
+
+def _make_labic(db, lab: Lab) -> User:
+    role = _role(db, "labic")
+    if role is None:
+        pytest.skip("No 'labic' role seeded; run dev_seed.sql.")
+    suffix = _next_suffix()
+    user = User(
+        role_id=role.role_id,
+        full_name=f"W11 Test IC {suffix}",
+        email=f"w11t.ic.{suffix}@example.test",
+        password_hash="placeholder_no_auth_yet",
+        lab_id=lab.lab_id,
     )
     db.add(user)
     db.flush()
@@ -265,15 +281,43 @@ def test_general_lab_group_excluded_from_totals(db, admin_user):
 
 
 # ─── 5. Role scoping ─────────────────────────────────────────────────────
-def test_lab_ic_forbidden(db):
-    """Lab IC is blocked from the dashboard aggregates (403)."""
-    labic = db.query(User).filter(User.email == "labic@test.com").first()
-    if labic is None:
-        pytest.skip("Seed labic@test.com missing; run dev_seed.sql.")
+def test_lab_ic_scoped_to_own_lab(db):
+    """A Lab IC sees only their assigned lab's spend, not sibling labs in the
+    same group."""
+    group = _make_group(db)
+    lab_a = _make_lab(db, group)
+    lab_b = _make_lab(db, group)
+    cat = _make_category(db)
+    _add_line(db, lab_a, cat, "400.00", "Approved")
+    _add_line(db, lab_b, cat, "999.00", "Approved")
 
-    with pytest.raises(HTTPException) as exc:
-        get_spending_summary(db=db, current_user=labic)
-    assert exc.value.status_code == 403
+    labic = _make_labic(db, lab_a)
+    result = get_spending_summary(db=db, current_user=labic)
+
+    # Only lab_a's $400 counts; lab_b's $999 is excluded.
+    assert Decimal(result.total_actual_spend_sgd) == Decimal("400.00")
+    assert Decimal(result.by_lab_group[str(group.lab_group_id)]) == Decimal("400.00")
+
+
+def test_lab_ic_breakdown_scoped_to_own_lab(db):
+    """The breakdown for a Lab IC contains only their lab."""
+    group = _make_group(db)
+    lab_a = _make_lab(db, group)
+    lab_b = _make_lab(db, group)
+    cat = _make_category(db)
+    _set_budget(db, group, lab_a, cat, "1000.00")
+    _add_line(db, lab_a, cat, "400.00", "Approved")
+    _set_budget(db, group, lab_b, cat, "5000.00")
+    _add_line(db, lab_b, cat, "999.00", "Approved")
+
+    labic = _make_labic(db, lab_a)
+    resp = get_breakdown(db=db, current_user=labic)
+    grp = next(g for g in resp.lab_groups if g.lab_group_id == group.lab_group_id)
+
+    lab_ids = {lab.lab_id for lab in grp.labs}
+    assert lab_ids == {lab_a.lab_id}
+    assert Decimal(grp.budget_sgd) == Decimal("1000.00")
+    assert Decimal(grp.actual_spend_sgd) == Decimal("400.00")
 
 
 def test_teamlead_sees_only_own_group(db):

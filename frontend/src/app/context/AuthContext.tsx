@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   assignedLabs: string[];
   labGroupId: number | null;
+  labId: number | null;
 }
 
 export type Permission =
@@ -99,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             email: data.email,
             role: data.role,
             labGroupId: data.lab_group_id,
+            labId: data.lab_id,
             assignedLabs: parseAssignedLabs(rawAssignedLabs),
           });
         } else {
@@ -137,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: rawUser.email,
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
+      labId: rawUser.lab_id,
       assignedLabs: parseAssignedLabs(rawAssignedLabs),
     });
   };

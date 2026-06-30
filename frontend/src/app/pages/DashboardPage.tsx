@@ -86,7 +86,7 @@ export function DashboardPage() {
   // Done during render with a previous-value guard (React's "adjust state when
   // a prop changes" pattern) instead of an effect, which would fire an extra
   // cascading render on every identity change.
-  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}`;
+  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labId ?? ""}`;
   const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
   if (userKey !== prevUserKey) {
     setPrevUserKey(userKey);
@@ -94,6 +94,9 @@ export function DashboardPage() {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
       setSelectedGroupId("all");
+    } else if (user?.role === "labic" && user.labId) {
+      // Lab IC is locked to their single assigned lab.
+      setSelectedLabId(String(user.labId));
     }
   }
 
