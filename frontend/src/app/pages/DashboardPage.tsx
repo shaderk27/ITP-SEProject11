@@ -74,6 +74,8 @@ export function DashboardPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
+  // Optional single-lab focus within the selected group ("all" = whole group).
+  const [selectedLabId, setSelectedLabId] = useState("all");
   const [loadError, setLoadError] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -120,37 +122,51 @@ export function DashboardPage() {
     };
   }, [dateRange, startDate, endDate]);
 
+  // When a single lab is picked, the cards read from that lab's breakdown row
+  // instead of the group-level numbers below.
+  const selectedLab = useMemo(() => {
+    if (selectedLabId === "all" || !breakdown) return null;
+    for (const g of breakdown.lab_groups) {
+      const lab = g.labs.find((l) => String(l.lab_id) === selectedLabId);
+      if (lab) return lab;
+    }
+    return null;
+  }, [breakdown, selectedLabId]);
+
   // Total Budget = raw System Config number, scoped by the Lab Group dropdown.
   // Always shows the full configured budget (not adjusted for spend/pending).
   const totalBudget = useMemo(() => {
+    if (selectedLab) return Number(selectedLab.budget_sgd) || 0;
     if (selectedGroupId === "all") {
       return labGroups.reduce((sum, g) => sum + g.budget, 0);
     }
     const match = labGroups.find((g) => String(g.id) === selectedGroupId);
     return match ? match.budget : 0;
-  }, [labGroups, selectedGroupId]);
+  }, [labGroups, selectedGroupId, selectedLab]);
 
   // Actual Spend = sum of Approved lines only. Backend role-filters; Team
   // Lead only ever gets their own group's numbers.
   const actualSpend = useMemo(() => {
+    if (selectedLab) return Number(selectedLab.actual_spend_sgd) || 0;
     if (!spending) return 0;
     if (selectedGroupId === "all") {
       return Number(spending.total_actual_spend_sgd) || 0;
     }
     const raw = spending.by_lab_group[selectedGroupId];
     return raw ? Number(raw) || 0 : 0;
-  }, [spending, selectedGroupId]);
+  }, [spending, selectedGroupId, selectedLab]);
 
   // Pending = committed but not yet approved. Only used to reduce Available
   // Balance; doesn't affect Total Budget or Utilisation %.
   const pendingSpend = useMemo(() => {
+    if (selectedLab) return Number(selectedLab.pending_sgd) || 0;
     if (!spending) return 0;
     if (selectedGroupId === "all") {
       return Number(spending.total_pending_sgd) || 0;
     }
     const raw = spending.pending_by_lab_group[selectedGroupId];
     return raw ? Number(raw) || 0 : 0;
-  }, [spending, selectedGroupId]);
+  }, [spending, selectedGroupId, selectedLab]);
 
   // Available = Total Budget - Approved - Pending.
   // Utilisation        = Approved / Total Budget (already-spent share).
@@ -172,12 +188,46 @@ export function DashboardPage() {
     );
   }, [breakdown, selectedGroupId]);
 
+  // Lab dropdown options: every lab in the visible groups (+ "All labs").
+  const labOptions = useMemo(() => {
+    const seen = new Map<number, string>();
+    for (const g of filteredBreakdown) {
+      for (const l of g.labs) seen.set(l.lab_id, l.lab_name);
+    }
+    return [
+      { value: "all", label: "All labs" },
+      ...Array.from(seen, ([id, name]) => ({ value: String(id), label: name })),
+    ];
+  }, [filteredBreakdown]);
+
+  // When a lab is focused, narrow the drilldown + category chart to it. The
+  // group header row is rewritten to mirror the single lab's totals.
+  const scopedBreakdown: BreakdownLabGroup[] = useMemo(() => {
+    if (selectedLabId === "all") return filteredBreakdown;
+    const out: BreakdownLabGroup[] = [];
+    for (const g of filteredBreakdown) {
+      const lab = g.labs.find((l) => String(l.lab_id) === selectedLabId);
+      if (!lab) continue;
+      out.push({
+        ...g,
+        budget_sgd: lab.budget_sgd,
+        actual_spend_sgd: lab.actual_spend_sgd,
+        pending_sgd: lab.pending_sgd,
+        available_balance_sgd: lab.available_balance_sgd,
+        utilisation_pct: lab.utilisation_pct,
+        projected_utilisation_pct: lab.projected_utilisation_pct,
+        labs: [lab],
+      });
+    }
+    return out;
+  }, [filteredBreakdown, selectedLabId]);
+
   // Spending by Category chart: approved spend summed per category_name across
   // the visible lab groups. Every category present in the breakdown is kept
   // (configured-but-unspent categories show as a $0 bar), sorted biggest-first.
   const categoryData = useMemo(() => {
     const totals = new Map<string, number>();
-    for (const group of filteredBreakdown) {
+    for (const group of scopedBreakdown) {
       for (const lab of group.labs) {
         for (const cat of lab.categories) {
           totals.set(
@@ -190,7 +240,7 @@ export function DashboardPage() {
     return Array.from(totals, ([category, amount]) => ({ category, amount })).sort(
       (a, b) => b.amount - a.amount,
     );
-  }, [filteredBreakdown]);
+  }, [scopedBreakdown]);
 
   const toggleGroup = (id: number) => {
     setExpandedGroups((prev) => {
@@ -223,7 +273,12 @@ export function DashboardPage() {
       <FilterBar
         searchPlaceholder="Search dashboard..."
         onFilterChange={(filterId, value) => {
-          if (filterId === "Lab Group") setSelectedGroupId(value);
+          if (filterId === "Lab Group") {
+            setSelectedGroupId(value);
+            // Lab list depends on the group, so reset the lab focus.
+            setSelectedLabId("all");
+          }
+          if (filterId === "Lab") setSelectedLabId(value);
           if (filterId === "Date Range") {
             // Picking a preset clears any custom range so the preset applies.
             setDateRange(value);
@@ -247,6 +302,11 @@ export function DashboardPage() {
             label: "Lab Group",
             value: selectedGroupId,
             options: labGroupOptions,
+          },
+          {
+            label: "Lab",
+            value: selectedLabId,
+            options: labOptions,
           },
         ]}
       />
@@ -358,7 +418,7 @@ export function DashboardPage() {
           </h3>
           {!breakdown ? (
             <p className="text-sm text-muted-foreground">Loading breakdown…</p>
-          ) : filteredBreakdown.length === 0 ? (
+          ) : scopedBreakdown.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No budget or spending data in this scope yet. Set budgets in System Config and commit a batch to see numbers here.
             </p>
@@ -377,7 +437,7 @@ export function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredBreakdown.map((group) => {
+                  {scopedBreakdown.map((group) => {
                     const groupOpen = expandedGroups.has(group.lab_group_id);
                     return (
                       <Fragment key={`g-${group.lab_group_id}`}>
