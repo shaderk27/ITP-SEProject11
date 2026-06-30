@@ -18,7 +18,8 @@ from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
 from app.models.config import Budget, Lab, LabGroup, SpendingCategory
-from app.models.staging import PurchaseRequestLine
+from app.models.staging import PurchaseRequest, PurchaseRequestLine
+from app.utils.date_range import date_range_bounds
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -40,6 +41,7 @@ class SpendingSummary(BaseModel):
 # ─── Endpoint ────────────────────────────────────────────────────────────
 @router.get("/spending", response_model=SpendingSummary)
 def get_spending_summary(
+    date_range: str = "all",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SpendingSummary:
@@ -74,11 +76,12 @@ def get_spending_summary(
             pending_by_lab_group={},
         )
 
+    start, end = date_range_bounds(date_range)
     approved_by_group, approved_total = _aggregate_by_status(
-        db, "approved%", role_name, current_user.lab_group_id
+        db, "approved%", role_name, current_user.lab_group_id, start, end
     )
     pending_by_group, pending_total = _aggregate_by_status(
-        db, "pending%", role_name, current_user.lab_group_id
+        db, "pending%", role_name, current_user.lab_group_id, start, end
     )
 
     return SpendingSummary(
@@ -89,8 +92,32 @@ def get_spending_summary(
     )
 
 
+def _apply_date_bounds(query, start, end):
+    """
+    Restrict a PurchaseRequestLine query to lines whose owning PR's request_date
+    (the xlsx "PR Sub Date") falls within [start, end]. Budgets are never
+    date-filtered — only spending. A NULL request_date fails the >= / <=
+    comparison, so undated PRs drop out whenever any bound is active.
+    """
+    if start is None and end is None:
+        return query
+    query = query.join(
+        PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id
+    )
+    if start is not None:
+        query = query.filter(PurchaseRequest.request_date >= start)
+    if end is not None:
+        query = query.filter(PurchaseRequest.request_date <= end)
+    return query
+
+
 def _aggregate_by_status(
-    db: Session, status_pattern: str, role_name: str, user_lab_group_id: int | None
+    db: Session,
+    status_pattern: str,
+    role_name: str,
+    user_lab_group_id: int | None,
+    start=None,
+    end=None,
 ) -> tuple[dict[str, str], Decimal]:
     """
     Sum line amounts grouped by lab_group, filtered by pr_status pattern.
@@ -111,6 +138,7 @@ def _aggregate_by_status(
         .filter(LabGroup.lab_group_name != "General")
         .group_by(Lab.lab_group_id)
     )
+    query = _apply_date_bounds(query, start, end)
     if role_name == "teamlead":
         query = query.filter(Lab.lab_group_id == user_lab_group_id)
 
@@ -174,6 +202,7 @@ class BreakdownResponse(BaseModel):
 
 @router.get("/breakdown", response_model=BreakdownResponse)
 def get_breakdown(
+    date_range: str = "all",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BreakdownResponse:
@@ -259,6 +288,9 @@ def get_breakdown(
         .filter(LabGroup.lab_group_name != "General")
         .group_by(PurchaseRequestLine.lab_id, PurchaseRequestLine.category_id)
     )
+    # Date filter applies to spending only; budgets stay full-FY (below).
+    start, end = date_range_bounds(date_range)
+    spending_query = _apply_date_bounds(spending_query, start, end)
     if role_name == "teamlead":
         spending_query = spending_query.filter(
             Lab.lab_group_id == current_user.lab_group_id
