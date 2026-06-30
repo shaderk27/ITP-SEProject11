@@ -161,7 +161,7 @@ def test_reset_password_rejects_wrong_current_password():
     hashed = bcrypt.hashpw("CorrectPass1".encode(), bcrypt.gensalt()).decode()
     user = make_user(password_hash=hashed)
     service.repository.get_user_by_id.return_value = user
-    service.repository.get_active_reset_token_by_user.return_value = None
+    service.repository.get_last_reset_token_by_user.return_value = None
 
     with pytest.raises(HTTPException) as exc:
         service.reset_password(1, "WrongPass99", "NewPass456")
