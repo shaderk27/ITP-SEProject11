@@ -64,7 +64,7 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Malformed session token.",
         )
-    
+
     user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(
@@ -72,9 +72,9 @@ def get_current_user(
             detail="User account no longer exists.",
         )
     if not user.is_active:
-      raise HTTPException(
-          status_code=status.HTTP_403_FORBIDDEN,
-          detail="User account is inactive.",
-      )
-      
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive.",
+        )
+
     return user
