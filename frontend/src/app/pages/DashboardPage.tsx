@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   DollarSign,
   TrendingUp,
@@ -64,6 +71,52 @@ function utilColor(pct: number): string {
   return "#10b981";
 }
 
+// Toggle chips to include/exclude specific entities from a comparison chart.
+function EntityChips({
+  names,
+  hidden,
+  onToggle,
+}: {
+  names: string[];
+  hidden: Set<string>;
+  onToggle: (name: string) => void;
+}) {
+  if (names.length <= 1) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-3">
+      {names.map((n) => {
+        const on = !hidden.has(n);
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onToggle(n)}
+            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+              on
+                ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
+                : "bg-white text-muted-foreground border-border line-through opacity-60"
+            }`}
+          >
+            {n}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Palette for the stacked category chart (cycles if there are more categories).
+const CATEGORY_COLORS = [
+  "#0d9488",
+  "#3b82f6",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ef4444",
+  "#10b981",
+  "#ec4899",
+  "#6b7280",
+];
+
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -91,6 +144,18 @@ export function DashboardPage() {
   // Per-chart "View by": compare lab groups or individual labs.
   const [utilViewBy, setUtilViewBy] = useState<"group" | "lab">("group");
   const [avbViewBy, setAvbViewBy] = useState<"group" | "lab">("group");
+  const [stackViewBy, setStackViewBy] = useState<"group" | "lab">("group");
+  // Per-chart entity include/exclude (by name) for the comparison bar charts.
+  const [utilHidden, setUtilHidden] = useState<Set<string>>(new Set());
+  const [avbHidden, setAvbHidden] = useState<Set<string>>(new Set());
+  const toggleHidden =
+    (setter: Dispatch<SetStateAction<Set<string>>>) => (name: string) =>
+      setter((prev) => {
+        const next = new Set(prev);
+        if (next.has(name)) next.delete(name);
+        else next.add(name);
+        return next;
+      });
   const [loadError, setLoadError] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -348,6 +413,34 @@ export function DashboardPage() {
     [scopedBreakdown],
   );
 
+  // Stacked category chart: each lab group (or lab) is one bar, stacked by
+  // approved spend per category. Returns rows keyed by category name + the
+  // full list of categories present (one <Bar> per category).
+  const stackedCategory = useMemo(() => {
+    const categories = new Set<string>();
+    const rowFor = (name: string, cats: { category_name: string; actual_spend_sgd: string }[][]) => {
+      const row: Record<string, number | string> = { name };
+      for (const catList of cats) {
+        for (const cat of catList) {
+          categories.add(cat.category_name);
+          row[cat.category_name] =
+            (Number(row[cat.category_name]) || 0) + Number(cat.actual_spend_sgd);
+        }
+      }
+      return row;
+    };
+    const group = scopedBreakdown.map((g) =>
+      rowFor(
+        g.lab_group_name,
+        g.labs.map((l) => l.categories),
+      ),
+    );
+    const lab = scopedBreakdown.flatMap((g) =>
+      g.labs.map((l) => rowFor(l.lab_name, [l.categories])),
+    );
+    return { group, lab, categories: Array.from(categories) };
+  }, [scopedBreakdown]);
+
   // Monthly Spend Trend: for a specific FY, pad to all 12 Apr–Mar buckets
   // (missing months = 0). For "All time", show every month that has spend.
   const monthlyData = useMemo(() => {
@@ -395,6 +488,13 @@ export function DashboardPage() {
     ...(isAdmin ? [{ value: "all", label: "All Lab Groups" }] : []),
     ...labGroups.map((g) => ({ value: String(g.id), label: g.name })),
   ];
+
+  // Comparison-chart series: the full entity list (for the chips) and the
+  // subset actually plotted (chips deselected → excluded).
+  const utilAll = utilViewBy === "lab" ? utilData.lab : utilData.group;
+  const utilVisible = utilAll.filter((d) => !utilHidden.has(d.name));
+  const avbAll = avbViewBy === "lab" ? avbData.lab : avbData.group;
+  const avbVisible = avbAll.filter((d) => !avbHidden.has(d.name));
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
@@ -661,11 +761,13 @@ export function DashboardPage() {
                 <option value="lab">By Lab</option>
               </select>
             </div>
+            <EntityChips
+              names={utilAll.map((d) => d.name)}
+              hidden={utilHidden}
+              onToggle={toggleHidden(setUtilHidden)}
+            />
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={utilViewBy === "lab" ? utilData.lab : utilData.group}
-                barCategoryGap="25%"
-              >
+              <BarChart data={utilVisible} barCategoryGap="25%">
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="name" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
@@ -689,11 +791,9 @@ export function DashboardPage() {
                   label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
                 />
                 <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                  {(utilViewBy === "lab" ? utilData.lab : utilData.group).map(
-                    (d, i) => (
-                      <Cell key={i} fill={utilColor(d.util)} />
-                    ),
-                  )}
+                  {utilVisible.map((d, i) => (
+                    <Cell key={i} fill={utilColor(d.util)} />
+                  ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -714,12 +814,13 @@ export function DashboardPage() {
                 <option value="lab">By Lab</option>
               </select>
             </div>
+            <EntityChips
+              names={avbAll.map((d) => d.name)}
+              hidden={avbHidden}
+              onToggle={toggleHidden(setAvbHidden)}
+            />
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart
-                data={avbViewBy === "lab" ? avbData.lab : avbData.group}
-                barGap={8}
-                barCategoryGap="20%"
-              >
+              <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="name" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" />
@@ -780,6 +881,44 @@ export function DashboardPage() {
             </ResponsiveContainer>
           </Card>
         </div>
+
+        {/* Category mix — stacked bar per lab group / lab */}
+        <Card className="p-6 bg-white border-border">
+          <div className="flex items-center justify-between mb-4 gap-2">
+            <h3 className="text-lg font-semibold text-foreground">
+              Category Mix by {stackViewBy === "lab" ? "Lab" : "Lab Group"}
+            </h3>
+            <select
+              value={stackViewBy}
+              onChange={(e) => setStackViewBy(e.target.value as "group" | "lab")}
+              className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+            >
+              <option value="group">By Lab Group</option>
+              <option value="lab">By Lab</option>
+            </select>
+          </div>
+          <ResponsiveContainer width="100%" height={320}>
+            <BarChart
+              data={stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group}
+              barCategoryGap="20%"
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="name" stroke="#6b7280" />
+              <YAxis stroke="#6b7280" />
+              <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+              <Legend />
+              {stackedCategory.categories.map((cat, i) => (
+                <Bar
+                  key={cat}
+                  dataKey={cat}
+                  stackId="spend"
+                  fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                  name={cat}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
 
         {/* Recent Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
