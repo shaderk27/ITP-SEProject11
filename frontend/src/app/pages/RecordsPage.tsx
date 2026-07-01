@@ -19,6 +19,7 @@ export function RecordsPage() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [labGroupFilter, setLabGroupFilter] = useState("all");
   const [dateRange, setDateRange] = useState("all");
   // Custom date range (overrides the preset when either is set).
   const [startDate, setStartDate] = useState("");
@@ -66,20 +67,26 @@ export function RecordsPage() {
   ).map((name) => ({ value: name.toLowerCase(), label: name }));
 
   const q = searchQuery.trim().toLowerCase();
-  const filteredRecords = q
-    ? records.filter((pr) => {
-        if (pr.source_pr_number?.toLowerCase().includes(q)) return true;
-        if (pr.requestor_name?.toLowerCase().includes(q)) return true;
-        if (pr.wbs_code?.toLowerCase().includes(q)) return true;
-        if (pr.lab_group_name?.toLowerCase().includes(q)) return true;
-        return pr.lines.some(
-          (line) =>
-            line.item_description?.toLowerCase().includes(q) ||
-            line.lab_name?.toLowerCase().includes(q) ||
-            line.pr_status?.toLowerCase().includes(q),
-        );
-      })
-    : records;
+  const filteredRecords = records.filter((pr) => {
+    // Lab Group dropdown filter (option value is the lowercased group name).
+    if (
+      labGroupFilter !== "all" &&
+      pr.lab_group_name?.toLowerCase() !== labGroupFilter
+    ) {
+      return false;
+    }
+    if (!q) return true;
+    if (pr.source_pr_number?.toLowerCase().includes(q)) return true;
+    if (pr.requestor_name?.toLowerCase().includes(q)) return true;
+    if (pr.wbs_code?.toLowerCase().includes(q)) return true;
+    if (pr.lab_group_name?.toLowerCase().includes(q)) return true;
+    return pr.lines.some(
+      (line) =>
+        line.item_description?.toLowerCase().includes(q) ||
+        line.lab_name?.toLowerCase().includes(q) ||
+        line.pr_status?.toLowerCase().includes(q),
+    );
+  });
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
@@ -87,6 +94,7 @@ export function RecordsPage() {
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
         onFilterChange={(filterId, value) => {
+          if (filterId === "Lab Group") setLabGroupFilter(value);
           if (filterId === "Date Range") {
             // Picking a preset clears any custom range so the preset applies.
             setDateRange(value);
@@ -97,6 +105,7 @@ export function RecordsPage() {
         filters={[
           {
             label: "Lab Group",
+            value: labGroupFilter,
             options: [{ value: "all", label: "All Lab Groups" }, ...labGroupOptions],
           },
           {
@@ -168,10 +177,12 @@ export function RecordsPage() {
                 ? "Loading…"
                 : q
                   ? `${filteredRecords.length} of ${records.length} committed purchase request${records.length === 1 ? "" : "s"} match "${searchQuery.trim()}".`
-                  : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
+                  : labGroupFilter !== "all"
+                    ? `${filteredRecords.length} of ${records.length} committed purchase request${records.length === 1 ? "" : "s"} shown.`
+                    : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={fetchRecords} disabled={loading}>
+          <Button size="sm" variant="outline" onClick={() => fetchRecords()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
