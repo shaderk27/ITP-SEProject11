@@ -286,7 +286,6 @@ def test_reset_password_deletes_all_reset_tokens():
 
 def test_login_rejects_expired_temp_password_explicitly():
     """Expired token should not be returned by repository, so login must fail."""
-    import bcrypt
 
     service = make_service()
 
