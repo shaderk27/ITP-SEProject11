@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -16,7 +16,12 @@ const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 export function ResetPasswordPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, clearResetFlag } = useAuth();
+  const { user, clearResetFlag,isLoading } = useAuth();
+  useEffect(() => { //if user not logged in
+    if (!isLoading && !user) {
+      navigate("/login", { replace: true });
+    }
+  }, [user, isLoading, navigate]);
 
   const isForced = (location.state as any)?.forced === true || user?.mustResetPassword === true;
 
