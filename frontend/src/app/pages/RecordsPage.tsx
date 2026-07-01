@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
+import { DatePickerField } from "../components/shared/DatePickerField";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
@@ -129,24 +130,18 @@ export function RecordsPage() {
         <span className="text-muted-foreground">Custom range:</span>
         <label className="flex items-center gap-1.5">
           <span className="text-muted-foreground">From</span>
-          <input
-            type="date"
-            lang="en-GB"
+          <DatePickerField
             value={startDate}
-            max={endDate || undefined}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="rounded-md border border-border px-2 py-1"
+            maxDate={endDate || undefined}
+            onChange={setStartDate}
           />
         </label>
         <label className="flex items-center gap-1.5">
           <span className="text-muted-foreground">To</span>
-          <input
-            type="date"
-            lang="en-GB"
+          <DatePickerField
             value={endDate}
-            min={startDate || undefined}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="rounded-md border border-border px-2 py-1"
+            minDate={startDate || undefined}
+            onChange={setEndDate}
           />
         </label>
         {customActive && (
