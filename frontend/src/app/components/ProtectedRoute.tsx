@@ -33,7 +33,10 @@ export function ProtectedRoute({
       <Navigate to="/login" replace state={{ from: location.pathname }} />
     );
   }
-
+  
+  if (user.mustResetPassword && location.pathname !== "/reset-password") {
+    return <Navigate to="/reset-password" state={{ forced: true }} replace />;
+  }
   // Role check only runs when allowedRoles is explicitly provided.
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return <Navigate to="/403" replace />;

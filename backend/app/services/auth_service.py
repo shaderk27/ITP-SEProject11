@@ -133,23 +133,30 @@ class AuthService:
             password, user.password_hash
         )
 
+        used_temp_password = False
+
         if not normal_valid:
-            token = self.repository.get_active_reset_token_by_user(
+            reset_token = self.repository.get_active_reset_token_by_user(
                 self.db, user.user_id
             )
-            if not token or not self._verify_password(password, token.temp_password):
+            if not reset_token or not self._verify_password(
+                password, reset_token.temp_password
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Incorrect email or password",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-            self.repository.mark_token_used(self.db, token)
+            self.repository.mark_token_used(self.db, reset_token)
+            used_temp_password = True
+
         token_payload = {
             "sub": str(user.user_id),
             "email": user.email,
             "role": user.role.role_name if user.role else None,
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
+            "must_reset_password": used_temp_password,
         }
         token = self._create_access_token(data=token_payload)
         response.set_cookie(
@@ -172,6 +179,7 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "lab_group_id": user.lab_group_id,
                 "lab_id": user.lab_id,
+                "must_reset_password": used_temp_password,
                 "assignedLabs": [user.lab.lab_code]
                 if user.lab
                 else ([user.lab_group.wbs_code] if user.lab_group else []),
@@ -577,33 +585,39 @@ class AuthService:
         }
 
     def reset_password(
-        self, user_id: int, current_password: str, new_password: str
+        self, user_id: int, current_password: Optional[str], new_password: str
     ) -> None:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
 
-        # Check if the account still has a placeholder password
         is_placeholder = (
             ALLOW_PLACEHOLDER_PASSWORDS
             and user.password_hash == "placeholder_no_auth_yet"
         )
 
         if is_placeholder:
-            # Placeholder accounts can set a new password without verifying the old one
-            normal_valid = True
-        else:
+            pass
+        elif current_password:
             normal_valid = bcrypt.checkpw(
                 current_password.encode(), user.password_hash.encode()
             )
-
-        if not normal_valid:
+            if not normal_valid:
+                token = self.repository.get_last_reset_token_by_user(
+                    self.db, user.user_id
+                )
+                if not token or not bcrypt.checkpw(
+                    current_password.encode(), token.temp_password.encode()
+                ):
+                    raise HTTPException(
+                        status_code=400, detail="Current password is incorrect."
+                    )
+        else:
+            # No current password provided — only allow if active temp token exists
             token = self.repository.get_last_reset_token_by_user(self.db, user.user_id)
-            if not token or not bcrypt.checkpw(
-                current_password.encode(), token.temp_password.encode()
-            ):
+            if not token:
                 raise HTTPException(
-                    status_code=400, detail="Current password is incorrect."
+                    status_code=400, detail="Current password is required."
                 )
 
         new_hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()

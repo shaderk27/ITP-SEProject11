@@ -189,14 +189,17 @@ export function RootLayout() {
         <nav className="flex-1 overflow-y-auto py-4">
           <ul className="space-y-1 px-3">
             {navigation
-              .filter((item) => user && item.roles.includes(user.role))
+              .filter((item) => {
+                if (!user) return false;
+                if (user.mustResetPassword) return false;
+                return item.roles.includes(user.role);
+              })
               .map((item) => {
                 const Icon = item.icon;
                 const isActive =
                   item.path === "/"
                     ? location.pathname === "/"
                     : location.pathname.startsWith(item.path);
-
                 return (
                   <li key={item.path}>
                     <Link

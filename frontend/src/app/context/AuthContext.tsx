@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   assignedLabs: string[];
   labGroupId: number | null;
+  mustResetPassword: boolean;
 }
 
 export type Permission =
@@ -54,6 +55,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<User>) => void;
+  clearResetFlag: () => void;
   hasAccess: (requiredRoles: UserRole[]) => boolean;
   hasPermission: (permission: Permission) => boolean;
   canAccessLabGroup: (labGroupId: number) => boolean;
@@ -79,6 +81,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateUser = (updates: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...updates } : null));
   };
+  const clearResetFlag = () => {
+    setUser((prev) => prev ? { ...prev, mustResetPassword: false } : null);
+  };
 
   // 1. Session Restore on Mount
   useEffect(() => {
@@ -100,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             role: data.role,
             labGroupId: data.lab_group_id,
             assignedLabs: parseAssignedLabs(rawAssignedLabs),
+            mustResetPassword: data.must_reset_password ?? false,
           });
         } else {
           setUser(null);
@@ -138,6 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
       assignedLabs: parseAssignedLabs(rawAssignedLabs),
+      mustResetPassword: rawUser.must_reset_password ?? false,
     });
   };
 
@@ -173,7 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, login, logout, updateUser, hasAccess, hasPermission, canAccessLabGroup }}
+      value={{ user, isLoading, login, logout, updateUser, clearResetFlag, hasAccess, hasPermission, canAccessLabGroup }}
     >
       {children}
     </AuthContext.Provider>
