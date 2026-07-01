@@ -392,3 +392,18 @@ def test_breakdown_budget_defaults_to_current_fy(db, admin_user):
     resp = get_breakdown(db=db, current_user=admin_user)  # no period_id
     grp = next(g for g in resp.lab_groups if g.lab_group_id == group.lab_group_id)
     assert Decimal(grp.budget_sgd) == Decimal("1000.00")
+
+
+def test_breakdown_budget_all_time_sums_all_periods(db, admin_user):
+    """period_id=0 ('All time') sums budgets across every fiscal year."""
+    group = _make_group(db)
+    lab = _make_lab(db, group)
+    cat = _make_category(db)
+    fy_a = _make_period(db, 2040)
+    fy_b = _make_period(db, 2041)
+    _set_budget(db, group, lab, cat, "1000.00", period_id=fy_a)
+    _set_budget(db, group, lab, cat, "5000.00", period_id=fy_b)
+
+    resp = get_breakdown(db=db, current_user=admin_user, period_id=0)
+    grp = next(g for g in resp.lab_groups if g.lab_group_id == group.lab_group_id)
+    assert Decimal(grp.budget_sgd) == Decimal("6000.00")

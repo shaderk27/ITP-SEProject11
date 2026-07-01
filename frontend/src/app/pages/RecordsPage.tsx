@@ -128,7 +128,8 @@ export function RecordsPage() {
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year") setSelectedFYPeriodId(Number(value));
+          if (filterId === "Fiscal Year")
+            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
           if (filterId === "Lab Group") setLabGroupFilter(value);
           if (filterId === "Date Range") {
             // Picking a preset clears any custom range so the preset applies.
@@ -140,8 +141,16 @@ export function RecordsPage() {
         filters={[
           {
             label: "Fiscal Year",
-            value: selectedFYPeriodId != null ? String(selectedFYPeriodId) : "",
-            options: periods.map((p) => ({ value: String(p.id), label: p.name })),
+            value:
+              selectedFYPeriodId == null
+                ? ""
+                : selectedFYPeriodId === 0
+                  ? "all"
+                  : String(selectedFYPeriodId),
+            options: [
+              { value: "all", label: "All time" },
+              ...periods.map((p) => ({ value: String(p.id), label: p.name })),
+            ],
           },
           {
             label: "Lab Group",

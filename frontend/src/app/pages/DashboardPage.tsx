@@ -319,7 +319,8 @@ export function DashboardPage() {
       <FilterBar
         searchPlaceholder="Search dashboard..."
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year") setSelectedFYPeriodId(Number(value));
+          if (filterId === "Fiscal Year")
+            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
           if (filterId === "Lab Group") {
             setSelectedGroupId(value);
             // Lab list depends on the group, so reset the lab focus.
@@ -336,8 +337,16 @@ export function DashboardPage() {
         filters={[
           {
             label: "Fiscal Year",
-            value: selectedFYPeriodId != null ? String(selectedFYPeriodId) : "",
-            options: periods.map((p) => ({ value: String(p.id), label: p.name })),
+            value:
+              selectedFYPeriodId == null
+                ? ""
+                : selectedFYPeriodId === 0
+                  ? "all"
+                  : String(selectedFYPeriodId),
+            options: [
+              { value: "all", label: "All time" },
+              ...periods.map((p) => ({ value: String(p.id), label: p.name })),
+            ],
           },
           {
             label: "Date Range",

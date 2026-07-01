@@ -128,7 +128,13 @@ def get_lab_groups(
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
     )
-    pid = period_id if period_id is not None else get_or_create_current_period(db)
+    # period_id: >0 = that fiscal year; 0 = all fiscal years (sum); None = current.
+    if period_id == 0:
+        pid = None
+    elif period_id is not None:
+        pid = period_id
+    else:
+        pid = get_or_create_current_period(db)
 
     query = db.query(LabGroup)
     if role_name == "teamlead":
@@ -141,15 +147,12 @@ def get_lab_groups(
     groups = query.all()
     result = []
     for g in groups:
-        total_budget = (
-            db.query(func.sum(Budget.budget_amount))
-            .filter(
-                Budget.lab_group_id == g.lab_group_id,
-                Budget.period_id == pid,
-            )
-            .scalar()
-            or 0
+        budget_q = db.query(func.sum(Budget.budget_amount)).filter(
+            Budget.lab_group_id == g.lab_group_id
         )
+        if pid is not None:
+            budget_q = budget_q.filter(Budget.period_id == pid)
+        total_budget = budget_q.scalar() or 0
         result.append(
             {
                 "id": g.lab_group_id,
