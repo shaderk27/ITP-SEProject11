@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
-from app.models.config import Budget, Lab, LabGroup, SpendingCategory
+from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
 from app.utils.date_range import date_range_bounds
 
@@ -185,6 +185,16 @@ def _role_name(user: User) -> str:
     return (user.role.role_name if user.role else "").lower().strip()
 
 
+def _current_period_id(db: Session) -> int | None:
+    """period_id of the current fiscal year (Apr–Mar), or None if not set up.
+    Budgets are per-FY, so the dashboard compares spend against the current
+    year's budget rather than summing every year's budgets together."""
+    today = date.today()
+    year = today.year if today.month >= 4 else today.year - 1
+    period = db.query(BudgetPeriod).filter(BudgetPeriod.year_no == year).first()
+    return period.period_id if period else None
+
+
 # ─── Breakdown (Lab Group → Lab → Category) ──────────────────────────────
 class BreakdownCategory(BaseModel):
     # Nullable: a committed line whose category could not be resolved aggregates
@@ -342,6 +352,11 @@ def get_breakdown(
         .filter(LabGroup.lab_group_name != "General")
         .group_by(Budget.lab_id, Budget.category_id)
     )
+    # Budgets are per fiscal year — only the current FY's, so multiple years'
+    # budgets don't sum together.
+    current_period = _current_period_id(db)
+    if current_period is not None:
+        budget_query = budget_query.filter(Budget.period_id == current_period)
     if role_name == "teamlead":
         budget_query = budget_query.filter(
             Budget.lab_group_id == current_user.lab_group_id
