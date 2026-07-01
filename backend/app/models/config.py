@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     BigInteger,
+    Integer,
     String,
     Text,
     Boolean,
@@ -85,8 +86,10 @@ class BudgetPeriod(Base):
 
     period_id = Column(BigInteger, primary_key=True)
     period_name = Column(String(50), nullable=False, unique=True)
+    year_no = Column(Integer, nullable=False)
     start_date = Column(Date)
     end_date = Column(Date)
+    is_closed = Column(Boolean, nullable=False, default=False)
 
 
 class Budget(Base):

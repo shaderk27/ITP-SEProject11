@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
@@ -45,6 +46,7 @@ def get_or_create_current_period(db: Session) -> int:
 
     new_period = BudgetPeriod(
         period_name=period_name,
+        year_no=start_year,
         start_date=date(start_year, 4, 1),
         end_date=date(start_year + 1, 3, 31),
     )
@@ -55,11 +57,62 @@ def get_or_create_current_period(db: Session) -> int:
     return new_period.period_id
 
 
+def _period_out(p: BudgetPeriod) -> dict:
+    return {
+        "id": p.period_id,
+        "name": p.period_name,
+        "year": p.year_no,
+        "start_date": p.start_date.isoformat() if p.start_date else None,
+        "end_date": p.end_date.isoformat() if p.end_date else None,
+        "is_closed": p.is_closed,
+    }
+
+
+# ==============================
+# FISCAL YEAR (BUDGET PERIOD) API
+# ==============================
+class PeriodCreate(BaseModel):
+    year: int
+
+
+@router.get("/periods")
+def list_periods(db: Session = Depends(get_db)):
+    """All fiscal years, newest first. Ensures the current FY exists."""
+    get_or_create_current_period(db)
+    periods = db.query(BudgetPeriod).order_by(BudgetPeriod.year_no.desc()).all()
+    return [_period_out(p) for p in periods]
+
+
+@router.post("/periods")
+def create_period(payload: PeriodCreate, db: Session = Depends(get_db)):
+    """Create a fiscal year from a year number: FY{year}, Apr 1 → Mar 31."""
+    year = payload.year
+    if year < 2000 or year > 2100:
+        raise HTTPException(
+            status_code=400, detail="Year must be between 2000 and 2100."
+        )
+    name = f"FY{year}"
+    existing = db.query(BudgetPeriod).filter(BudgetPeriod.period_name == name).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"{name} already exists.")
+    period = BudgetPeriod(
+        period_name=name,
+        year_no=year,
+        start_date=date(year, 4, 1),
+        end_date=date(year + 1, 3, 31),
+    )
+    db.add(period)
+    db.commit()
+    db.refresh(period)
+    return _period_out(period)
+
+
 # ==============================
 # LAB GROUPS API
 # ==============================
 @router.get("/labgroups", response_model=List[LabGroupOut])
 def get_lab_groups(
+    period_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -68,10 +121,14 @@ def get_lab_groups(
       - Admin     → every lab group.
       - Team Lead → only their assigned lab_group_id.
       - Lab IC    → empty list (lab groups aren't in scope for them).
+
+    ``period_id`` scopes the Allocated Budget total to one fiscal year
+    (defaults to the current FY).
     """
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
     )
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
 
     query = db.query(LabGroup)
     if role_name == "teamlead":
@@ -86,7 +143,10 @@ def get_lab_groups(
     for g in groups:
         total_budget = (
             db.query(func.sum(Budget.budget_amount))
-            .filter(Budget.lab_group_id == g.lab_group_id)
+            .filter(
+                Budget.lab_group_id == g.lab_group_id,
+                Budget.period_id == pid,
+            )
             .scalar()
             or 0
         )
@@ -289,11 +349,16 @@ def get_orphaned_labs(db: Session = Depends(get_db)):
 
 
 @router.get("/labs", response_model=List[LabOut])
-def get_labs(db: Session = Depends(get_db)):
+def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
     labs = db.query(Lab).all()
     result = []
     for lab in labs:
-        budgets = db.query(Budget).filter(Budget.lab_id == lab.lab_id).all()
+        budgets = (
+            db.query(Budget)
+            .filter(Budget.lab_id == lab.lab_id, Budget.period_id == pid)
+            .all()
+        )
         total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
         result.append(
@@ -314,8 +379,14 @@ def get_labs(db: Session = Depends(get_db)):
 
 
 @router.post("/labs", response_model=LabOut)
-def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
-    current_period_id = get_or_create_current_period(db)
+def create_lab(
+    lab_in: LabCreate,
+    period_id: int | None = None,
+    db: Session = Depends(get_db),
+):
+    current_period_id = (
+        period_id if period_id is not None else get_or_create_current_period(db)
+    )
     new_lab = Lab(
         lab_code=lab_in.lab_code,
         lab_name=lab_in.lab_name,
@@ -354,16 +425,26 @@ def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/labs/{lab_id}", response_model=LabOut)
-def update_lab(lab_id: int, lab_in: LabCreate, db: Session = Depends(get_db)):
+def update_lab(
+    lab_id: int,
+    lab_in: LabCreate,
+    period_id: int | None = None,
+    db: Session = Depends(get_db),
+):
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab:
         raise HTTPException(status_code=404)
-    current_period_id = get_or_create_current_period(db)
+    current_period_id = (
+        period_id if period_id is not None else get_or_create_current_period(db)
+    )
     db_lab.lab_code = lab_in.lab_code
     db_lab.lab_name = lab_in.lab_name
     db_lab.lab_group_id = lab_in.lab_group_id
     db_lab.venue = lab_in.venue
-    db.query(Budget).filter(Budget.lab_id == lab_id).delete()
+    # Only clear THIS fiscal year's budgets — other years' budgets are untouched.
+    db.query(Budget).filter(
+        Budget.lab_id == lab_id, Budget.period_id == current_period_id
+    ).delete()
     total_assigned = 0
     for cat_id_str, amount in lab_in.budgets.items():
         if amount > 0:
