@@ -16,7 +16,7 @@ SAVEPOINT, so none of these inserts persist to budget_system.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -75,11 +75,28 @@ def _a_period_id(db) -> int:
     return period.period_id
 
 
-def _set_budget(db, group, lab, category, amount) -> None:
+def _make_period(db, year: int) -> int:
+    """Create (or reuse) a fiscal-year period, returning its period_id."""
+    name = f"FY{year}"
+    existing = db.query(BudgetPeriod).filter(BudgetPeriod.period_name == name).first()
+    if existing:
+        return existing.period_id
+    period = BudgetPeriod(
+        period_name=name,
+        year_no=year,
+        start_date=date(year, 4, 1),
+        end_date=date(year + 1, 3, 31),
+    )
+    db.add(period)
+    db.flush()
+    return period.period_id
+
+
+def _set_budget(db, group, lab, category, amount, period_id=None) -> None:
     now = datetime.now(timezone.utc)
     db.add(
         Budget(
-            period_id=_a_period_id(db),
+            period_id=period_id if period_id is not None else _a_period_id(db),
             lab_group_id=group.lab_group_id,
             lab_id=lab.lab_id,
             category_id=category.category_id if category else None,
@@ -338,3 +355,40 @@ def test_teamlead_sees_only_own_group(db):
     assert str(group_a.lab_group_id) in result.by_lab_group
     assert Decimal(result.by_lab_group[str(group_a.lab_group_id)]) == Decimal("400.00")
     assert str(group_b.lab_group_id) not in result.by_lab_group
+
+
+# ─── 6. Fiscal-year budget scoping ───────────────────────────────────────
+def test_breakdown_budget_scoped_to_period(db, admin_user):
+    """/breakdown budget reflects only the requested fiscal year's budget,
+    never a sum across years."""
+    group = _make_group(db)
+    lab = _make_lab(db, group)
+    cat = _make_category(db)
+    fy_a = _make_period(db, 2040)
+    fy_b = _make_period(db, 2041)
+    _set_budget(db, group, lab, cat, "1000.00", period_id=fy_a)
+    _set_budget(db, group, lab, cat, "5000.00", period_id=fy_b)
+
+    resp_a = get_breakdown(db=db, current_user=admin_user, period_id=fy_a)
+    grp_a = next(g for g in resp_a.lab_groups if g.lab_group_id == group.lab_group_id)
+    assert Decimal(grp_a.budget_sgd) == Decimal("1000.00")
+
+    resp_b = get_breakdown(db=db, current_user=admin_user, period_id=fy_b)
+    grp_b = next(g for g in resp_b.lab_groups if g.lab_group_id == group.lab_group_id)
+    assert Decimal(grp_b.budget_sgd) == Decimal("5000.00")
+
+
+def test_breakdown_budget_defaults_to_current_fy(db, admin_user):
+    """With no period_id, budget uses the current fiscal year (FY2026 for this
+    project's clock) — not a different year's budget."""
+    group = _make_group(db)
+    lab = _make_lab(db, group)
+    cat = _make_category(db)
+    current_fy = _make_period(db, 2026)  # today is 2026-07-01 → FY2026
+    other_fy = _make_period(db, 2041)
+    _set_budget(db, group, lab, cat, "1000.00", period_id=current_fy)
+    _set_budget(db, group, lab, cat, "5000.00", period_id=other_fy)
+
+    resp = get_breakdown(db=db, current_user=admin_user)  # no period_id
+    grp = next(g for g in resp.lab_groups if g.lab_group_id == group.lab_group_id)
+    assert Decimal(grp.budget_sgd) == Decimal("1000.00")
