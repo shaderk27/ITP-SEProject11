@@ -41,9 +41,9 @@ export function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#1e3a8a] to-[#0f172a] flex items-center justify-center p-4">
-      <Card className="w-full max-w-md p-8 bg-white">
-        <div className="mb-8 text-center">
+    <div className="min-h-screen bg-gradient-to-br from-[#1e3a8a] to-[#0f172a] flex items-center justify-center p-4 ">
+      <Card className="w-full max-w-md p-4 bg-white">
+        <div className="mb-2 text-center">
           <h1 className="text-3xl font-semibold text-[#1e3a8a] mb-2">
             Lab Budget Monitor
           </h1>
@@ -56,16 +56,16 @@ export function ForgotPasswordPage() {
           // Success state
           <div className="space-y-6">
             <div className="flex flex-col items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-6 text-center">
-              <CheckCircle2 className="h-8 w-8 text-green-600" />
+              <CheckCircle2 className="size-8 text-green-600" />
               <div>
-                <p className="text-sm font-medium text-green-800">Email sent</p>
                 <p className="text-sm text-green-700 mt-1">
                   If <span className="font-medium">{email}</span> is registered,
-                  a temporary password has been sent. It expires in 1 hour.
+                  a temporary password has been sent.
                 </p>
               </div>
             </div>
             <p className="text-xs text-center text-muted-foreground">
+              It expires in 1 hour.<br/>
               Check your spam folder if you don't see it within a few minutes.
             </p>
             <Button
@@ -79,9 +79,12 @@ export function ForgotPasswordPage() {
           // Form state
           <>
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-foreground">Reset your password</h2>
+              <h2 className="text-lg font-semibold text-foreground">
+                Reset your password
+              </h2>
               <p className="text-sm text-muted-foreground mt-1">
-                Enter your SIT email address and we'll send you a temporary password.
+                Enter your SIT email address and we'll send you a temporary
+                password.
               </p>
             </div>
 
