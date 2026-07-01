@@ -28,6 +28,10 @@ export const router = createBrowserRouter([
     Component: ForgotPasswordPage,
   },
   {
+    path: "/401",
+    element: <NotFound />,
+  },
+  {
     path: "/403",
     element: <AccessDenied />,
   },
@@ -41,7 +45,9 @@ export const router = createBrowserRouter([
       <ProtectedRoute>
         <RootLayout />
       </ProtectedRoute>
+      
     ),
+    errorElement: <NotFound />,
     children: [
       {
         index: true,
@@ -143,4 +149,9 @@ export const router = createBrowserRouter([
       },
     ],
   },
+  {
+  path: "*",
+  element: <NotFound />,
+},
+
 ]);
