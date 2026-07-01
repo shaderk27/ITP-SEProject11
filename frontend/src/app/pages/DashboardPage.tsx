@@ -88,6 +88,9 @@ export function DashboardPage() {
   const customActive = Boolean(startDate || endDate);
   // Optional single-lab focus within the selected group ("all" = whole group).
   const [selectedLabId, setSelectedLabId] = useState("all");
+  // Per-chart "View by": compare lab groups or individual labs.
+  const [utilViewBy, setUtilViewBy] = useState<"group" | "lab">("group");
+  const [avbViewBy, setAvbViewBy] = useState<"group" | "lab">("group");
   const [loadError, setLoadError] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
@@ -313,22 +316,35 @@ export function DashboardPage() {
     );
   }, [scopedBreakdown]);
 
-  // Per-lab-group series for the two group-level charts.
-  const utilByGroup = useMemo(
-    () =>
-      scopedBreakdown.map((g) => ({
-        group: g.lab_group_name,
+  // Series for the two bar charts, at both lab-group and lab granularity so a
+  // per-chart "View by" toggle can compare either.
+  const utilData = useMemo(
+    () => ({
+      group: scopedBreakdown.map((g) => ({
+        name: g.lab_group_name,
         util: g.utilisation_pct,
       })),
+      lab: scopedBreakdown.flatMap((g) =>
+        g.labs.map((l) => ({ name: l.lab_name, util: l.utilisation_pct })),
+      ),
+    }),
     [scopedBreakdown],
   );
-  const actualVsBudget = useMemo(
-    () =>
-      scopedBreakdown.map((g) => ({
-        group: g.lab_group_name,
+  const avbData = useMemo(
+    () => ({
+      group: scopedBreakdown.map((g) => ({
+        name: g.lab_group_name,
         budget: Number(g.budget_sgd),
         actual: Number(g.actual_spend_sgd),
       })),
+      lab: scopedBreakdown.flatMap((g) =>
+        g.labs.map((l) => ({
+          name: l.lab_name,
+          budget: Number(l.budget_sgd),
+          actual: Number(l.actual_spend_sgd),
+        })),
+      ),
+    }),
     [scopedBreakdown],
   );
 
@@ -630,15 +646,28 @@ export function DashboardPage() {
 
         {/* Charts row 1 — lab-group level */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Budget Utilisation by Lab Group */}
+          {/* Budget Utilisation by Lab Group / Lab */}
           <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Budget Utilisation by Lab Group
-            </h3>
+            <div className="flex items-center justify-between mb-4 gap-2">
+              <h3 className="text-lg font-semibold text-foreground">
+                Budget Utilisation by {utilViewBy === "lab" ? "Lab" : "Lab Group"}
+              </h3>
+              <select
+                value={utilViewBy}
+                onChange={(e) => setUtilViewBy(e.target.value as "group" | "lab")}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={utilByGroup} barCategoryGap="25%">
+              <BarChart
+                data={utilViewBy === "lab" ? utilData.lab : utilData.group}
+                barCategoryGap="25%"
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="group" stroke="#6b7280" />
+                <XAxis dataKey="name" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
                 <Tooltip formatter={(v: number) => `${v}%`} />
                 <ReferenceLine
@@ -660,23 +689,39 @@ export function DashboardPage() {
                   label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
                 />
                 <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                  {utilByGroup.map((d, i) => (
-                    <Cell key={i} fill={utilColor(d.util)} />
-                  ))}
+                  {(utilViewBy === "lab" ? utilData.lab : utilData.group).map(
+                    (d, i) => (
+                      <Cell key={i} fill={utilColor(d.util)} />
+                    ),
+                  )}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </Card>
 
-          {/* Actual vs Budget by Lab Group */}
+          {/* Actual vs Budget by Lab Group / Lab */}
           <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Actual vs Budget by Lab Group
-            </h3>
+            <div className="flex items-center justify-between mb-4 gap-2">
+              <h3 className="text-lg font-semibold text-foreground">
+                Actual vs Budget by {avbViewBy === "lab" ? "Lab" : "Lab Group"}
+              </h3>
+              <select
+                value={avbViewBy}
+                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={actualVsBudget} barGap={8} barCategoryGap="20%">
+              <BarChart
+                data={avbViewBy === "lab" ? avbData.lab : avbData.group}
+                barGap={8}
+                barCategoryGap="20%"
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="group" stroke="#6b7280" />
+                <XAxis dataKey="name" stroke="#6b7280" />
                 <YAxis stroke="#6b7280" />
                 <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
                 <Legend />
