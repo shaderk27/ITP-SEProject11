@@ -101,3 +101,30 @@ export async function getBreakdown(
 
   return response.json();
 }
+
+export interface MonthlyPoint {
+  month: string; // "YYYY-MM"
+  amount: string;
+}
+
+export async function getMonthly(
+  startDate: string = "",
+  endDate: string = "",
+  labGroupId?: number | null,
+  labId?: number | null,
+): Promise<MonthlyPoint[]> {
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  if (labGroupId != null) params.set("lab_group_id", String(labGroupId));
+  if (labId != null) params.set("lab_id", String(labId));
+  const q = params.toString() ? `?${params.toString()}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/dashboard/monthly${q}`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load monthly trend (${response.status}).`);
+  }
+  const data = await response.json();
+  return data.points as MonthlyPoint[];
+}

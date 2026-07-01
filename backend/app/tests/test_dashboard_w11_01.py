@@ -21,7 +21,11 @@ from decimal import Decimal
 
 import pytest
 
-from app.api.dashboard import get_breakdown, get_spending_summary
+from app.api.dashboard import (
+    get_breakdown,
+    get_monthly_spend,
+    get_spending_summary,
+)
 from app.models.auth import Role, User
 from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
@@ -108,13 +112,14 @@ def _set_budget(db, group, lab, category, amount, period_id=None) -> None:
     db.flush()
 
 
-def _add_line(db, lab, category, amount, pr_status: str) -> None:
+def _add_line(db, lab, category, amount, pr_status: str, request_date=None) -> None:
     """Insert one committed PR + line with a known amount/status/lab/category."""
     suffix = _next_suffix()
     pr = PurchaseRequest(
         source_pr_number=f"PR-W11T-{suffix}",
         grand_total_sgd=Decimal(str(amount)),
         pr_status=pr_status,
+        request_date=request_date,
     )
     db.add(pr)
     db.flush()
@@ -407,3 +412,26 @@ def test_breakdown_budget_all_time_sums_all_periods(db, admin_user):
     resp = get_breakdown(db=db, current_user=admin_user, period_id=0)
     grp = next(g for g in resp.lab_groups if g.lab_group_id == group.lab_group_id)
     assert Decimal(grp.budget_sgd) == Decimal("6000.00")
+
+
+# ─── 7. Monthly spend trend ──────────────────────────────────────────────
+def test_monthly_only_approved_grouped_by_month(db, admin_user):
+    """Monthly trend sums Approved spend by request_date month; pending and
+    rejected are excluded, and months with no spend don't appear."""
+    group = _make_group(db)
+    lab = _make_lab(db, group)
+    cat = _make_category(db)
+    _add_line(db, lab, cat, "100.00", "Approved", request_date=date(2026, 4, 10))
+    _add_line(db, lab, cat, "50.00", "Approved", request_date=date(2026, 4, 20))
+    _add_line(
+        db, lab, cat, "999.00", "Pending Approval", request_date=date(2026, 4, 15)
+    )
+    _add_line(db, lab, cat, "500.00", "Approved", request_date=date(2026, 6, 5))
+
+    resp = get_monthly_spend(
+        db=db, current_user=admin_user, lab_group_id=group.lab_group_id
+    )
+    by_month = {p.month: Decimal(p.amount) for p in resp.points}
+    assert by_month["2026-04"] == Decimal("150.00")  # 100 + 50, pending excluded
+    assert by_month["2026-06"] == Decimal("500.00")
+    assert "2026-05" not in by_month

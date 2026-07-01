@@ -474,6 +474,74 @@ def get_breakdown(
     return BreakdownResponse(lab_groups=result_groups)
 
 
+# ─── Monthly spend trend ─────────────────────────────────────────────────
+class MonthlyPoint(BaseModel):
+    month: str  # "YYYY-MM"
+    amount: str
+
+
+class MonthlyResponse(BaseModel):
+    points: list[MonthlyPoint]
+
+
+@router.get("/monthly", response_model=MonthlyResponse)
+def get_monthly_spend(
+    start_date: date | None = None,
+    end_date: date | None = None,
+    lab_group_id: int | None = None,
+    lab_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MonthlyResponse:
+    """
+    Approved committed spend grouped by month (YYYY-MM of the PR's request_date).
+    Only Approved lines, real (non-General) lab groups. Optional date window +
+    lab-group / lab filter. Role-scoped like the other dashboard endpoints; the
+    frontend pads out the full fiscal-year months.
+    """
+    role_name = _role_name(current_user)
+    if role_name not in ALLOWED_DASHBOARD_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin or Team Lead can view dashboard spending.",
+        )
+    if (role_name == "teamlead" and not current_user.lab_group_id) or (
+        role_name == "labic" and not current_user.lab_id
+    ):
+        return MonthlyResponse(points=[])
+
+    month_expr = func.to_char(PurchaseRequest.request_date, "YYYY-MM")
+    query = (
+        db.query(
+            month_expr.label("month"),
+            func.coalesce(func.sum(PurchaseRequestLine.amount_gst), 0),
+        )
+        .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+        .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+        .join(LabGroup, LabGroup.lab_group_id == Lab.lab_group_id)
+        .filter(PurchaseRequestLine.pr_status.ilike("approved%"))
+        .filter(LabGroup.lab_group_name != "General")
+        .filter(PurchaseRequest.request_date.isnot(None))
+        .group_by(month_expr)
+        .order_by(month_expr)
+    )
+    if start_date is not None:
+        query = query.filter(PurchaseRequest.request_date >= start_date)
+    if end_date is not None:
+        query = query.filter(PurchaseRequest.request_date <= end_date)
+    if lab_group_id is not None:
+        query = query.filter(Lab.lab_group_id == lab_group_id)
+    if lab_id is not None:
+        query = query.filter(PurchaseRequestLine.lab_id == lab_id)
+    query = _apply_role_scope(query, current_user)
+
+    points = [
+        MonthlyPoint(month=month, amount=str(_to_decimal(amount)))
+        for month, amount in query.all()
+    ]
+    return MonthlyResponse(points=points)
+
+
 def _to_decimal(value: Any) -> Decimal:
     if isinstance(value, Decimal):
         return value

@@ -21,9 +21,11 @@ import { useAuth } from "../context/AuthContext";
 import { format, subDays } from "date-fns";
 import {
   getBreakdown,
+  getMonthly,
   getSpendingSummary,
   listLabGroups,
   listPeriods,
+  type MonthlyPoint,
   type Period,
 } from "../services/dashboardService";
 import type {
@@ -35,6 +37,7 @@ import type {
 import {
   BarChart,
   Bar,
+  Cell,
   LineChart,
   Line,
   XAxis,
@@ -42,23 +45,24 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
 
-const budgetData = [
-  { month: "Jan", budget: 45000, actual: 42000 },
-  { month: "Feb", budget: 45000, actual: 46500 },
-  { month: "Mar", budget: 45000, actual: 43200 },
-  { month: "Apr", budget: 45000, actual: 47800 },
-  { month: "May", budget: 45000, actual: 44100 },
-  { month: "Jun", budget: 45000, actual: 0 },
-];
 
 const recentUploads = [
   { id: "UP-2024-152", date: "2026-05-20", records: 45, status: "processed" },
   { id: "UP-2024-151", date: "2026-05-18", records: 28, status: "review" },
   { id: "UP-2024-150", date: "2026-05-15", records: 62, status: "processed" },
 ];
+
+// Utilisation threshold colour: green <50%, amber <80%, orange <95%, red ≥95%.
+function utilColor(pct: number): string {
+  if (pct >= 95) return "#ef4444";
+  if (pct >= 80) return "#f97316";
+  if (pct >= 50) return "#f59e0b";
+  return "#10b981";
+}
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -124,13 +128,11 @@ export function DashboardPage() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    // Fiscal-year span is the base spend window + budget year.
+  // Effective spend window: the selected FY's span, narrowed by a preset/custom.
+  const [effStart, effEnd] = useMemo(() => {
     const period = periods.find((p) => p.id === selectedFYPeriodId);
     const fyStart = period?.start_date ?? "";
     const fyEnd = period?.end_date ?? "";
-    // Optional sub-window: custom range wins, else a day preset.
     let rawStart = "";
     let rawEnd = "";
     if (startDate || endDate) {
@@ -142,9 +144,13 @@ export function DashboardPage() {
       rawEnd = format(new Date(), "yyyy-MM-dd");
     }
     // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
-    const effStart = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
-    const effEnd = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
+    const s = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
+    const e = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
+    return [s, e] as const;
+  }, [periods, selectedFYPeriodId, dateRange, startDate, endDate]);
 
+  useEffect(() => {
+    let cancelled = false;
     Promise.all([
       listLabGroups(selectedFYPeriodId),
       getSpendingSummary("all", effStart, effEnd),
@@ -166,7 +172,26 @@ export function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedFYPeriodId, dateRange, startDate, endDate, periods]);
+  }, [selectedFYPeriodId, effStart, effEnd]);
+
+  // Monthly trend — its own fetch so the client-side group/lab filter re-scopes
+  // it without re-loading the whole dashboard.
+  const [monthlyPoints, setMonthlyPoints] = useState<MonthlyPoint[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const gid = selectedGroupId !== "all" ? Number(selectedGroupId) : undefined;
+    const lid = selectedLabId !== "all" ? Number(selectedLabId) : undefined;
+    getMonthly(effStart, effEnd, gid, lid)
+      .then((pts) => {
+        if (!cancelled) setMonthlyPoints(pts);
+      })
+      .catch(() => {
+        if (!cancelled) setMonthlyPoints([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [effStart, effEnd, selectedGroupId, selectedLabId]);
 
   // When a single lab is picked, the cards read from that lab's breakdown row
   // instead of the group-level numbers below.
@@ -287,6 +312,48 @@ export function DashboardPage() {
       (a, b) => b.amount - a.amount,
     );
   }, [scopedBreakdown]);
+
+  // Per-lab-group series for the two group-level charts.
+  const utilByGroup = useMemo(
+    () =>
+      scopedBreakdown.map((g) => ({
+        group: g.lab_group_name,
+        util: g.utilisation_pct,
+      })),
+    [scopedBreakdown],
+  );
+  const actualVsBudget = useMemo(
+    () =>
+      scopedBreakdown.map((g) => ({
+        group: g.lab_group_name,
+        budget: Number(g.budget_sgd),
+        actual: Number(g.actual_spend_sgd),
+      })),
+    [scopedBreakdown],
+  );
+
+  // Monthly Spend Trend: for a specific FY, pad to all 12 Apr–Mar buckets
+  // (missing months = 0). For "All time", show every month that has spend.
+  const monthlyData = useMemo(() => {
+    const map = new Map(monthlyPoints.map((p) => [p.month, Number(p.amount)]));
+    const period = periods.find((p) => p.id === selectedFYPeriodId);
+    if (period) {
+      const [y, m] = period.start_date.split("-").map(Number);
+      return Array.from({ length: 12 }, (_, i) => {
+        const d = new Date(y, m - 1 + i, 1);
+        return { month: format(d, "MMM"), amount: map.get(format(d, "yyyy-MM")) ?? 0 };
+      });
+    }
+    return [...monthlyPoints]
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map((p) => {
+        const [y, m] = p.month.split("-").map(Number);
+        return {
+          month: format(new Date(y, m - 1, 1), "MMM yy"),
+          amount: Number(p.amount),
+        };
+      });
+  }, [monthlyPoints, periods, selectedFYPeriodId]);
 
   const toggleGroup = (id: number) => {
     setExpandedGroups((prev) => {
@@ -561,26 +628,67 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* Charts Row */}
+        {/* Charts row 1 — lab-group level */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Budget vs Actual Chart */}
+          {/* Budget Utilisation by Lab Group */}
           <Card className="p-6 bg-white border-border">
             <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Budget vs Actual Spending
+              Budget Utilisation by Lab Group
             </h3>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={budgetData} barGap={8} barCategoryGap="20%">
+              <BarChart data={utilByGroup} barCategoryGap="25%">
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="month" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="budget" fill="#1e3a8a" name="Budget" minPointSize={5} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="actual" fill="#3b82f6" name="Actual" minPointSize={5} radius={[4, 4, 0, 0]} />
+                <XAxis dataKey="group" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
+                <Tooltip formatter={(v: number) => `${v}%`} />
+                <ReferenceLine
+                  y={50}
+                  stroke="#f59e0b"
+                  strokeDasharray="4 4"
+                  label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                />
+                <ReferenceLine
+                  y={80}
+                  stroke="#f97316"
+                  strokeDasharray="4 4"
+                  label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                />
+                <ReferenceLine
+                  y={95}
+                  stroke="#ef4444"
+                  strokeDasharray="4 4"
+                  label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                />
+                <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
+                  {utilByGroup.map((d, i) => (
+                    <Cell key={i} fill={utilColor(d.util)} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </Card>
 
+          {/* Actual vs Budget by Lab Group */}
+          <Card className="p-6 bg-white border-border">
+            <h3 className="text-lg font-semibold mb-4 text-foreground">
+              Actual vs Budget by Lab Group
+            </h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={actualVsBudget} barGap={8} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="group" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                <Legend />
+                <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
+
+        {/* Charts row 2 — category + monthly */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Spending by Category */}
           <Card className="p-6 bg-white border-border">
             <h3 className="text-lg font-semibold mb-4 text-foreground">
@@ -601,37 +709,32 @@ export function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           </Card>
-        </div>
 
-        {/* Monthly Trend */}
-        <Card className="p-6 bg-white border-border">
-          <h3 className="text-lg font-semibold mb-4 text-foreground">
-            Monthly Spending Trend
-          </h3>
-          <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={budgetData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="month" stroke="#6b7280" />
-              <YAxis stroke="#6b7280" />
-              <Tooltip />
-              <Legend />
-              <Line
-                type="monotone"
-                dataKey="budget"
-                stroke="#1e3a8a"
-                strokeWidth={2}
-                name="Budget"
-              />
-              <Line
-                type="monotone"
-                dataKey="actual"
-                stroke="#3b82f6"
-                strokeWidth={2}
-                name="Actual"
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </Card>
+          {/* Monthly Spending Trend — approved committed spend by month */}
+          <Card className="p-6 bg-white border-border">
+            <h3 className="text-lg font-semibold mb-4 text-foreground">
+              Monthly Spending Trend
+            </h3>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="month" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip
+                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="amount"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  name="Actual spend"
+                  dot
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </Card>
+        </div>
 
         {/* Recent Activity */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
