@@ -18,10 +18,13 @@ import { DatePickerField } from "../components/shared/DatePickerField";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
+import { format, subDays } from "date-fns";
 import {
   getBreakdown,
   getSpendingSummary,
   listLabGroups,
+  listPeriods,
+  type Period,
 } from "../services/dashboardService";
 import type {
   BreakdownLabGroup,
@@ -69,7 +72,11 @@ export function DashboardPage() {
   const [selectedGroupId, setSelectedGroupId] = useState<string>(() =>
     user?.labGroupId ? String(user.labGroupId) : "all",
   );
-  // Date Range dropdown: all / fy (current fiscal year) / 7d / 30d / 90d.
+  // Fiscal year is the master time scope: it sets the budget year AND the base
+  // spend window (Apr–Mar). The Date Range presets + custom range narrow within.
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
+  // Date Range dropdown: all (whole FY) / 7d / 30d / 90d — a sub-window on spend.
   const [dateRange, setDateRange] = useState("all");
   // Custom date range (overrides the preset when either is set).
   const [startDate, setStartDate] = useState("");
@@ -101,12 +108,47 @@ export function DashboardPage() {
     }
   }
 
+  // Load fiscal years once; default to the newest (current FY).
   useEffect(() => {
     let cancelled = false;
+    listPeriods()
+      .then((data) => {
+        if (!cancelled) {
+          setPeriods(data);
+          if (data.length) setSelectedFYPeriodId(data[0].id);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Fiscal-year span is the base spend window + budget year.
+    const period = periods.find((p) => p.id === selectedFYPeriodId);
+    const fyStart = period?.start_date ?? "";
+    const fyEnd = period?.end_date ?? "";
+    // Optional sub-window: custom range wins, else a day preset.
+    let rawStart = "";
+    let rawEnd = "";
+    if (startDate || endDate) {
+      rawStart = startDate;
+      rawEnd = endDate;
+    } else if (dateRange === "7d" || dateRange === "30d" || dateRange === "90d") {
+      const days = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 90;
+      rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
+      rawEnd = format(new Date(), "yyyy-MM-dd");
+    }
+    // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
+    const effStart = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
+    const effEnd = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
+
     Promise.all([
-      listLabGroups(),
-      getSpendingSummary(dateRange, startDate, endDate),
-      getBreakdown(dateRange, startDate, endDate),
+      listLabGroups(selectedFYPeriodId),
+      getSpendingSummary("all", effStart, effEnd),
+      getBreakdown("all", effStart, effEnd, selectedFYPeriodId),
     ])
       .then(([groups, spendingSummary, breakdownResp]) => {
         if (!cancelled) {
@@ -124,7 +166,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [dateRange, startDate, endDate]);
+  }, [selectedFYPeriodId, dateRange, startDate, endDate, periods]);
 
   // When a single lab is picked, the cards read from that lab's breakdown row
   // instead of the group-level numbers below.
@@ -277,6 +319,7 @@ export function DashboardPage() {
       <FilterBar
         searchPlaceholder="Search dashboard..."
         onFilterChange={(filterId, value) => {
+          if (filterId === "Fiscal Year") setSelectedFYPeriodId(Number(value));
           if (filterId === "Lab Group") {
             setSelectedGroupId(value);
             // Lab list depends on the group, so reset the lab focus.
@@ -292,11 +335,15 @@ export function DashboardPage() {
         }}
         filters={[
           {
+            label: "Fiscal Year",
+            value: selectedFYPeriodId != null ? String(selectedFYPeriodId) : "",
+            options: periods.map((p) => ({ value: String(p.id), label: p.name })),
+          },
+          {
             label: "Date Range",
             value: dateRange,
             options: [
-              { value: "all", label: "All time" },
-              { value: "fy", label: "This fiscal year" },
+              { value: "all", label: "Whole year" },
               { value: "7d", label: "Last 7 days" },
               { value: "30d", label: "Last 30 days" },
               { value: "90d", label: "Last 90 days" },

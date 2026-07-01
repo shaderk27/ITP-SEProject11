@@ -242,6 +242,7 @@ def get_breakdown(
     date_range: str = "all",
     start_date: date | None = None,
     end_date: date | None = None,
+    period_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BreakdownResponse:
@@ -352,11 +353,11 @@ def get_breakdown(
         .filter(LabGroup.lab_group_name != "General")
         .group_by(Budget.lab_id, Budget.category_id)
     )
-    # Budgets are per fiscal year — only the current FY's, so multiple years'
-    # budgets don't sum together.
-    current_period = _current_period_id(db)
-    if current_period is not None:
-        budget_query = budget_query.filter(Budget.period_id == current_period)
+    # Budgets are per fiscal year — scope to the requested FY (or the current
+    # FY by default) so multiple years' budgets don't sum together.
+    budget_period = period_id if period_id is not None else _current_period_id(db)
+    if budget_period is not None:
+        budget_query = budget_query.filter(Budget.period_id == budget_period)
     if role_name == "teamlead":
         budget_query = budget_query.filter(
             Budget.lab_group_id == current_user.lab_group_id

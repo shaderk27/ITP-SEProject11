@@ -6,8 +6,11 @@ import type {
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-export async function listLabGroups(): Promise<LabGroupSummary[]> {
-  const response = await fetch(`${API_BASE_URL}/api/config/labgroups`, {
+export async function listLabGroups(
+  periodId?: number | null,
+): Promise<LabGroupSummary[]> {
+  const query = periodId != null ? `?period_id=${periodId}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/config/labgroups${query}`, {
     credentials: "include",
   });
 
@@ -20,6 +23,25 @@ export async function listLabGroups(): Promise<LabGroupSummary[]> {
     ...g,
     budget: Number(g.budget) || 0,
   }));
+}
+
+export interface Period {
+  id: number;
+  name: string;
+  year: number;
+  start_date: string;
+  end_date: string;
+  is_closed: boolean;
+}
+
+export async function listPeriods(): Promise<Period[]> {
+  const response = await fetch(`${API_BASE_URL}/api/config/periods`, {
+    credentials: "include",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to load fiscal years (${response.status}).`);
+  }
+  return response.json();
 }
 
 function dateRangeQuery(
@@ -59,9 +81,17 @@ export async function getBreakdown(
   dateRange: string = "all",
   startDate: string = "",
   endDate: string = "",
+  periodId?: number | null,
 ): Promise<BreakdownResponse> {
+  const base = dateRangeQuery(dateRange, startDate, endDate);
+  const query =
+    periodId != null
+      ? base
+        ? `${base}&period_id=${periodId}`
+        : `?period_id=${periodId}`
+      : base;
   const response = await fetch(
-    `${API_BASE_URL}/api/dashboard/breakdown${dateRangeQuery(dateRange, startDate, endDate)}`,
+    `${API_BASE_URL}/api/dashboard/breakdown${query}`,
     { credentials: "include" },
   );
 
