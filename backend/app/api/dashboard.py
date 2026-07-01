@@ -353,9 +353,14 @@ def get_breakdown(
         .filter(LabGroup.lab_group_name != "General")
         .group_by(Budget.lab_id, Budget.category_id)
     )
-    # Budgets are per fiscal year — scope to the requested FY (or the current
-    # FY by default) so multiple years' budgets don't sum together.
-    budget_period = period_id if period_id is not None else _current_period_id(db)
+    # Budget period scope. period_id: >0 = that fiscal year; 0 = all fiscal
+    # years (sum — the "All time" view); None = current FY (default).
+    if period_id == 0:
+        budget_period = None
+    elif period_id is not None:
+        budget_period = period_id
+    else:
+        budget_period = _current_period_id(db)
     if budget_period is not None:
         budget_query = budget_query.filter(Budget.period_id == budget_period)
     if role_name == "teamlead":
