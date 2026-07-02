@@ -623,3 +623,38 @@ class AuthService:
         new_hashed = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
         self.repository.update_user_password(self.db, user.user_id, new_hashed)
         self.repository.delete_reset_tokens_by_user(self.db, user.user_id)
+
+    def get_current_user_allow_reset(self, token: Optional[str]) -> Dict[str, Any]:
+        """Like get_current_user but allows JWTs flagged with must_reset_password.
+        Use only on the /reset-password endpoint."""
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated. Missing session token.",
+            )
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            user_id_str: Optional[str] = payload.get("sub")
+            if user_id_str is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid token session metrics.",
+                )
+            user_id = int(user_id_str)
+        except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session expired or signature invalid.",
+            )
+
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account no longer exists.",
+            )
+
+        return {
+            "id": user.user_id,
+            "must_reset_password": bool(payload.get("must_reset_password", False)),
+        }
