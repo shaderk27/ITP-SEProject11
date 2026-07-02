@@ -20,6 +20,11 @@ ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50);
 -- Irfan (W11-03): per-line status (a PR can have lines in different states).
 ALTER TABLE purchase_request_lines ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50);
 
+-- Randy (W11-02): For flags on threshold to prevent repeated notifications/emails.
+ALTER TABLE labs ADD COLUMN notified_50 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN notified_80 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN notified_95 BOOLEAN DEFAULT FALSE;
+
 
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES

@@ -5,7 +5,7 @@ import { Button } from "../components/ui/button";
 import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker, Mail, UserRound, CheckCircle2, UserPlus, Unlink } from "lucide-react";
 import { UserManagement } from "../components/config/UserManagement";
 
-// --- NEW: DYNAMIC TAG GENERATOR ---
+// --- DYNAMIC TAG GENERATOR ---
 const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => {
   try {
     const tags = new Set<string>();

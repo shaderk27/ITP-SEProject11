@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -22,6 +22,9 @@ from app.models.config import (
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
+
+# Import the new threshold service
+from app.services.threshold_service import check_and_notify_lab_thresholds
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
@@ -176,7 +179,7 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     db.add(new_group)
     db.flush()  # Flush to generate the new ID without committing yet
 
-    # NEW: Bulk Claim Orphaned Labs & Sync Budgets Explicitly
+    # Bulk Claim Orphaned Labs & Sync Budgets Explicitly
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         labs_to_update = (
             db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
@@ -214,7 +217,7 @@ def update_lab_group(
     db_group.wbs_code = group.wbs_code
     db_group.description = group.description
 
-    # NEW: Bulk Claim Orphaned Labs during Edit & Sync Budgets Explicitly
+    # Bulk Claim Orphaned Labs during Edit & Sync Budgets Explicitly
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         labs_to_update = (
             db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
@@ -431,6 +434,7 @@ def create_lab(
 def update_lab(
     lab_id: int,
     lab_in: LabCreate,
+    background_tasks: BackgroundTasks,
     period_id: int | None = None,
     db: Session = Depends(get_db),
 ):
@@ -461,8 +465,13 @@ def update_lab(
             )
             db.add(b)
             total_assigned += amount
+
     db.commit()
     db.refresh(db_lab)
+
+    # --- TRIGGER NOTIFICATION CHECK ---
+    background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
+
     return {
         "id": db_lab.lab_id,
         "code": db_lab.lab_code or "",
