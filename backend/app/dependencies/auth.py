@@ -9,61 +9,72 @@ Returns the User model so endpoints can keep using
 `current_user.role.role_name`, `current_user.lab_group_id`, etc.
 """
 
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import jwt
-from fastapi import HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
-from app.services.auth_service import ALGORITHM, SECRET_KEY
+from app.database import get_db
+from app.models.auth import User
+from app.services.auth_service import ALGORITHM, COOKIE_NAME, SECRET_KEY
 
 
-def get_current_user(self, token: Optional[str]) -> Dict[str, Any]:
-    if not token:
+def get_current_user(
+    access_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME),
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    Resolve the current request's caller into a User row.
+
+    Raises:
+      - 401 if no cookie, the token is expired, the token signature is
+        invalid, or the resolved user no longer exists.
+    """
+    if not access_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated. Missing session token.",
+            detail="Not authenticated. Log in first.",
         )
+
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id_str: Optional[str] = payload.get("sub")
-        if user_id_str is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token session metrics.",
-            )
-        user_id = int(user_id_str)
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, ValueError):
+        payload = jwt.decode(access_token, SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired or signature invalid.",
+            detail="Session expired. Please log in again.",
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session token.",
         )
 
-    must_reset_password = bool(payload.get("must_reset_password", False))
+    user_id_str = payload.get("sub")
+    if not user_id_str:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed session token.",
+        )
 
-    user = self.repository.get_user_by_id(self.db, user_id)
+    try:
+        user_id = int(user_id_str)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Malformed session token.",
+        )
+
+    user = db.query(User).filter(User.user_id == user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account no longer exists.",
         )
-
-    # Block access to normal endpoints if password reset is required
-    if must_reset_password:
+    if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Password reset required before accessing this resource.",
+            detail="User account is inactive.",
         )
 
-    return {
-        "id": user.user_id,
-        "full_name": user.full_name,
-        "email": user.email,
-        "staff_id": user.staff_id,
-        "role": user.role.role_name if user.role else None,
-        "lab_group_id": user.lab_group_id,
-        "lab_id": user.lab_id,
-        "must_reset_password": must_reset_password,
-        "assignedLabs": [user.lab.lab_code]
-        if user.lab
-        else ([user.lab_group.wbs_code] if user.lab_group else []),
-    }
+    return user
