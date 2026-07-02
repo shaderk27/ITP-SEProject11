@@ -106,7 +106,7 @@ def test_instruction_to_vendor_selects_lab_after_purpose() -> None:
     assert result["lab_id"] == 20
     assert "Vendor instruction" in result["reason"]
 
-# --- NEW: TESTS FOR VENUE TAGS & SMART CATEGORIES ---
+# --- TESTS FOR VENUE TAGS & SMART CATEGORIES ---
 def test_lab_venue_tag_selects_lab_before_purpose() -> None:
     # "SR4A" is a venue tag for Analytical Lab. It should match instantly from the row text!
     result = classify_line_item(

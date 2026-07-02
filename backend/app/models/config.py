@@ -46,6 +46,9 @@ class Lab(Base):
 
     group = relationship("LabGroup", back_populates="labs")
     aliases = relationship("LabAlias", back_populates="lab")
+    notified_50 = Column(Boolean, default=False)
+    notified_80 = Column(Boolean, default=False)
+    notified_95 = Column(Boolean, default=False)
 
 
 class LabAlias(Base):
