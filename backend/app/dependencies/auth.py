@@ -12,12 +12,9 @@ Returns the User model so endpoints can keep using
 from typing import Any, Dict, Optional
 
 import jwt
-from fastapi import Cookie, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 
-from app.database import get_db
-from app.models.auth import User
-from app.services.auth_service import ALGORITHM, COOKIE_NAME, SECRET_KEY
+from app.services.auth_service import ALGORITHM, SECRET_KEY
 
 
 def get_current_user(self, token: Optional[str]) -> Dict[str, Any]:

@@ -16,7 +16,6 @@ from app.schemas.auth_schema import (
 )
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
-from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
