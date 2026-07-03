@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
+from app.models.auth import User
 from app.processors.classifier import classify_line_item
 
 
@@ -8,8 +9,15 @@ class FakeQuery:
     def __init__(self, rows: list[SimpleNamespace]) -> None:
         self.rows = rows
 
+    # Mock the SQLAlchemy .filter() method to just pass the rows through
+    def filter(self, *args, **kwargs) -> 'FakeQuery':
+        return self
+
     def all(self) -> list[SimpleNamespace]:
         return self.rows
+
+    def first(self) -> SimpleNamespace | None:
+        return self.rows[0] if self.rows else None
 
 
 class FakeDb:
@@ -69,6 +77,10 @@ class FakeDb:
                 category_id=4, category_name="General", description="fallback"
             ),
         ]
+        # Mocked User table to support Lab IC matching
+        self.users = [
+            SimpleNamespace(user_id=1, full_name="Randy Kwok", email="randy@sit.edu", lab_id=30, lab_group_id=1)
+        ]
 
     def query(self, model):
         if model is LabGroup:
@@ -79,41 +91,45 @@ class FakeDb:
             return FakeQuery(self.requester_mappings)
         if model is SpendingCategory:
             return FakeQuery(self.categories)
+        if model is User:
+            return FakeQuery(self.users)
         return FakeQuery([])
 
 
-def test_wbs_scopes_lab_group_and_purpose_selects_lab() -> None:
+def test_purpose_matches_exact_lab_name() -> None:
+    # Under strict matching, purpose must contain the exact name "Analytical Lab" or code "CHEM-A"
     result = classify_line_item(
         FakeDb(),
-        row_text="buying analytical tools",
-        requestor_name="Randy Kwok",
+        row_text="buying lab tools",
+        requestor_name="Unknown",
         wbs="WBS-100",
-        purpose="Buying analytical tools",
+        purpose="Buying tools for Analytical Lab",
     )
 
     assert result["lab_group_id"] == 1
     assert result["lab_id"] == 10
-    assert "Purpose matched" in result["reason"]
+    assert "Purpose field matched lab" in result["reason"]
 
 
-def test_requestor_mapping_is_used_after_text_clues() -> None:
+def test_requestor_name_matches_lab_ic() -> None:
     result = classify_line_item(
         FakeDb(),
         row_text="general items",
-        requestor_name="Randy Kwok",
+        requestor_name="Randy.Kwok",
         wbs="WBS-100",
         purpose="General items",
     )
 
     assert result["lab_group_id"] == 1
     assert result["lab_id"] == 30
-    assert "Requestor matched" in result["reason"]
+    assert "Requestor matched Lab IC" in result["reason"]
 
 
-def test_instruction_to_vendor_selects_lab_after_purpose() -> None:
+def test_vendor_instructions_match_lab_code() -> None:
+    # "BIO-M" matches strictly at boundaries.
     result = classify_line_item(
         FakeDb(),
-        row_text="delivery note says microscope room",
+        row_text="delivery note",
         requestor_name="Unknown Person",
         wbs="WBS-200",
         purpose="General lab purchase",
@@ -122,23 +138,25 @@ def test_instruction_to_vendor_selects_lab_after_purpose() -> None:
 
     assert result["lab_group_id"] == 2
     assert result["lab_id"] == 20
-    assert "Vendor instruction" in result["reason"]
+    assert "Vendor instructions matched lab" in result["reason"]
+
 
 # --- TESTS FOR VENUE TAGS & SMART CATEGORIES ---
-def test_lab_venue_tag_selects_lab_before_purpose() -> None:
-    # "SR4A" is a venue tag for Analytical Lab. It should match instantly from the row text!
+def test_venue_tag_in_purpose_selects_lab() -> None:
+    # "SR4A" is a venue tag for Analytical Lab. Since it's in the Purpose, it hits Client Priority 1.
     result = classify_line_item(
         FakeDb(),
-        row_text="Delivery to SR4A for testing",
+        row_text="Delivery for testing",
         requestor_name="Unknown Person",
         wbs="WBS-100",
-        purpose="General lab purchase",
+        purpose="General purchase for SR4A",
         instruction_to_vendor="Leave at door",
     )
 
     assert result["lab_group_id"] == 1
     assert result["lab_id"] == 10
-    assert "venue tag" in result["reason"]
+    assert "Purpose field matched lab" in result["reason"]
+
 
 
 def test_category_is_selected_by_exact_req_type() -> None:
@@ -150,11 +168,10 @@ def test_category_is_selected_by_exact_req_type() -> None:
     )
 
     assert result["category_id"] == 1
-    assert "scored highest" in result["reason"]
+    assert "Matched category" in result["reason"]
 
 
-def test_category_position_based_scoring_resolves_ties() -> None:
-    # "hardware" is at the start (30pts) and "maintenance" is at the end (10pts). Equipment should win!
+def test_category_conflict_sends_to_review() -> None:
     result = classify_line_item(
         FakeDb(),
         row_text="random item",
@@ -162,8 +179,9 @@ def test_category_position_based_scoring_resolves_ties() -> None:
         req_type="IT-Hardware (computers, accessories, maintenance)",
     )
 
-    assert result["category_id"] == 1  # 1 is Equipment
-    assert "scored highest" in result["reason"]
+    assert result["category_id"] is None
+    assert "Conflict detected" in result["reason"]
+
 
 
 def test_unknown_row_is_left_for_review() -> None:

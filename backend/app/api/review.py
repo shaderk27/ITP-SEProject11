@@ -7,11 +7,12 @@ auto-classifications. Frontend's Review Queue page reads from here.
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.services.threshold_service import check_and_notify_lab_thresholds
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
@@ -655,6 +656,7 @@ def correct_queue_item(
 @router.post("/batches/{batch_id}/commit", response_model=CommitResponse)
 def commit_batch(
     batch_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CommitResponse:
@@ -757,6 +759,9 @@ def commit_batch(
     prs_updated_count = 0
     lines_created = 0
     lines_updated = 0
+    
+    # Keep track of unique labs affected by this commit
+    affected_lab_ids = set() 
 
     for header in headers:
         lines = (
@@ -852,6 +857,10 @@ def commit_batch(
         status_updates: list[dict] = []
 
         for line in lines:
+            # Record every lab that is having money spent on it
+            if line.suggested_lab_id:
+                affected_lab_ids.add(line.suggested_lab_id)
+                
             line_identity_key = _raw_line_value(line, "line_identity_key")
             existing_line = existing_lines_by_identity.get(line_identity_key)
             if existing_line:
@@ -955,6 +964,11 @@ def commit_batch(
     )
 
     db.commit()
+    
+    # TRIGGER THRESHOLD EMAILS 
+    # Will instantly run the math and send emails for the specific labs involved in this commit
+    for lab_id in affected_lab_ids:
+        background_tasks.add_task(check_and_notify_lab_thresholds, db, lab_id)
 
     return CommitResponse(
         success=True,

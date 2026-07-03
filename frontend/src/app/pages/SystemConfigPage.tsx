@@ -33,15 +33,13 @@ const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => 
         const room = match[3].toUpperCase();
         const levelShort = parseInt(levelRaw, 10).toString();
 
-        // Standard format
-        tags.add(`Block ${block}, Level ${levelRaw}, Room ${room}`);
         
         // Short variations
-        tags.add(`${block}L${levelShort}`); 
         tags.add(`${block}L${levelShort}R${room}`); 
         tags.add(`${block}-L${levelShort}-${room}`); 
+        tags.add(`${block}L${levelShort}${room}`);
         tags.add(code.toUpperCase()); 
-
+        
         if (name) {
           const shortName = name.toLowerCase().endsWith(" lab") ? name.substring(0, name.length - 4).trim() : name;
           tags.add(`${block}L${levelShort} ${shortName}`); 
