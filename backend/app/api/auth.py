@@ -14,7 +14,12 @@ from app.schemas.auth_schema import (
     AssignLabGroupSchema,
     AssignLabSchema,
 )
-from app.services.auth_service import ACCESS_TOKEN_EXPIRE_MINUTES, COOKIE_NAME, COOKIE_SECURE, AuthService
+from app.services.auth_service import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    COOKIE_NAME,
+    COOKIE_SECURE,
+    AuthService,
+)
 from app.repositories.auth_repository import AuthRepository
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -228,7 +233,7 @@ async def refresh_session(
         "role": current_user["role"],
         "lab_group_id": current_user["lab_group_id"],
         "lab_id": current_user["lab_id"],
-        "must_reset_password": False,
+        "must_reset_password": current_user.get("must_reset_password", False),
     }
     token = service._create_access_token(data=token_payload)
     response.set_cookie(
@@ -236,7 +241,6 @@ async def refresh_session(
         value=token,
         httponly=True,
         max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        expires=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         samesite="lax",
         secure=COOKIE_SECURE,
         path="/",

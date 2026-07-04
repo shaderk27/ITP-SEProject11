@@ -121,20 +121,16 @@ class AuthService:
             and user
             and user.password_hash == "placeholder_no_auth_yet"
         )
-
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-
         normal_valid = is_seed_placeholder or self._verify_password(
             password, user.password_hash
         )
-
         used_temp_password = False
-
         if not normal_valid:
             reset_token = self.repository.get_active_reset_token_by_user(
                 self.db, user.user_id
@@ -149,7 +145,6 @@ class AuthService:
                 )
             self.repository.mark_token_used(self.db, reset_token)
             used_temp_password = True
-
         token_payload = {
             "sub": str(user.user_id),
             "email": user.email,
@@ -164,7 +159,6 @@ class AuthService:
             value=token,
             httponly=True,
             max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            expires=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             samesite="lax",
             secure=COOKIE_SECURE,
             path="/",

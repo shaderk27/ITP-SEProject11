@@ -19,7 +19,7 @@ import {
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
 import type { UserRole } from "../../context/AuthContext";
-import { useSessionTimeout } from "../../services/sessionTimeoutService";
+import { useSessionTimeout, WARNING_BEFORE_EXPIRY_MS } from "../../services/useSessionTimeout";
 
 interface NavItem {
   name: string;
@@ -544,7 +544,9 @@ export function RootLayout() {
               <div className="w-full bg-gray-100 rounded-full h-1.5">
                 <div
                   className="bg-amber-500 h-1.5 rounded-full transition-all duration-1000"
-                  style={{ width: `${(secondsRemaining / 120) * 100}%` }}
+                  style={{
+                    width: `${(secondsRemaining / (WARNING_BEFORE_EXPIRY_MS / 1000)) * 100}%`,
+                  }}
                 />
               </div>
 
