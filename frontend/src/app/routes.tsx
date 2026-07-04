@@ -17,6 +17,7 @@ import { CreateUserPage } from "./pages/CreateUserPage";
 import { AccessDenied } from "./pages/error/AccessDenied";
 import { NotFound } from "./pages/error/NotFound";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 
 export const router = createBrowserRouter([
   {
@@ -28,8 +29,8 @@ export const router = createBrowserRouter([
     Component: ForgotPasswordPage,
   },
   {
-    path: "/401",
-    element: <NotFound />,
+    path: "/reset-password",//used to enforce password reset when logging in with temp pw
+    Component: ResetPasswordPage,
   },
   {
     path: "/403",

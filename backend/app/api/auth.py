@@ -16,8 +16,6 @@ from app.schemas.auth_schema import (
 )
 from app.services.auth_service import AuthService
 from app.repositories.auth_repository import AuthRepository
-from app.dependencies.auth import get_current_user
-from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -37,6 +35,13 @@ def require_admin(
             detail="Admin access is required.",
         )
     return current_user
+
+
+def get_current_user_allow_reset(
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+) -> dict:
+    return service.get_current_user_allow_reset(access_token)
 
 
 @router.post("/login")
@@ -72,6 +77,15 @@ async def update_me(
         user_id=int(user_id),
         full_name=payload.full_name,
     )
+
+
+@router.get("/me/reset")
+async def me_reset(
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+):
+    """For temp-reset sessions only — returns minimal user info."""
+    return service.get_current_user_allow_reset(access_token)
 
 
 @router.post("/logout")
@@ -173,10 +187,10 @@ async def deactivate_user(
 async def reset_password(
     payload: ResetPasswordSchema,
     service: AuthService = Depends(get_auth_service),
-    current_user: User = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user_allow_reset),
 ):
     service.reset_password(
-        current_user.user_id,
+        current_user["id"],
         payload.current_password,
         payload.new_password,
     )
