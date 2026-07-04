@@ -7,7 +7,7 @@ export const WARNING_BEFORE_EXPIRY_MS = 2 * 60 * 1000; // show warning 5 mins be
 const DEFAULT_SESSION_MINUTES = 15;
 
 const configuredMinutes = Number(
-  import.meta.env.VITE_ACCESS_TOKEN_EXPIRE_MINUTES,
+  import.meta.env.ACCESS_TOKEN_EXPIRE_MINUTES,
 );
 
 const SESSION_DURATION_MINUTES =
@@ -18,7 +18,7 @@ const SESSION_DURATION_MINUTES =
 if (!Number.isFinite(configuredMinutes) || configuredMinutes <= 0) {
 
   console.warn(
-    `VITE_ACCESS_TOKEN_EXPIRE_MINUTES is missing or invalid — falling back to ${DEFAULT_SESSION_MINUTES} minutes. ` +
+    `ACCESS_TOKEN_EXPIRE_MINUTES is missing or invalid — falling back to ${DEFAULT_SESSION_MINUTES} minutes. ` +
       "Set it to match the backend's ACCESS_TOKEN_EXPIRE_MINUTES or session timing will be wrong.",
   );
 }
