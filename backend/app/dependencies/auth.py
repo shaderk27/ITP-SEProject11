@@ -50,6 +50,12 @@ def get_current_user(
             detail="Invalid session token.",
         )
 
+    if payload.get("must_reset_password"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password reset required before accessing this resource.",
+        )
+
     user_id_str = payload.get("sub")
     if not user_id_str:
         raise HTTPException(

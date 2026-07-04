@@ -132,7 +132,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .then((data) => {
         if (!data) return;
-        // ... existing setUser logic
+        const rawAssignedLabs =
+          data.assignedLabs ||
+          data.assigned_labs ||
+          data.lab_group?.wbs_code ||
+          data.wbs_code;
+
+        setUser({
+          id: data.id,
+          fullName: data.full_name,
+          email: data.email,
+          role: data.role,
+          labGroupId: data.lab_group_id,
+          assignedLabs: parseAssignedLabs(rawAssignedLabs),
+          mustResetPassword: data.must_reset_password ?? false,
+        });
       })
       .finally(() => setIsLoading(false));
   }, []);
