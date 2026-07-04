@@ -5,6 +5,7 @@ The `db` fixture wraps every test in a SAVEPOINT so DB writes performed by
 the test (including `db.commit()` inside the code-under-test) never persist
 to the budget_system database. Each test starts clean, no truncation needed.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -58,11 +59,7 @@ def db() -> Session:
 
 @pytest.fixture
 def admin_user(db: Session) -> User:
-    user = (
-        db.query(User)
-        .filter(User.email == "admin@test.com")
-        .first()
-    )
+    user = db.query(User).filter(User.email == "admin@test.com").first()
     if user is None:
         pytest.skip(
             "Seed admin@test.com missing. Run backend/seeds/dev_seed.sql first."
@@ -76,11 +73,7 @@ def seed_refs(db: Session) -> dict:
     group = db.query(LabGroup).filter(LabGroup.lab_group_name != "General").first()
     if group is None:
         group = db.query(LabGroup).first()
-    lab = (
-        db.query(Lab)
-        .filter(Lab.lab_group_id == group.lab_group_id)
-        .first()
-    )
+    lab = db.query(Lab).filter(Lab.lab_group_id == group.lab_group_id).first()
     if lab is None:
         pytest.skip("No labs seeded for any lab_group; run dev_seed.sql.")
     category = db.query(SpendingCategory).first()

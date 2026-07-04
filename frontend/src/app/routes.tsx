@@ -16,17 +16,21 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { CreateUserPage } from "./pages/CreateUserPage";
 import { AccessDenied } from "./pages/error/AccessDenied";
 import { NotFound } from "./pages/error/NotFound";
-
-// Minimal 403 fallback component for unauthorized users
-
-
-// Minimal 404 fallback component for unknown page
-
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 
 export const router = createBrowserRouter([
   {
     path: "/login",
     Component: LoginPage,
+  },
+  {
+    path: "/forgot-password",
+    Component: ForgotPasswordPage,
+  },
+  {
+    path: "/reset-password",//used to enforce password reset when logging in with temp pw
+    Component: ResetPasswordPage,
   },
   {
     path: "/403",
@@ -132,7 +136,6 @@ export const router = createBrowserRouter([
         Component: ChatbotPage, // Open to all logged-in roles
       },
       {
-        
         path: "users/create",
         element: (
           <ProtectedRoute
@@ -142,7 +145,6 @@ export const router = createBrowserRouter([
             <CreateUserPage />
           </ProtectedRoute>
         ),
-        
       },
     ],
   },

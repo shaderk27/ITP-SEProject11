@@ -8,6 +8,7 @@ looks up the user by the `sub` (user_id) claim.
 Returns the User model so endpoints can keep using
 `current_user.role.role_name`, `current_user.lab_group_id`, etc.
 """
+
 from typing import Optional
 
 import jwt
@@ -49,6 +50,12 @@ def get_current_user(
             detail="Invalid session token.",
         )
 
+    if payload.get("must_reset_password"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password reset required before accessing this resource.",
+        )
+
     user_id_str = payload.get("sub")
     if not user_id_str:
         raise HTTPException(
@@ -70,4 +77,10 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User account no longer exists.",
         )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive.",
+        )
+
     return user

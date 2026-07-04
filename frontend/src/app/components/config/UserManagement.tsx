@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus, Trash2, Unlink } from "lucide-react";
+import { Plus, Trash2, Unlink, KeyRound } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
@@ -9,6 +9,7 @@ interface UserData {
   id: number;
   full_name: string;
   email: string;
+  staff_id: string | null;
   role: "admin" | "teamlead" | "labic";
   lab_group_name: string | null;
   lab_group_code: string | null;
@@ -76,7 +77,8 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     }
   };
 
-  const hasScope = (user: UserData) => Boolean(user.lab_group_name || user.lab_name);
+  const hasScope = (user: UserData) =>
+    Boolean(user.lab_group_name || user.lab_name);
 
   const readErrorDetail = async (res: Response, fallback: string) => {
     try {
@@ -93,10 +95,13 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`${API}/api/auth/users/${user.id}/unassign-scope`, {
-        method: "PUT",
-        credentials: "include",
-      });
+      const res = await fetch(
+        `${API}/api/auth/users/${user.id}/unassign-scope`,
+        {
+          method: "PUT",
+          credentials: "include",
+        },
+      );
       if (!res.ok) {
         alert(await readErrorDetail(res, "Failed to clear assignment."));
         return;
@@ -111,7 +116,9 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
   const handleDeactivateUser = async (user: UserData) => {
     if (!user.is_active) return;
     if (hasScope(user)) {
-      alert("Unassign this user from their Lab or Lab Group before deactivating the account.");
+      alert(
+        "Unassign this user from their Lab or Lab Group before deactivating the account.",
+      );
       return;
     }
 
@@ -134,15 +141,53 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     }
   };
 
+  const [resetTargetUser, setResetTargetUser] = useState<UserData | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const handleAdminResetPassword = async () => {
+    if (!resetTargetUser) return;
+    setIsResetting(true);
+    setResetSuccess(null);
+    setResetError(null);
+
+    try {
+      const res = await fetch(
+        `${API}/api/auth/users/${resetTargetUser.id}/send-reset`,
+        {
+          method: "POST",
+          credentials: "include",
+        },
+      );
+      if (res.ok) {
+        setResetSuccess(
+          `A temporary password has been sent to ${resetTargetUser.email}.`,
+        );
+      } else {
+        const msg = await readErrorDetail(res, "Failed to send reset email.");
+        setResetError(msg);
+      }
+    } catch {
+      setResetError("Network error. Please try again.");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   if (isLoading) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading users...</div>;
+    return (
+      <div className="p-6 text-sm text-muted-foreground">Loading users...</div>
+    );
   }
 
   return (
     <Card className="bg-white border-border">
       <div className="p-6 border-b border-border flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">User Management</h3>
+          <h3 className="text-lg font-semibold text-foreground">
+            User Management
+          </h3>
           <p className="text-sm text-muted-foreground mt-1">
             View users and their assigned role scope
           </p>
@@ -170,6 +215,9 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                 Name
               </th>
               <th className="text-left p-4 text-sm font-medium text-muted-foreground">
+                Staff ID
+              </th>
+              <th className="text-left p-4 text-sm font-medium text-muted-foreground">
                 Email
               </th>
               <th className="text-left p-4 text-sm font-medium text-muted-foreground">
@@ -195,7 +243,14 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                 <td className="p-4 text-sm font-medium text-foreground">
                   {user.full_name}
                 </td>
-                <td className="p-4 text-sm text-muted-foreground">{user.email}</td>
+                <td className="p-4 text-sm text-muted-foreground">
+                  {user.staff_id ?? (
+                    <span className="text-gray-300 italic">—</span>
+                  )}
+                </td>
+                <td className="p-4 text-sm text-muted-foreground">
+                  {user.email}
+                </td>
                 <td className="p-4">
                   <StatusBadge status={getRoleBadgeStatus(user.role) as any}>
                     {user.role === "teamlead"
@@ -209,12 +264,33 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                   {getScopeLabel(user)}
                 </td>
                 <td className="p-4">
-                  <StatusBadge status={user.is_active ? "approved" : "rejected"}>
+                  <StatusBadge
+                    status={user.is_active ? "approved" : "rejected"}
+                  >
                     {user.is_active ? "Active" : "Inactive"}
                   </StatusBadge>
                 </td>
                 <td className="p-4 text-center">
                   <div className="flex items-center justify-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!user.is_active || user.role === "admin"}
+                      title={
+                        user.role === "admin"
+                          ? "Admin passwords cannot be reset by another admin"
+                          : user.is_active
+                            ? "Send password reset email"
+                            : "User is inactive"
+                      }
+                      onClick={() => {
+                        setResetTargetUser(user);
+                        setResetSuccess(null);
+                        setResetError(null);
+                      }}
+                    >
+                      <KeyRound className="h-3 w-3" />
+                    </Button>
                     <Button
                       size="sm"
                       variant="outline"
@@ -250,7 +326,10 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
             ))}
             {users.length === 0 && !error && (
               <tr>
-                <td colSpan={6} className="p-6 text-center text-sm text-muted-foreground">
+                <td
+                  colSpan={7}
+                  className="p-6 text-center text-sm text-muted-foreground"
+                >
                   No users found.
                 </td>
               </tr>
@@ -258,6 +337,64 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
           </tbody>
         </table>
       </div>
+      {/* RESET PASSWORD MODAL */}
+      {resetTargetUser && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm px-4">
+          <div className="bg-white w-full max-w-md rounded-xl shadow-xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="text-lg font-semibold text-gray-800">
+                Reset Password
+              </h3>
+              <button
+                onClick={() => setResetTargetUser(null)}
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-md transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {resetSuccess ? (
+                <div className="p-3 text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg">
+                  {resetSuccess}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-600">
+                  This will send a temporary password to{" "}
+                  <span className="font-medium text-gray-800">
+                    {resetTargetUser.email}
+                  </span>
+                  . The temporary password expires in 1 hour.
+                </p>
+              )}
+
+              {resetError && (
+                <div className="p-3 text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg">
+                  {resetError}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setResetTargetUser(null)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  {resetSuccess ? "Close" : "Cancel"}
+                </button>
+                {!resetSuccess && (
+                  <button
+                    onClick={handleAdminResetPassword}
+                    disabled={isResetting}
+                    className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e40af] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isResetting ? "Sending..." : "Send Temporary Password"}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.auth_schema import (
+    ForgotPasswordSchema,
     LoginRequest,
     CreateUserRequest,
+    ResetPasswordSchema,
     RoleResponse,
     UpdateProfileRequest,
     AssignLabGroupSchema,
@@ -35,6 +37,13 @@ def require_admin(
     return current_user
 
 
+def get_current_user_allow_reset(
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+) -> dict:
+    return service.get_current_user_allow_reset(access_token)
+
+
 @router.post("/login")
 async def login(
     payload: LoginRequest,
@@ -60,13 +69,23 @@ async def update_me(
 ):
     current_user = service.get_current_user(access_token)
     user_id = current_user.get("id")
-
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session."
+        )
     return service.update_user_profile(
-        user_id=user_id,
+        user_id=int(user_id),
         full_name=payload.full_name,
-        current_password=payload.current_password,
-        new_password=payload.new_password,
     )
+
+
+@router.get("/me/reset")
+async def me_reset(
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+):
+    """For temp-reset sessions only — returns minimal user info."""
+    return service.get_current_user_allow_reset(access_token)
 
 
 @router.post("/logout")
@@ -95,6 +114,16 @@ async def create_user(
 @router.get("/roles", response_model=List[RoleResponse])
 async def get_all_roles(service: AuthService = Depends(get_auth_service)):
     return service.get_all_roles()
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    payload: ForgotPasswordSchema,
+    service: AuthService = Depends(get_auth_service),
+):
+    # Always return 200 even if email not found — don't leak whether email exists
+    service.forgot_password(payload.email)
+    return {"message": "If that email exists, a temporary password has been sent."}
 
 
 @router.get("/users")
@@ -152,3 +181,34 @@ async def deactivate_user(
     admin: dict = Depends(require_admin),
 ):
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
+
+
+@router.post("/reset-password")
+async def reset_password(
+    payload: ResetPasswordSchema,
+    service: AuthService = Depends(get_auth_service),
+    current_user: dict = Depends(get_current_user_allow_reset),
+):
+    service.reset_password(
+        current_user["id"],
+        payload.current_password,
+        payload.new_password,
+    )
+    return {"message": "Password reset successfully."}
+
+
+@router.post("/users/{user_id}/send-reset")
+async def admin_send_reset(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    user = service.repository.get_user_by_id(service.db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if user.role.role_name == "admin":
+        raise HTTPException(
+            status_code=403, detail="Admin passwords cannot be reset by another admin."
+        )
+    service.forgot_password(user.email)
+    return {"message": f"Temporary password sent to {user.email}."}

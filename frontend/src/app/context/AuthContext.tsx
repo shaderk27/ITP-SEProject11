@@ -10,6 +10,7 @@ export interface User {
   role: UserRole;
   assignedLabs: string[];
   labGroupId: number | null;
+  mustResetPassword: boolean;
 }
 
 export type Permission =
@@ -35,17 +36,30 @@ export type Permission =
 
 const rolePermissions: Record<UserRole, Permission[]> = {
   admin: [
-    "dashboard:view", "upload:create", "review:view", "review:approve",
-    "records:view", "reports:view", "alerts:view", "audit:view",
-    "config:view", "config:edit", "budget:view", "budget:edit", "user:create",
+    "dashboard:view",
+    "upload:create",
+    "review:view",
+    "review:approve",
+    "records:view",
+    "reports:view",
+    "alerts:view",
+    "audit:view",
+    "config:view",
+    "config:edit",
+    "budget:view",
+    "budget:edit",
+    "user:create",
   ],
   teamlead: [
-    "dashboard:view", "upload:create", "review:view", "records:view",
-    "reports:view", "alerts:view", "budget:view",
+    "dashboard:view",
+    "upload:create",
+    "review:view",
+    "records:view",
+    "reports:view",
+    "alerts:view",
+    "budget:view",
   ],
-  labic: [
-    "dashboard:view", "records:view", "reports:view", "budget:view",
-  ],
+  labic: ["dashboard:view", "records:view", "reports:view", "budget:view"],
 };
 
 interface AuthContextType {
@@ -54,6 +68,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (updates: Partial<User>) => void;
+  clearResetFlag: () => void;
   hasAccess: (requiredRoles: UserRole[]) => boolean;
   hasPermission: (permission: Permission) => boolean;
   canAccessLabGroup: (labGroupId: number) => boolean;
@@ -68,7 +83,10 @@ function parseAssignedLabs(rawLabs: any): string[] {
   if (!rawLabs) return [];
   if (Array.isArray(rawLabs)) return rawLabs;
   if (typeof rawLabs === "string") {
-    return rawLabs.split(",").map((l) => l.trim()).filter(Boolean);
+    return rawLabs
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean);
   }
   return [];
 }
@@ -79,33 +97,57 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateUser = (updates: Partial<User>) => {
     setUser((prev) => (prev ? { ...prev, ...updates } : null));
   };
+  const clearResetFlag = () => {
+    setUser((prev) => (prev ? { ...prev, mustResetPassword: false } : null));
+  };
 
   // 1. Session Restore on Mount
   useEffect(() => {
     fetch(`${API}/api/auth/me`, { credentials: "include" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data) {
-          const rawAssignedLabs =
-            data.assignedLabs ||
-            data.assigned_labs ||
-            data.lab_group?.wbs_code ||
-            data.wbs_code;
-
-          // Normalize backend properties to frontend camelCase matches
-          setUser({
-            id: data.id,
-            fullName: data.full_name,
-            email: data.email,
-            role: data.role,
-            labGroupId: data.lab_group_id,
-            assignedLabs: parseAssignedLabs(rawAssignedLabs),
+      .then(async (res) => {
+        if (res.status === 403) {
+          // May be a temp-reset session
+          const fallback = await fetch(`${API}/api/auth/me/reset`, {
+            credentials: "include",
           });
-        } else {
-          setUser(null);
+          if (fallback.ok) {
+            const data = await fallback.json();
+            if (data.must_reset_password) {
+              setUser({
+                id: data.id,
+                fullName: "",
+                email: "",
+                role: "labic",
+                labGroupId: null,
+                assignedLabs: [],
+                mustResetPassword: true,
+              });
+            }
+          } else {
+            setUser(null);
+          }
+          return null;
         }
+        return res.ok ? res.json() : null;
       })
-      .catch(() => setUser(null))
+      .then((data) => {
+        if (!data) return;
+        const rawAssignedLabs =
+          data.assignedLabs ||
+          data.assigned_labs ||
+          data.lab_group?.wbs_code ||
+          data.wbs_code;
+
+        setUser({
+          id: data.id,
+          fullName: data.full_name,
+          email: data.email,
+          role: data.role,
+          labGroupId: data.lab_group_id,
+          assignedLabs: parseAssignedLabs(rawAssignedLabs),
+          mustResetPassword: data.must_reset_password ?? false,
+        });
+      })
       .finally(() => setIsLoading(false));
   }, []);
 
@@ -138,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
       assignedLabs: parseAssignedLabs(rawAssignedLabs),
+      mustResetPassword: rawUser.must_reset_password ?? false,
     });
   };
 
@@ -173,7 +216,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, login, logout, updateUser, hasAccess, hasPermission, canAccessLabGroup }}
+      value={{
+        user,
+        isLoading,
+        login,
+        logout,
+        updateUser,
+        clearResetFlag,
+        hasAccess,
+        hasPermission,
+        canAccessLabGroup,
+      }}
     >
       {children}
     </AuthContext.Provider>

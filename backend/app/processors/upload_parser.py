@@ -96,6 +96,7 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
 
     return errors
 
+
 def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
     column_map = {normalize_text(column): column for column in df.columns}
     items: list[PRLineItem] = []
@@ -111,10 +112,10 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
         item_details = normalize_text(row[column_map["Item Details"]])
         wbs = normalize_text(row[column_map["WBS"]])
         instruction = _optional_text(row, column_map, "Instruction to Vendor")
-        
+
         req_type = _optional_text(row, column_map, "Req Type")
-        pr_category = _optional_text(row, column_map, "PR Category") # RESTORED
-        
+        pr_category = _optional_text(row, column_map, "PR Category")  # RESTORED
+
         lab = _optional_text(row, column_map, "Lab")
         pr_sub_date = _format_date(row[column_map["PR Sub Date"]])
         grand_total = parse_decimal(row[column_map["Grand Total in SGD"]])
@@ -147,8 +148,8 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                 "unit_rate": _decimal_to_text(unit_rate),
                 "wbs": wbs,
                 "instruction_to_vendor": instruction,
-                "req_type": req_type, 
-                "pr_category": pr_category, # RESTORED
+                "req_type": req_type,
+                "pr_category": pr_category,  # RESTORED
                 "lab": lab,
                 "amount_gst": _decimal_to_text(amount_gst),
             }
@@ -171,7 +172,7 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                 wbs=wbs,
                 instruction_to_vendor=instruction,
                 req_type=req_type,
-                pr_category=pr_category, # RESTORED
+                pr_category=pr_category,  # RESTORED
                 lab=lab,
                 amount_gst=amount_gst,
                 line_identity_key=identity_key,

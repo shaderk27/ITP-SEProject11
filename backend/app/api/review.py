@@ -820,7 +820,9 @@ def commit_batch(
                 "requestor_name": existing_pr.requestor_name,
                 "wbs_code": existing_pr.wbs_code,
                 "lab_group_id": existing_pr.lab_group_id,
-                "grand_total_sgd": str(existing_pr.grand_total_sgd) if existing_pr.grand_total_sgd is not None else None,
+                "grand_total_sgd": str(existing_pr.grand_total_sgd)
+                if existing_pr.grand_total_sgd is not None
+                else None,
                 "line_count": existing_line_count,
                 "latest_batch_id": existing_pr.latest_batch_id,
                 "pr_status": existing_pr.pr_status,
@@ -905,7 +907,9 @@ def commit_batch(
             "requestor_name": pr.requestor_name,
             "wbs_code": pr.wbs_code,
             "lab_group_id": pr.lab_group_id,
-            "grand_total_sgd": str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else None,
+            "grand_total_sgd": str(pr.grand_total_sgd)
+            if pr.grand_total_sgd is not None
+            else None,
             "line_count": final_line_count,
             "latest_batch_id": pr.latest_batch_id,
             "pr_status": pr.pr_status,

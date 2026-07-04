@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ==========================================
 # REQUEST SCHEMAS
@@ -81,7 +81,14 @@ class RoleResponse(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = None
-    current_password: Optional[str] = None
+    # current_password: Optional[str] = None
+    # new_password: Optional[str] = Field(
+    #     None, min_length=8, description="Must be at least 8 characters"
+    # )
+
+
+class ForgotPasswordSchema(BaseModel):
+    email: str
     new_password: Optional[str] = Field(
         None, min_length=8, description="Must be at least 8 characters"
     )
@@ -101,5 +108,18 @@ class AssignLabSchema(BaseModel):
 class AssignLabGroupSchema(BaseModel):
     lab_group_id: int
 
-    class Config:
-        from_attributes = True
+
+class ResetPasswordSchema(BaseModel):
+    current_password: Optional[str] = None
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        return v
+
+
+class Config:
+    from_attributes = True

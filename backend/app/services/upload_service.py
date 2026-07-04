@@ -58,7 +58,13 @@ class UploadService:
         except Exception as error:
             return self._failed_result(
                 metadata,
-                [{"field": "File", "message": f"Format error: {error}", "severity": "error"}],
+                [
+                    {
+                        "field": "File",
+                        "message": f"Format error: {error}",
+                        "severity": "error",
+                    }
+                ],
             )
 
         validation_errors = validate_dataframe(dataframe)
@@ -76,14 +82,16 @@ class UploadService:
         lab_cache = {}
         group_cache = {}
         category_cache = {}
-        
+
         if self.db:
             try:
                 if LabGroup:
                     for g in self.db.query(LabGroup).all():
                         g_id = getattr(g, "lab_group_id", None)
                         if g_id is not None:
-                            group_cache[g_id] = getattr(g, "lab_group_name", "Pending Lab Group")
+                            group_cache[g_id] = getattr(
+                                g, "lab_group_name", "Pending Lab Group"
+                            )
 
                 if Lab:
                     for lab in self.db.query(Lab).all():
@@ -98,13 +106,15 @@ class UploadService:
                                 "lab_name": getattr(lab, "lab_name", "Unknown Lab"),
                                 "lab_group_name": group_name,
                             }
-                            
+
                 if SpendingCategory:
                     for c in self.db.query(SpendingCategory).all():
                         c_id = getattr(c, "category_id", None)
                         if c_id is not None:
-                            category_cache[c_id] = getattr(c, "category_name", "General")
-                            
+                            category_cache[c_id] = getattr(
+                                c, "category_name", "General"
+                            )
+
             except Exception:
                 pass
 
@@ -115,7 +125,7 @@ class UploadService:
             assigned_group = "Pending Lab Group"
             assigned_category = "General"
             classification_reason = "Manual review required."
-            
+
             classification: dict = {
                 "lab_id": None,
                 "lab_group_id": None,
@@ -140,31 +150,40 @@ class UploadService:
                         item_dict.get("requestor", ""),
                         wbs=item_dict.get("wbs", ""),
                         purpose=item_dict.get("purpose", ""),
-                        instruction_to_vendor=item_dict.get("instruction_to_vendor", ""),
-                        req_type=item_dict.get("req_type", ""), 
-                        pr_category=item_dict.get("pr_category", ""), 
+                        instruction_to_vendor=item_dict.get(
+                            "instruction_to_vendor", ""
+                        ),
+                        req_type=item_dict.get("req_type", ""),
+                        pr_category=item_dict.get("pr_category", ""),
                     )
-                    
+
                     lab_id = classification.get("lab_id")
                     group_id = classification.get("lab_group_id")
                     cat_id = classification.get("category_id")
-                    classification_reason = classification.get("reason", classification_reason)
+                    classification_reason = classification.get(
+                        "reason", classification_reason
+                    )
 
                     if lab_id and lab_id in lab_cache:
                         assigned_lab = lab_cache[lab_id]["lab_name"]
                         assigned_group = lab_cache[lab_id]["lab_group_name"]
                     elif group_id and group_id in group_cache:
                         assigned_group = group_cache[group_id]
-                        
+
                     if cat_id and cat_id in category_cache:
                         assigned_category = category_cache[cat_id]
-                        
+
                 except Exception:
-                    classification_reason = "Classification unavailable. Manual review required."
+                    classification_reason = (
+                        "Classification unavailable. Manual review required."
+                    )
 
             if dataclasses.is_dataclass(item):
                 item = dataclasses.replace(
-                    item, lab=assigned_lab, lab_group=assigned_group, category=assigned_category
+                    item,
+                    lab=assigned_lab,
+                    lab_group=assigned_group,
+                    category=assigned_category,
                 )
             else:
                 item.lab = assigned_lab
@@ -175,7 +194,11 @@ class UploadService:
             decision = self.duplicate_service.decide(item, existing)
 
             if decision.status != "duplicate":
-                if assigned_lab == "Unassigned Lab" or not assigned_lab or assigned_category == "General":
+                if (
+                    assigned_lab == "Unassigned Lab"
+                    or not assigned_lab
+                    or assigned_category == "General"
+                ):
                     needs_review_count += 1
                 classified_items.append(
                     {
@@ -195,12 +218,11 @@ class UploadService:
             final_line_dict["lab_group"] = assigned_group
             final_line_dict["labGroup"] = assigned_group
             final_line_dict["lab_group_name"] = assigned_group
-            
 
             final_line_dict["category"] = assigned_category
-            final_line_dict["pr_category"] = assigned_category 
+            final_line_dict["pr_category"] = assigned_category
             final_line_dict["category_name"] = assigned_category
-            
+
             final_line_dict["classification_reason"] = classification_reason
 
             records[decision.status].append(
@@ -227,7 +249,9 @@ class UploadService:
                 classified_items=classified_items,
                 current_user=current_user,
             )
-            needs_review_count = persistence_counts.get("queue_items_inserted", needs_review_count)
+            needs_review_count = persistence_counts.get(
+                "queue_items_inserted", needs_review_count
+            )
 
         return {
             "success": True,
@@ -245,13 +269,19 @@ class UploadService:
             "records": records,
         }
 
-    def _failed_result(self, metadata: UploadMetadata, errors: list[dict[str, str]]) -> dict:
+    def _failed_result(
+        self, metadata: UploadMetadata, errors: list[dict[str, str]]
+    ) -> dict:
         return {
             "success": False,
             "metadata": metadata.to_dict(),
             "counts": {
-                "total_lines": 0, "accepted": 0, "duplicate_skipped": 0,
-                "reupload_updated": 0, "needs_review": 0, "rejected": len(errors),
+                "total_lines": 0,
+                "accepted": 0,
+                "duplicate_skipped": 0,
+                "reupload_updated": 0,
+                "needs_review": 0,
+                "rejected": len(errors),
             },
             "validation_errors": errors,
             "records": {"inserted": [], "updated": [], "duplicate": []},
