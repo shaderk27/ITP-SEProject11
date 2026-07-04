@@ -14,12 +14,11 @@ import {
   UserPlus,
   X,
   User as UserIcon,
-  Lock,
+  Lock
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
 import type { UserRole } from "../../context/AuthContext";
-import { useSessionTimeout, WARNING_BEFORE_EXPIRY_MS } from "../../services/useSessionTimeout";
 
 interface NavItem {
   name: string;
@@ -61,12 +60,7 @@ const navigation: NavItem[] = [
   },
   { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead"] },
   { name: "Audit Log", path: "/audit", icon: FileSearch, roles: ["admin"] },
-  {
-    name: "Create User",
-    path: "/users/create",
-    icon: UserPlus,
-    roles: ["admin"],
-  },
+  { name: "Create User", path: "/users/create", icon: UserPlus, roles: ["admin"] },
   {
     name: "AI Chatbot",
     path: "/chatbot",
@@ -83,18 +77,12 @@ export function RootLayout() {
 
   // --- Profile Modal States ---
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    full_name: "",
-    current_password: "",
-    new_password: "",
-    confirm_password: "",
-  });
+  const [profileForm, setProfileForm] = useState({ full_name: "", current_password: "", new_password: "", confirm_password: "" });
   const [isSaving, setIsSaving] = useState(false);
   const [profileError, setProfileError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [profileSuccess, setProfileSuccess] = useState("");
-  const { showWarning, secondsRemaining, extendSession, handleExpire } =
-    useSessionTimeout();
+  
   const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
   useEffect(() => {
@@ -109,12 +97,7 @@ export function RootLayout() {
 
   // --- Handlers ---
   const openProfileModal = () => {
-    setProfileForm({
-      full_name: user.fullName || "",
-      current_password: "",
-      new_password: "",
-      confirm_password: "",
-    });
+    setProfileForm({ full_name: user.fullName || "", current_password: "", new_password: "", confirm_password: "" });
     setProfileError("");
     setPasswordError("");
     setProfileSuccess("");
@@ -159,9 +142,7 @@ export function RootLayout() {
     if (profileForm.new_password.length < 8)
       return setPasswordError("New password must be at least 8 characters.");
     if (profileForm.new_password === profileForm.current_password)
-      return setPasswordError(
-        "New password must differ from your current password.",
-      );
+      return setPasswordError("New password must differ from your current password.");
     if (profileForm.new_password !== profileForm.confirm_password)
       return setPasswordError("Passwords do not match.");
 
@@ -178,12 +159,7 @@ export function RootLayout() {
       });
 
       if (res.ok) {
-        setProfileForm((prev) => ({
-          ...prev,
-          current_password: "",
-          new_password: "",
-          confirm_password: "",
-        }));
+        setProfileForm((prev) => ({ ...prev, current_password: "", new_password: "", confirm_password: "" }));
         setProfileSuccess("Password reset successfully.");
       } else {
         const errorData = await res.json();
@@ -246,8 +222,9 @@ export function RootLayout() {
 
         {/* User section */}
         <div className="border-t border-border p-4">
+          
           {/* THE CLICKABLE USER CARD */}
-          <div
+          <div 
             onClick={openProfileModal}
             className="flex items-center gap-3 mb-2 p-2 -mx-2 rounded-lg hover:bg-[#f1f5f9] cursor-pointer transition-colors group"
             title="Edit Profile"
@@ -325,18 +302,17 @@ export function RootLayout() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm px-4">
           <div className="bg-white w-full max-w-md rounded-xl shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <h3 className="text-lg font-semibold text-gray-800">
-                Edit Profile
-              </h3>
-              <button
-                onClick={() => setIsProfileModalOpen(false)}
+              <h3 className="text-lg font-semibold text-gray-800">Edit Profile</h3>
+              <button 
+                onClick={() => setIsProfileModalOpen(false)} 
                 className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-md transition-colors"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-
+            
             <div className="p-6 space-y-6">
+
               {/* Success message */}
               {profileSuccess && (
                 <div className="p-3 text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg">
@@ -355,9 +331,7 @@ export function RootLayout() {
                 )}
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Full Name
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <UserIcon className="h-4 w-4 text-gray-400" />
@@ -367,12 +341,7 @@ export function RootLayout() {
                       required
                       className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all"
                       value={profileForm.full_name}
-                      onChange={(e) =>
-                        setProfileForm({
-                          ...profileForm,
-                          full_name: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setProfileForm({ ...profileForm, full_name: e.target.value })}
                     />
                   </div>
                 </div>
@@ -389,13 +358,9 @@ export function RootLayout() {
               </form>
 
               {/* ── Section 2: Password ── */}
-              <form
-                onSubmit={handlePasswordReset}
-                className="space-y-4 pt-4 border-t border-gray-100"
-              >
+              <form onSubmit={handlePasswordReset} className="space-y-4 pt-4 border-t border-gray-100">
                 <h4 className="text-sm font-semibold text-gray-800">
-                  Change Password{" "}
-                  <span className="text-gray-400 font-normal">(Optional)</span>
+                  Change Password <span className="text-gray-400 font-normal">(Optional)</span>
                 </h4>
 
                 {passwordError && (
@@ -405,9 +370,7 @@ export function RootLayout() {
                 )}
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Current Password
-                  </label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Current Password</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="h-4 w-4 text-gray-400" />
@@ -418,20 +381,13 @@ export function RootLayout() {
                       placeholder="Enter current password"
                       className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm"
                       value={profileForm.current_password}
-                      onChange={(e) =>
-                        setProfileForm({
-                          ...profileForm,
-                          current_password: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setProfileForm({ ...profileForm, current_password: e.target.value })}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    New Password
-                  </label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">New Password</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="h-4 w-4 text-gray-400" />
@@ -442,26 +398,16 @@ export function RootLayout() {
                       placeholder="Min. 8 characters"
                       className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm"
                       value={profileForm.new_password}
-                      onChange={(e) =>
-                        setProfileForm({
-                          ...profileForm,
-                          new_password: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setProfileForm({ ...profileForm, new_password: e.target.value })}
                     />
                   </div>
-                  {profileForm.new_password.length > 0 &&
-                    profileForm.new_password.length < 8 && (
-                      <p className="text-xs text-amber-600 mt-1.5 font-medium">
-                        Password must be at least 8 characters
-                      </p>
-                    )}
+                  {profileForm.new_password.length > 0 && profileForm.new_password.length < 8 && (
+                    <p className="text-xs text-amber-600 mt-1.5 font-medium">Password must be at least 8 characters</p>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Confirm New Password
-                  </label>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Confirm New Password</label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                       <Lock className="h-4 w-4 text-gray-400" />
@@ -472,21 +418,12 @@ export function RootLayout() {
                       placeholder="Re-enter new password"
                       className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all placeholder:text-sm"
                       value={profileForm.confirm_password}
-                      onChange={(e) =>
-                        setProfileForm({
-                          ...profileForm,
-                          confirm_password: e.target.value,
-                        })
-                      }
+                      onChange={(e) => setProfileForm({ ...profileForm, confirm_password: e.target.value })}
                     />
                   </div>
-                  {profileForm.confirm_password.length > 0 &&
-                    profileForm.new_password !==
-                      profileForm.confirm_password && (
-                      <p className="text-xs text-amber-600 mt-1.5 font-medium">
-                        Passwords do not match
-                      </p>
-                    )}
+                  {profileForm.confirm_password.length > 0 && profileForm.new_password !== profileForm.confirm_password && (
+                    <p className="text-xs text-amber-600 mt-1.5 font-medium">Passwords do not match</p>
+                  )}
                 </div>
 
                 <div className="flex justify-end gap-3 pt-2">
@@ -499,71 +436,13 @@ export function RootLayout() {
                   </button>
                   <button
                     type="submit"
-                    disabled={
-                      isSaving ||
-                      !profileForm.current_password ||
-                      profileForm.new_password.length < 8 ||
-                      profileForm.new_password !== profileForm.confirm_password
-                    }
+                    disabled={isSaving || !profileForm.current_password || profileForm.new_password.length < 8 || profileForm.new_password !== profileForm.confirm_password}
                     className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e40af] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {isSaving ? "Saving..." : "Reset Password"}
                   </button>
                 </div>
               </form>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* SESSION TIMEOUT WARNING MODAL */}
-      {showWarning && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm px-4">
-          <div className="bg-white w-full max-w-sm rounded-xl shadow-xl overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 bg-amber-50">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-full bg-amber-100">
-                  <Bell className="h-5 w-5 text-amber-600" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-800">
-                  Session Expiring
-                </h3>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <p className="text-sm text-gray-600">
-                Your session will expire in{" "}
-                <span className="font-semibold text-amber-600">
-                  {Math.floor(secondsRemaining / 60)}:
-                  {String(secondsRemaining % 60).padStart(2, "0")}
-                </span>
-                . Would you like to stay logged in?
-              </p>
-
-              {/* Countdown bar */}
-              <div className="w-full bg-gray-100 rounded-full h-1.5">
-                <div
-                  className="bg-amber-500 h-1.5 rounded-full transition-all duration-1000"
-                  style={{
-                    width: `${(secondsRemaining / (WARNING_BEFORE_EXPIRY_MS / 1000)) * 100}%`,
-                  }}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleExpire}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Sign Out
-                </button>
-                <button
-                  onClick={extendSession}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e40af] transition-colors"
-                >
-                  Stay Logged In
-                </button>
-              </div>
             </div>
           </div>
         </div>

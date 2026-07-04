@@ -1,22 +1,23 @@
 // src/app/hooks/useSessionTimeout.ts
 import { useEffect, useRef, useCallback, useState } from "react";
-import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router";
 
-export const WARNING_BEFORE_EXPIRY_MS = 2 * 60 * 1000; // show warning 5 mins before expiry
-const DEFAULT_SESSION_MINUTES = 15;
+export const WARNING_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // show warning 5 mins before expiry
 
+// Mirrors the backend's ACCESS_TOKEN_EXPIRE_MINUTES env var so the two can't
+// silently drift apart again. Set VITE_ACCESS_TOKEN_EXPIRE_MINUTES to the
+// same value as the backend's ACCESS_TOKEN_EXPIRE_MINUTES.
+const DEFAULT_SESSION_MINUTES = 15;
 const configuredMinutes = Number(
   import.meta.env.VITE_ACCESS_TOKEN_EXPIRE_MINUTES,
 );
-
 const SESSION_DURATION_MINUTES =
   Number.isFinite(configuredMinutes) && configuredMinutes > 0
     ? configuredMinutes
     : DEFAULT_SESSION_MINUTES;
 
 if (!Number.isFinite(configuredMinutes) || configuredMinutes <= 0) {
-
+  // eslint-disable-next-line no-console
   console.warn(
     `VITE_ACCESS_TOKEN_EXPIRE_MINUTES is missing or invalid — falling back to ${DEFAULT_SESSION_MINUTES} minutes. ` +
       "Set it to match the backend's ACCESS_TOKEN_EXPIRE_MINUTES or session timing will be wrong.",
@@ -25,8 +26,17 @@ if (!Number.isFinite(configuredMinutes) || configuredMinutes <= 0) {
 
 const SESSION_DURATION_MS = SESSION_DURATION_MINUTES * 60 * 1000;
 
-export function useSessionTimeout() {
-  const { logout } = useAuth();
+interface UseSessionTimeoutOptions {
+  /** Whether there's currently an authenticated session to time out. */
+  isAuthenticated: boolean;
+  /** Called to actually clear the session (e.g. hit the logout endpoint). */
+  logout: () => Promise<void>;
+}
+
+export function useSessionTimeout({
+  isAuthenticated,
+  logout,
+}: UseSessionTimeoutOptions) {
   const navigate = useNavigate();
   const [showWarning, setShowWarning] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(
@@ -36,6 +46,9 @@ export function useSessionTimeout() {
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expireTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tracks the last time we actually reset the session timers (used only
+  // for throttling how often startTimers() is called). Kept separate from
+  // any other "raw" activity timestamp so the two concerns can't interfere.
   const lastResetRef = useRef(Date.now());
 
   const clearAllTimers = useCallback(() => {
@@ -111,6 +124,14 @@ export function useSessionTimeout() {
   }, [startTimers, handleExpire]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      // No authenticated session (not logged in yet, or just logged out) —
+      // nothing to time out. Make sure any previous timers/state are cleared.
+      clearAllTimers();
+      setShowWarning(false);
+      return;
+    }
+
     startTimers();
 
     const events = [
@@ -128,7 +149,7 @@ export function useSessionTimeout() {
       clearAllTimers();
       events.forEach((e) => window.removeEventListener(e, handleActivity));
     };
-  }, [startTimers, handleActivity, clearAllTimers]);
+  }, [isAuthenticated, startTimers, handleActivity, clearAllTimers]);
 
   return { showWarning, secondsRemaining, extendSession, handleExpire };
 }

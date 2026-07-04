@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
+import { SessionTimeoutProvider } from "./SessionTimeoutProvider";
 
 export type UserRole = "admin" | "teamlead" | "labic";
 
@@ -185,7 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // 3. Functional Logout Handler
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await fetch(`${API}/api/auth/logout`, {
         method: "POST",
@@ -196,7 +197,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setUser(null);
     }
-  };
+  }, []);
 
   const hasAccess = (requiredRoles: UserRole[]) => {
     if (!user) return false;
@@ -228,7 +229,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         canAccessLabGroup,
       }}
     >
-      {children}
+      <SessionTimeoutProvider isAuthenticated={!!user} logout={logout}>
+        {children}
+      </SessionTimeoutProvider>
     </AuthContext.Provider>
   );
 }
