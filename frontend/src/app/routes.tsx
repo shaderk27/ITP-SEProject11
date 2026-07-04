@@ -33,11 +33,11 @@ export const router = createBrowserRouter([
     Component: ResetPasswordPage,
   },
   {
-    path: "/403",
+    path: "/403",//sim
     element: <AccessDenied />,
   },
   {
-    path: "/404",
+    path: "/404",//sim 
     element: <NotFound />,
   },
   {
@@ -151,7 +151,7 @@ export const router = createBrowserRouter([
     ],
   },
   {
-  path: "*",
+  path: "*",//for 404
   element: <NotFound />,
 },
 
