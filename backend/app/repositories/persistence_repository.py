@@ -112,7 +112,7 @@ def persist_upload_to_db(
             classifier_group_id = classification.get("lab_group_id")
             classifier_lab_id = classification.get("lab_id")
             classifier_category_id = classification.get("category_id")
-            
+
             classification_reason = classification.get("reason") or ""
             existing_final_line = _find_existing_final_line(
                 db, pr_number, item.line_identity_key
@@ -120,13 +120,15 @@ def persist_upload_to_db(
 
             # Resolve final IDs with General fallback chain
             final_group_id = classifier_group_id or general_group.lab_group_id
-            final_lab_id = classifier_lab_id or general_labs_by_group.get(final_group_id)
+            final_lab_id = classifier_lab_id or general_labs_by_group.get(
+                final_group_id
+            )
             final_category_id = classifier_category_id or general_category.category_id
 
             used_fallback_group = classifier_group_id is None
             used_fallback_lab = classifier_lab_id is None
             used_fallback_category = classifier_category_id is None
-            
+
             if existing_final_line:
                 final_lab_id = existing_final_line.lab_id
                 existing_lab = _get_lab_by_id(db, final_lab_id)
@@ -135,8 +137,10 @@ def persist_upload_to_db(
                     if existing_lab is not None
                     else classifier_group_id or general_group.lab_group_id
                 )
-                final_category_id = existing_final_line.category_id or general_category.category_id
-                
+                final_category_id = (
+                    existing_final_line.category_id or general_category.category_id
+                )
+
                 used_fallback_group = False
                 used_fallback_lab = False
                 used_fallback_category = False
@@ -144,7 +148,7 @@ def persist_upload_to_db(
                     "Existing committed line found. Preserving reviewed "
                     "lab/category; only source status may update on commit."
                 )
-                
+
             any_fallback = (
                 used_fallback_group or used_fallback_lab or used_fallback_category
             )
@@ -158,7 +162,7 @@ def persist_upload_to_db(
                 item_details=item.item_details or None,
                 qty=item.quantity,
                 unit_rate=item.unit_rate,
-                raw_pr_category=item.pr_category or None, # RESTORED
+                raw_pr_category=item.pr_category or None,  # RESTORED
                 raw_lab_text=item.lab or None,
                 amount_gst=item.amount_gst,
                 suggested_lab_group_id=final_group_id,
@@ -219,6 +223,7 @@ def persist_upload_to_db(
         "queue_items_inserted": queue_items_inserted,
     }
 
+
 def _parse_pr_date(raw: str | None):
     if not raw:
         return None
@@ -228,6 +233,7 @@ def _parse_pr_date(raw: str | None):
         except (ValueError, TypeError):
             continue
     return None
+
 
 def _find_existing_final_line(
     db: Session, source_pr_number: str, line_identity_key: str
@@ -259,6 +265,7 @@ def _find_existing_final_line(
         ):
             return final_line
     return None
+
 
 def _get_lab_by_id(db: Session, lab_id: int | None) -> Lab | None:
     if lab_id is None:
