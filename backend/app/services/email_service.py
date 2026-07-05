@@ -15,9 +15,10 @@ SMTP_PASS = os.environ.get("SMTP_PASS")
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 
+
 def send_threshold_alert(to_emails: list[str], subject: str, html_content: str):
     """Sends an HTML email via Gmail SMTP using credentials from .env."""
-    
+
     # Fail silently if there is no one to email or missing credentials
     if not to_emails or not SMTP_USER or not SMTP_PASS:
         return
@@ -29,10 +30,10 @@ def send_threshold_alert(to_emails: list[str], subject: str, html_content: str):
 
         for email_addr in to_emails:
             msg = MIMEMultipart()
-            msg['From'] = f"SIT Lab Budget System <{SMTP_USER}>"
-            msg['To'] = email_addr
-            msg['Subject'] = subject
-            msg.attach(MIMEText(html_content, 'html'))
+            msg["From"] = f"SIT Lab Budget System <{SMTP_USER}>"
+            msg["To"] = email_addr
+            msg["Subject"] = subject
+            msg.attach(MIMEText(html_content, "html"))
 
             server.sendmail(SMTP_USER, email_addr, msg.as_string())
 

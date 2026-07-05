@@ -10,7 +10,7 @@ class FakeQuery:
         self.rows = rows
 
     # Mock the SQLAlchemy .filter() method to just pass the rows through
-    def filter(self, *args, **kwargs) -> 'FakeQuery':
+    def filter(self, *args, **kwargs) -> "FakeQuery":
         return self
 
     def all(self) -> list[SimpleNamespace]:
@@ -33,13 +33,25 @@ class FakeDb:
         ]
         self.labs = [
             SimpleNamespace(
-                lab_id=10, lab_group_id=1, lab_code="CHEM-A", lab_name="Analytical Lab", venue="CHEM1, SR4A"
+                lab_id=10,
+                lab_group_id=1,
+                lab_code="CHEM-A",
+                lab_name="Analytical Lab",
+                venue="CHEM1, SR4A",
             ),
             SimpleNamespace(
-                lab_id=20, lab_group_id=2, lab_code="BIO-M", lab_name="Microscope Lab", venue="BIO-L, W4L2"
+                lab_id=20,
+                lab_group_id=2,
+                lab_code="BIO-M",
+                lab_name="Microscope Lab",
+                venue="BIO-L, W4L2",
             ),
             SimpleNamespace(
-                lab_id=30, lab_group_id=1, lab_code="SW-L", lab_name="Software Lab", venue=""
+                lab_id=30,
+                lab_group_id=1,
+                lab_code="SW-L",
+                lab_name="Software Lab",
+                venue="",
             ),
         ]
         self.requester_mappings = [
@@ -47,13 +59,19 @@ class FakeDb:
         ]
         self.categories = [
             SimpleNamespace(
-                category_id=1, category_name="Equipment", description="hardware, computers, workstation"
+                category_id=1,
+                category_name="Equipment",
+                description="hardware, computers, workstation",
             ),
             SimpleNamespace(
-                category_id=2, category_name="Maintenance", description="repair, maintenance, servicing"
+                category_id=2,
+                category_name="Maintenance",
+                description="repair, maintenance, servicing",
             ),
             SimpleNamespace(
-                category_id=3, category_name="Consumables", description="chemicals, perishable"
+                category_id=3,
+                category_name="Consumables",
+                description="chemicals, perishable",
             ),
             SimpleNamespace(
                 category_id=4, category_name="General", description="fallback"
@@ -61,7 +79,13 @@ class FakeDb:
         ]
         # Mocked User table to support Lab IC matching
         self.users = [
-            SimpleNamespace(user_id=1, full_name="Randy Kwok", email="randy@sit.edu", lab_id=30, lab_group_id=1)
+            SimpleNamespace(
+                user_id=1,
+                full_name="Randy Kwok",
+                email="randy@sit.edu",
+                lab_id=30,
+                lab_group_id=1,
+            )
         ]
 
     def query(self, model):
@@ -154,7 +178,7 @@ def test_category_is_selected_by_exact_req_type() -> None:
 
 
 def test_category_conflict_sends_to_review() -> None:
-    # "hardware" matches Equipment, and "maintenance" matches Maintenance. 
+    # "hardware" matches Equipment, and "maintenance" matches Maintenance.
     # Under the strict rules, this is a conflict. It should return None!
     result = classify_line_item(
         FakeDb(),
