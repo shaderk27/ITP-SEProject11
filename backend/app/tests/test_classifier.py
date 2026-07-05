@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from types import SimpleNamespace 
 
 from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
 from app.models.auth import User
