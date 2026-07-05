@@ -35,7 +35,7 @@ export function useSessionTimeout() {
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const expireTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastResetRef = useRef(Date.now());
+  const lastResetRef = useRef(0);
 
   const clearAllTimers = useCallback(() => {
     if (warningTimerRef.current) clearTimeout(warningTimerRef.current);
