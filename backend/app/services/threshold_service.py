@@ -23,7 +23,7 @@ def check_and_notify_lab_thresholds(lab_id: int):
         ).first()
 
         if not current_period:
-            return # Pause alerts if outside of an active FY timeline
+            return
 
         # 2. FY-Aware Budget Math
         total_budget = db.query(func.sum(Budget.budget_amount)).filter(
@@ -53,7 +53,6 @@ def check_and_notify_lab_thresholds(lab_id: int):
         utilization_pct = (float(total_spent) / float(total_budget)) * 100
 
         # --- SMART FY RESET ---
-        # If the active FY changes, wipe the old flags clean!
         if lab.alert_period_id != current_period.period_id:
             lab.notified_50 = False
             lab.notified_80 = False
@@ -88,15 +87,22 @@ def check_and_notify_lab_thresholds(lab_id: int):
         if not threshold_hit:
             return 
 
-        # Gather recipients and send email...
+        # Gather recipients and send email
         recipients = []
         lab_ic = db.query(User).filter(User.lab_id == lab.lab_id, User.role_id == 3).first()
-        if lab_ic and lab_ic.email: recipients.append(lab_ic.email)
+        
+        # --- RUFF FIX: Break statements onto new lines ---
+        if lab_ic and lab_ic.email:
+            recipients.append(lab_ic.email)
 
         team_lead = db.query(User).filter(User.lab_group_id == lab.lab_group_id, User.role_id == 2).first()
-        if team_lead and team_lead.email: recipients.append(team_lead.email)
+        
+        if team_lead and team_lead.email:
+            recipients.append(team_lead.email)
 
-        if not recipients: return
+        if not recipients:
+            return
+        # -------------------------------------------------
 
         spent_str = f"${float(total_spent):,.2f}"
         budget_str = f"${float(total_budget):,.2f}"
