@@ -8,7 +8,7 @@ from app.models.auth import User
 @patch("app.services.threshold_service.send_threshold_alert")
 def test_check_and_notify_lab_thresholds_80_percent(mock_send_email):
     mock_db = MagicMock()
-    
+
     fake_lab = Lab(
         lab_id=1,
         lab_group_id=10,

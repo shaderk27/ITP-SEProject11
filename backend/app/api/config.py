@@ -156,12 +156,14 @@ def get_lab_groups(
         if pid is not None:
             budget_q = budget_q.filter(Budget.period_id == pid)
         total_budget = budget_q.scalar() or 0
-        
-        total_spent = db.query(func.sum(PurchaseRequestLine.amount_gst)).join(
-            Lab, Lab.lab_id == PurchaseRequestLine.lab_id
-        ).filter(
-            Lab.lab_group_id == g.lab_group_id
-        ).scalar() or 0
+
+        total_spent = (
+            db.query(func.sum(PurchaseRequestLine.amount_gst))
+            .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+            .filter(Lab.lab_group_id == g.lab_group_id)
+            .scalar()
+            or 0
+        )
 
         result.append(
             {
@@ -377,19 +379,29 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
         )
         total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
-        
-        total_spent = db.query(func.sum(PurchaseRequestLine.amount_gst)).filter(
-            PurchaseRequestLine.lab_id == lab.lab_id
-        ).scalar() or 0
 
-        spent_data = db.query(
-            PurchaseRequestLine.category_id,
-            func.sum(PurchaseRequestLine.amount_gst)
-        ).filter(
-            PurchaseRequestLine.lab_id == lab.lab_id
-        ).group_by(PurchaseRequestLine.category_id).all()
-        
-        spent_by_cat = {str(cat_id): float(amount) for cat_id, amount in spent_data if cat_id is not None}
+        total_spent = (
+            db.query(func.sum(PurchaseRequestLine.amount_gst))
+            .filter(PurchaseRequestLine.lab_id == lab.lab_id)
+            .scalar()
+            or 0
+        )
+
+        spent_data = (
+            db.query(
+                PurchaseRequestLine.category_id,
+                func.sum(PurchaseRequestLine.amount_gst),
+            )
+            .filter(PurchaseRequestLine.lab_id == lab.lab_id)
+            .group_by(PurchaseRequestLine.category_id)
+            .all()
+        )
+
+        spent_by_cat = {
+            str(cat_id): float(amount)
+            for cat_id, amount in spent_data
+            if cat_id is not None
+        }
 
         result.append(
             {
@@ -400,7 +412,7 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
                 "group_id": lab.lab_group_id if lab.lab_group_id else 0,
                 "venue": lab.venue or "",
                 "budget": total_budget,
-                "spent": float(total_spent), 
+                "spent": float(total_spent),
                 "ic_name": "",
                 "ic_email": "",
                 "budgets": budget_map,
@@ -500,9 +512,12 @@ def update_lab(
     background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
 
     # Get real spent value so UI updates immediately
-    total_spent = db.query(func.sum(PurchaseRequestLine.amount_gst)).filter(
-        PurchaseRequestLine.lab_id == db_lab.lab_id
-    ).scalar() or 0
+    total_spent = (
+        db.query(func.sum(PurchaseRequestLine.amount_gst))
+        .filter(PurchaseRequestLine.lab_id == db_lab.lab_id)
+        .scalar()
+        or 0
+    )
 
     return {
         "id": db_lab.lab_id,

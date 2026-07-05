@@ -1,4 +1,4 @@
-from types import SimpleNamespace 
+from types import SimpleNamespace
 
 from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
 from app.models.auth import User
@@ -10,7 +10,7 @@ class FakeQuery:
         self.rows = rows
 
     # Mock the SQLAlchemy .filter() method to just pass the rows through
-    def filter(self, *args, **kwargs) -> 'FakeQuery':
+    def filter(self, *args, **kwargs) -> "FakeQuery":
         return self
 
     def all(self) -> list[SimpleNamespace]:
@@ -79,7 +79,13 @@ class FakeDb:
         ]
         # Mocked User table to support Lab IC matching
         self.users = [
-            SimpleNamespace(user_id=1, full_name="Randy Kwok", email="randy@sit.edu", lab_id=30, lab_group_id=1)
+            SimpleNamespace(
+                user_id=1,
+                full_name="Randy Kwok",
+                email="randy@sit.edu",
+                lab_id=30,
+                lab_group_id=1,
+            )
         ]
 
     def query(self, model):
@@ -158,7 +164,6 @@ def test_venue_tag_in_purpose_selects_lab() -> None:
     assert "Purpose field matched lab" in result["reason"]
 
 
-
 def test_category_is_selected_by_exact_req_type() -> None:
     result = classify_line_item(
         FakeDb(),
@@ -181,7 +186,6 @@ def test_category_conflict_sends_to_review() -> None:
 
     assert result["category_id"] is None
     assert "Conflict detected" in result["reason"]
-
 
 
 def test_unknown_row_is_left_for_review() -> None:

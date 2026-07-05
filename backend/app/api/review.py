@@ -759,9 +759,9 @@ def commit_batch(
     prs_updated_count = 0
     lines_created = 0
     lines_updated = 0
-    
+
     # Keep track of unique labs affected by this commit
-    affected_lab_ids = set() 
+    affected_lab_ids = set()
 
     for header in headers:
         lines = (
@@ -860,7 +860,7 @@ def commit_batch(
             # Record every lab that is having money spent on it
             if line.suggested_lab_id:
                 affected_lab_ids.add(line.suggested_lab_id)
-                
+
             line_identity_key = _raw_line_value(line, "line_identity_key")
             existing_line = existing_lines_by_identity.get(line_identity_key)
             if existing_line:
@@ -964,8 +964,8 @@ def commit_batch(
     )
 
     db.commit()
-    
-    # TRIGGER THRESHOLD EMAILS 
+
+    # TRIGGER THRESHOLD EMAILS
     # Will instantly run the math and send emails for the specific labs involved in this commit
     for lab_id in affected_lab_ids:
         background_tasks.add_task(check_and_notify_lab_thresholds, db, lab_id)
