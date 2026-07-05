@@ -24,8 +24,8 @@ from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
 
-# Import the new threshold service
 from app.services.threshold_service import check_and_notify_lab_thresholds
+from app.models.staging import PurchaseRequestLine
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
@@ -157,6 +157,13 @@ def get_lab_groups(
         if pid is not None:
             budget_q = budget_q.filter(Budget.period_id == pid)
         total_budget = budget_q.scalar() or 0
+        
+        total_spent = db.query(func.sum(PurchaseRequestLine.amount_gst)).join(
+            Lab, Lab.lab_id == PurchaseRequestLine.lab_id
+        ).filter(
+            Lab.lab_group_id == g.lab_group_id
+        ).scalar() or 0
+
         result.append(
             {
                 "id": g.lab_group_id,
@@ -164,6 +171,7 @@ def get_lab_groups(
                 "wbs_code": g.wbs_code or "",
                 "description": g.description or "",
                 "budget": total_budget,
+                "spent": float(total_spent),
                 "threshold": 80,
             }
         )
@@ -202,6 +210,7 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
         "wbs_code": new_group.wbs_code,
         "description": new_group.description,
         "budget": 0,
+        "spent": 0.0,
         "threshold": 80,
     }
 
@@ -239,6 +248,7 @@ def update_lab_group(
         "wbs_code": db_group.wbs_code,
         "description": db_group.description,
         "budget": 0,
+        "spent": 0.0,
         "threshold": 80,
     }
 
@@ -368,6 +378,11 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
         )
         total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
+        
+        total_spent = db.query(func.sum(PurchaseRequestLine.amount_gst)).filter(
+            PurchaseRequestLine.lab_id == lab.lab_id
+        ).scalar() or 0
+
         result.append(
             {
                 "id": lab.lab_id,
@@ -377,6 +392,7 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
                 "group_id": lab.lab_group_id if lab.lab_group_id else 0,
                 "venue": lab.venue or "",
                 "budget": total_budget,
+                "spent": float(total_spent), 
                 "ic_name": "",
                 "ic_email": "",
                 "budgets": budget_map,
@@ -425,6 +441,7 @@ def create_lab(
         "group_id": new_lab.lab_group_id,
         "venue": new_lab.venue,
         "budget": total_assigned,
+        "spent": 0.0,
         "ic_name": lab_in.ic_name,
         "ic_email": lab_in.ic_email,
         "budgets": lab_in.budgets,
@@ -473,6 +490,11 @@ def update_lab(
     # --- TRIGGER NOTIFICATION CHECK ---
     background_tasks.add_task(check_and_notify_lab_thresholds, db, db_lab.lab_id)
 
+    # Get real spent value so UI updates immediately
+    total_spent = db.query(func.sum(PurchaseRequestLine.amount_gst)).filter(
+        PurchaseRequestLine.lab_id == db_lab.lab_id
+    ).scalar() or 0
+
     return {
         "id": db_lab.lab_id,
         "code": db_lab.lab_code or "",
@@ -481,6 +503,7 @@ def update_lab(
         "group_id": db_lab.lab_group_id,
         "venue": db_lab.venue,
         "budget": total_assigned,
+        "spent": float(total_spent),
         "ic_name": lab_in.ic_name,
         "ic_email": lab_in.ic_email,
         "budgets": lab_in.budgets,

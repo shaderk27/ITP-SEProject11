@@ -1,6 +1,7 @@
 from sqlalchemy import (
     Column,
     BigInteger,
+    Integer,
     String,
     Text,
     Boolean,
@@ -88,8 +89,10 @@ class BudgetPeriod(Base):
 
     period_id = Column(BigInteger, primary_key=True)
     period_name = Column(String(50), nullable=False, unique=True)
+    year_no = Column(Integer, nullable=False)
     start_date = Column(Date)
     end_date = Column(Date)
+    is_closed = Column(Boolean, nullable=False, default=False)
 
 
 class Budget(Base):
@@ -115,6 +118,7 @@ class LabGroupOut(BaseModel):
     wbs_code: str | None = None
     description: str | None = None
     budget: float
+    spent: float = 0.0
     threshold: int
 
 
@@ -126,6 +130,7 @@ class LabOut(BaseModel):
     group_id: int
     venue: str | None = None
     budget: float
+    spent: float = 0.0
     ic_name: str | None = None
     ic_email: str | None = None
     budgets: dict[str, float] = {}

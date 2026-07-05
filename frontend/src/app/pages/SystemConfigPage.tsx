@@ -90,13 +90,21 @@ export function SystemConfigPage() {
   const [assignTargetGroup, setAssignTargetGroup] = useState<any | null>(null);
   const [selectedTeamLeadUserId, setSelectedTeamLeadUserId] = useState<number | "">("");
 
+  // Fiscal year (budget period) selection — scopes all budget reads/writes here.
+  const [periods, setPeriods] = useState<any[]>([]);
+  const [selectedPeriodId, setSelectedPeriodId] = useState<number | null>(null);
+  const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
+  const [newPeriodYear, setNewPeriodYear] = useState("");
+
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-  const fetchConfigData = async () => {
+  const fetchConfigData = async (periodId?: number | null) => {
+    const pid = periodId ?? selectedPeriodId;
+    const q = pid ? `?period_id=${pid}` : "";
     try {
       const [groupsRes, labsRes, catsRes, orphanedRes, labicRes, teamleadRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/config/labgroups`),
-        fetch(`${API_BASE_URL}/api/config/labs`),
+        fetch(`${API_BASE_URL}/api/config/labgroups${q}`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/api/config/labs${q}`),
         fetch(`${API_BASE_URL}/api/config/categories`),
         fetch(`${API_BASE_URL}/api/config/labs/orphaned`),
         fetch(`${API_BASE_URL}/api/auth/users?role=labic`, {
@@ -119,10 +127,56 @@ export function SystemConfigPage() {
     }
   };
 
+  // Load fiscal years once; default to the newest (current FY).
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/config/periods`, {
+          credentials: "include",
+        });
+        const data = await res.json();
+        setPeriods(data);
+        if (data.length) setSelectedPeriodId(data[0].id);
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  }, []);
+
+  // Re-fetch config whenever the selected fiscal year changes.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchConfigData();
-  }, []);
+    if (selectedPeriodId != null) fetchConfigData(selectedPeriodId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPeriodId]);
+
+  const handleAddPeriod = async () => {
+    const year = parseInt(newPeriodYear, 10);
+    if (!year) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/config/periods`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ year }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        const listRes = await fetch(`${API_BASE_URL}/api/config/periods`, {
+          credentials: "include",
+        });
+        setPeriods(await listRes.json());
+        setSelectedPeriodId(created.id);
+        setIsPeriodModalOpen(false);
+        setNewPeriodYear("");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || "Failed to create fiscal year.");
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const toggleGroupExpand = (groupId: number) => {
     if (expandedGroups.includes(groupId)) {
@@ -292,9 +346,30 @@ export function SystemConfigPage() {
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa] relative">
       <div className="p-6">
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold text-foreground">System Configuration</h2>
-          <p className="text-sm text-muted-foreground mt-1">Manage lab groups, labs, categories, and budgets</p>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-semibold text-foreground">System Configuration</h2>
+            <p className="text-sm text-muted-foreground mt-1">Manage lab groups, labs, categories, and budgets</p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="text-sm font-medium text-muted-foreground">Fiscal Year:</label>
+            <select
+              className="border border-border rounded-md px-3 py-2 text-sm bg-white"
+              value={selectedPeriodId ?? ""}
+              onChange={(e) => {
+                if (e.target.value === "__add__") {
+                  setIsPeriodModalOpen(true);
+                  return;
+                }
+                setSelectedPeriodId(Number(e.target.value));
+              }}
+            >
+              {periods.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+              <option value="__add__">+ Add Fiscal Year</option>
+            </select>
+          </div>
         </div>
 
         <Tabs defaultValue="labgroups" className="w-full">
@@ -331,7 +406,7 @@ export function SystemConfigPage() {
                     {labGroups.map((group) => {
                       const isExpanded = expandedGroups.includes(group.id);
                       const groupLabs = labs.filter(l => l.group_id === group.id);
-                      const spent = 0; 
+                      const spent = group.spent || 0; 
                       const availableBalance = group.budget - spent;
                       const teamlead = teamleadUsers.find(u => u.lab_group_id === group.id);
 
@@ -435,10 +510,10 @@ export function SystemConfigPage() {
                                                 )}
                                               </td>
                                               <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                              <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                              <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - (lab.spent || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                               <td className="p-3 text-center flex justify-center gap-2">
-                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-400 hover:text-gray-700" /></Button>
-                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleUnassignLab(lab.id, lab.name)}><X className="h-3 w-3 text-red-400 hover:text-red-700" /></Button>
+                                                <Button size="sm" variant="outline" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3" /></Button>
+                                                <Button size="sm" variant="outline" onClick={() => handleUnassignLab(lab.id, lab.name)} className="text-[#dc2626]"><X className="h-3 w-3" /></Button>
                                               </td>
                                             </tr>
                                           );
@@ -483,7 +558,7 @@ export function SystemConfigPage() {
                   </thead>
                   <tbody>
                     {labs.map((lab) => {
-                      const labAvailable = lab.budget - 0; // Mocked until expenses are tracked
+                      const labAvailable = lab.budget - (lab.spent || 0);
                       const labic = labicUsers.find(u => u.lab_id === lab.id);
                       return (
                         <tr key={lab.id} className="border-b border-border hover:bg-[#f8f9fa]">
@@ -649,6 +724,55 @@ export function SystemConfigPage() {
         </div>
       )}
 
+      {/* ADD FISCAL YEAR MODAL */}
+      {isPeriodModalOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <Card className="w-full max-w-sm bg-white shadow-xl">
+            <div className="flex justify-between items-center p-6 border-b border-border bg-[#f8f9fa]">
+              <h3 className="text-xl font-bold">Add Fiscal Year</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setIsPeriodModalOpen(false);
+                  setNewPeriodYear("");
+                }}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+            <div className="p-6 space-y-3">
+              <label className="text-sm font-medium text-gray-700">Year</label>
+              <input
+                type="number"
+                autoFocus
+                className="w-full mt-1 p-2 border rounded-md"
+                placeholder="e.g. 2025"
+                value={newPeriodYear}
+                onChange={(e) => setNewPeriodYear(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Creates FY{newPeriodYear || "…"} (Apr 1 → Mar 31 the next year).
+              </p>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsPeriodModalOpen(false);
+                    setNewPeriodYear("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button className="bg-[#1e3a8a] text-white" onClick={handleAddPeriod}>
+                  Create
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
       {/* LAB MODAL (SMART AUTOFILL & MULTI-LINE TEXTAREA) */}
       {isLabModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -659,9 +783,10 @@ export function SystemConfigPage() {
             </div>
             <form onSubmit={(e) => { 
               e.preventDefault(); 
-              const endpoint = editingLabId ? `/api/config/labs/${editingLabId}` : "/api/config/labs";
+              const base = editingLabId ? `/api/config/labs/${editingLabId}` : "/api/config/labs";
+              const endpoint = `${base}?period_id=${selectedPeriodId}`;
               const method = editingLabId ? "PUT" : "POST";
-              handleSave(endpoint, method, { ...newLabForm, lab_group_id: Number(newLabForm.lab_group_id) }, resetLabModal); 
+              handleSave(endpoint, method, { ...newLabForm, lab_group_id: Number(newLabForm.lab_group_id) }, resetLabModal);
             }} className="space-y-4 p-6">
               <div className="grid grid-cols-2 gap-4">
                 
