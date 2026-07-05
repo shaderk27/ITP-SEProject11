@@ -775,21 +775,22 @@ export function SystemConfigPage() {
                   onChange={(e) => setSelectedLabICUserId(e.target.value === "" ? "" : Number(e.target.value))}
                 >
                   <option value="" disabled>Select a user...</option>
-                  {labicUsers
-                    .filter(u => u.lab_id === null || u.lab_id === assignTargetLab.id)
-                    .map(u => (
-                      <option key={u.user_id} value={u.user_id}>
-                        {u.full_name} — {u.email}
-                        {u.lab_id === assignTargetLab.id ? " (current)" : ""}
-                      </option>
-                    ))
-                  }
-                  {labicUsers.filter(u => u.lab_id === null || u.lab_id === assignTargetLab.id).length === 0 && (
-                    <option disabled>No unassigned Lab IC users available</option>
+                  {labicUsers.map(u => (
+                    <option key={u.user_id} value={u.user_id}>
+                      {u.full_name} — {u.email}
+                      {u.lab_id === assignTargetLab.id
+                        ? " (current)"
+                        : u.lab_id
+                          ? ` (currently: ${u.lab_name ?? "another lab"})`
+                          : ""}
+                    </option>
+                  ))}
+                  {labicUsers.length === 0 && (
+                    <option disabled>No Lab IC users available</option>
                   )}
                 </select>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Only unassigned Lab IC users are shown. To reassign from another lab, unassign them first via User Management.
+                  Selecting a user already assigned elsewhere will move them to this lab.
                 </p>
                 {selectedLabICUserId !== "" && (
                   <div className="mt-3 rounded-md border border-[#1e3a8a]/20 bg-[#eff6ff] p-3 text-sm">
@@ -848,21 +849,22 @@ export function SystemConfigPage() {
                   onChange={(e) => setSelectedTeamLeadUserId(e.target.value === "" ? "" : Number(e.target.value))}
                 >
                   <option value="" disabled>Select a user...</option>
-                  {teamleadUsers
-                    .filter(u => u.lab_group_id === null || u.lab_group_id === assignTargetGroup.id)
-                    .map(u => (
-                      <option key={u.user_id} value={u.user_id}>
-                        {u.full_name} — {u.email}
-                        {u.lab_group_id === assignTargetGroup.id ? " (current)" : ""}
-                      </option>
-                    ))
-                  }
-                  {teamleadUsers.filter(u => u.lab_group_id === null || u.lab_group_id === assignTargetGroup.id).length === 0 && (
-                    <option disabled>No unassigned Team Lead users available</option>
+                  {teamleadUsers.map(u => (
+                    <option key={u.user_id} value={u.user_id}>
+                      {u.full_name} — {u.email}
+                      {u.lab_group_id === assignTargetGroup.id
+                        ? " (current)"
+                        : u.lab_group_id
+                          ? ` (currently: ${u.lab_group_name ?? "another group"})`
+                          : ""}
+                    </option>
+                  ))}
+                  {teamleadUsers.length === 0 && (
+                    <option disabled>No Team Lead users available</option>
                   )}
                 </select>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Only unassigned Team Leads are shown. To reassign from another group, unassign them first via User Management.
+                  Selecting a user already assigned elsewhere will move them to this group.
                 </p>
                 {selectedTeamLeadUserId !== "" && (
                   <div className="mt-3 rounded-md border border-[#1e3a8a]/20 bg-[#eff6ff] p-3 text-sm">
