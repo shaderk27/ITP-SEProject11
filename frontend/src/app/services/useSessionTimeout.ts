@@ -4,7 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router";
 
 export const WARNING_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // show warning 5 mins before expiry
-const DEFAULT_SESSION_MINUTES = 15;
+const DEFAULT_SESSION_MINUTES = 6;
 const configuredMinutes = Number(
   import.meta.env.VITE_ACCESS_TOKEN_EXPIRE_MINUTES,
 );
@@ -50,9 +50,12 @@ export function useSessionTimeout() {
     navigate("/login", { state: { reason: "expired" }, replace: true });
   }, [logout, navigate, clearAllTimers]);
 
-  const startTimers = useCallback(() => {
+  // Arms the warning/expiry timers without touching showWarning state.
+  // Safe to call synchronously from the mount effect since it never calls
+  // setState directly — only from within the setTimeout callback below,
+  // which runs later as its own task, not during the effect's execution.
+  const armTimers = useCallback(() => {
     clearAllTimers();
-    setShowWarning(false);
     lastResetRef.current = Date.now();
 
     warningTimerRef.current = setTimeout(() => {
@@ -78,13 +81,30 @@ export function useSessionTimeout() {
     }, SESSION_DURATION_MS - WARNING_BEFORE_EXPIRY_MS);
   }, [clearAllTimers, handleExpire]);
 
+  // Used from event handlers (activity, "stay logged in") where an active
+  // warning needs to be dismissed before re-arming the timers.
+  const startTimers = useCallback(() => {
+    setShowWarning(false);
+    armTimers();
+  }, [armTimers]);
+
+  // Mirror showWarning in a ref so handleActivity's identity stays stable.
+  // (If handleActivity depended on `showWarning` directly, it would get a
+  // new identity every time the warning toggled, which would retrigger the
+  // setup effect below and re-run startTimers()/setShowWarning(false) —
+  // wiping out the warning modal the instant it appeared.)
+  const showWarningRef = useRef(false);
+  useEffect(() => {
+    showWarningRef.current = showWarning;
+  }, [showWarning]);
+
   // Reset timers on user activity
   const handleActivity = useCallback(() => {
     const now = Date.now();
     // Throttle to avoid resetting on every mouse move
     if (now - lastResetRef.current < 10_000) return;
-    if (!showWarning) startTimers();
-  }, [showWarning, startTimers]);
+    if (!showWarningRef.current) startTimers();
+  }, [startTimers]);
 
   const extendSession = useCallback(async () => {
     try {
@@ -110,7 +130,7 @@ export function useSessionTimeout() {
   }, [startTimers, handleExpire]);
 
   useEffect(() => {
-    startTimers();
+    armTimers();
 
     const events = [
       "mousemove",
@@ -127,7 +147,7 @@ export function useSessionTimeout() {
       clearAllTimers();
       events.forEach((e) => window.removeEventListener(e, handleActivity));
     };
-  }, [startTimers, handleActivity, clearAllTimers]);
+  }, [armTimers, handleActivity, clearAllTimers]);
 
   return { showWarning, secondsRemaining, extendSession, handleExpire };
 }
