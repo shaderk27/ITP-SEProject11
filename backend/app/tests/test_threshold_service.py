@@ -4,12 +4,15 @@ from app.services.threshold_service import check_and_notify_lab_thresholds
 from app.models.config import Lab, BudgetPeriod
 from app.models.auth import User
 
+
 @patch("app.services.threshold_service.SessionLocal")
 @patch("app.services.threshold_service.send_threshold_alert")
-def test_check_and_notify_lab_thresholds_80_percent(mock_send_email, mock_session_local):
+def test_check_and_notify_lab_thresholds_80_percent(
+    mock_send_email, mock_session_local
+):
     mock_db = MagicMock()
     mock_session_local.return_value.__enter__.return_value = mock_db
-    
+
     fake_lab = Lab(
         lab_id=1,
         lab_group_id=10,
@@ -18,13 +21,11 @@ def test_check_and_notify_lab_thresholds_80_percent(mock_send_email, mock_sessio
         notified_50=True,
         notified_80=False,
         notified_95=False,
-        alert_period_id=1, # Matching our mock period
+        alert_period_id=1,  # Matching our mock period
     )
 
     fake_period = BudgetPeriod(
-        period_id=1,
-        start_date=date(2020, 1, 1),
-        end_date=date(2099, 12, 31)
+        period_id=1, start_date=date(2020, 1, 1), end_date=date(2099, 12, 31)
     )
 
     fake_ic = User(email="labic@test.com", role_id=3)

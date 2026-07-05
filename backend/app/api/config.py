@@ -154,7 +154,9 @@ def get_lab_groups(
         if active_period:
             total_spent = (
                 db.query(func.sum(PurchaseRequestLine.amount_gst))
-                .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+                .join(
+                    PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id
+                )
                 .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
                 .filter(
                     Lab.lab_group_id == g.lab_group_id,
@@ -164,9 +166,9 @@ def get_lab_groups(
                         PurchaseRequestLine.pr_status.is_(None),
                         and_(
                             PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                            PurchaseRequestLine.pr_status.not_ilike("%cancel%")
-                        )
-                    )
+                            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+                        ),
+                    ),
                 )
                 .scalar()
                 or 0
@@ -389,7 +391,9 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
         if active_period:
             total_spent = (
                 db.query(func.sum(PurchaseRequestLine.amount_gst))
-                .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+                .join(
+                    PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id
+                )
                 .filter(
                     PurchaseRequestLine.lab_id == lab.lab_id,
                     PurchaseRequest.request_date >= active_period.start_date,
@@ -398,9 +402,9 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
                         PurchaseRequestLine.pr_status.is_(None),
                         and_(
                             PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                            PurchaseRequestLine.pr_status.not_ilike("%cancel%")
-                        )
-                    )
+                            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+                        ),
+                    ),
                 )
                 .scalar()
                 or 0
@@ -411,7 +415,9 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
                     PurchaseRequestLine.category_id,
                     func.sum(PurchaseRequestLine.amount_gst),
                 )
-                .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+                .join(
+                    PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id
+                )
                 .filter(
                     PurchaseRequestLine.lab_id == lab.lab_id,
                     PurchaseRequest.request_date >= active_period.start_date,
@@ -420,9 +426,9 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
                         PurchaseRequestLine.pr_status.is_(None),
                         and_(
                             PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                            PurchaseRequestLine.pr_status.not_ilike("%cancel%")
-                        )
-                    )
+                            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+                        ),
+                    ),
                 )
                 .group_by(PurchaseRequestLine.category_id)
                 .all()
@@ -543,7 +549,11 @@ def update_lab(
 
     background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
 
-    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == current_period_id).first()
+    active_period = (
+        db.query(BudgetPeriod)
+        .filter(BudgetPeriod.period_id == current_period_id)
+        .first()
+    )
 
     if active_period:
         total_spent = (
@@ -557,9 +567,9 @@ def update_lab(
                     PurchaseRequestLine.pr_status.is_(None),
                     and_(
                         PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                        PurchaseRequestLine.pr_status.not_ilike("%cancel%")
-                    )
-                )
+                        PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+                    ),
+                ),
             )
             .scalar()
             or 0
