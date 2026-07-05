@@ -1,52 +1,24 @@
 import re
-import difflib
-
 from sqlalchemy.orm import Session
 from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
-
-STOP_WORDS = {
-    "lab",
-    "laboratory",
-    "system",
-    "systems",
-    "room",
-    "the",
-    "and",
-    "for",
-    "of",
-    "in",
-}
+from app.models.auth import User
 
 
-def _is_smart_match(source_text: str, target_tag: str, threshold: float = 0.8) -> bool:
+def _is_smart_match(source_text: str, target_tag: str) -> bool:
     """
-    Intelligently checks if a tag exists in the source text.
-    Handles weird punctuation (it-software) and minor typos (softwar vs software).
+    STRICT word-boundary match. 
+    Prevents 'test' from matching 'testing', or 'A' from matching 'apple'.
     """
     source_text = source_text.lower().strip()
     target_tag = target_tag.lower().strip()
+    
+    if not target_tag or not source_text:
+        return False
+        
+    # Use regex word boundaries (\b) to ensure we only match exact, distinct words/phrases
+    pattern = r'\b' + re.escape(target_tag) + r'\b'
+    return bool(re.search(pattern, source_text))
 
-    # 1. Fast Direct Match
-    if target_tag in source_text or source_text in target_tag:
-        return True
-
-    # 2. Tokenized & Fuzzy Check
-    words = [w for w in re.split(r"[^a-z0-9]", source_text) if len(w) > 2]
-
-    for word in words:
-        if word == target_tag:
-            return True
-        if difflib.SequenceMatcher(None, word, target_tag).ratio() >= threshold:
-            return True
-
-    return False
-
-
-def extract_core_clues(text: str) -> set:
-    if not text:
-        return set()
-    clean_text = re.sub(r"[^\w\s]", "", text.lower())
-    return set(clean_text.split()) - STOP_WORDS
 
 
 def classify_line_item(
@@ -61,62 +33,84 @@ def classify_line_item(
     pr_category: str = "",
 ) -> dict:
     text_lower = (row_text or "").lower()
-    req_clean = requestor_name.strip().lower() if requestor_name else ""
+    purpose_lower = (purpose or "").lower()
+    vendor_lower = (instruction_to_vendor or "").lower()
+    
+    # --- REQUESTOR NORMALIZATION ---
+    req_clean = ""
+    if requestor_name:
+        raw_name = requestor_name.split("@")[0]  # Drop the email domain if present
+        req_clean = raw_name.replace(".", " ").replace("_", " ").strip().lower()
+    # -------------------------------------------
+    
     labs = db.query(Lab).all()
     lab_groups = db.query(LabGroup).all()
     categories = db.query(SpendingCategory).all()
 
-    # 1. --- LAB & GROUP MATCHING (Uses Row Text vs Venue Tags) ---
+    # 1. --- STRICT LAB & GROUP MATCHING ---
     matched_group = _match_lab_group_by_wbs(lab_groups, wbs)
     scoped_labs = _filter_labs_by_group(labs, matched_group)
 
     lab_match = None
     lab_reason = ""
 
-    lab_match = _match_lab_by_venue_tags(scoped_labs, text_lower)
-    if lab_match:
-        lab_reason = f"Row text matched lab venue tag for '{lab_match.lab_name}'."
-
+    # Step 1: Check if lab name/venue specified in "purpose" field
     if not lab_match:
-        lab_match = _match_lab_by_text(scoped_labs, purpose)
+        lab_match = _match_lab_by_text(scoped_labs, purpose_lower) or _match_lab_by_venue_tags(scoped_labs, purpose_lower)
         if lab_match:
-            lab_reason = f"Purpose matched lab '{lab_match.lab_name}'."
+            lab_reason = f"Purpose field matched lab '{lab_match.lab_name}'."
 
+    # Step 2: Check if lab name/venue specified in "instructions to vendor" field
     if not lab_match:
-        lab_match = _match_lab_by_text(scoped_labs, instruction_to_vendor)
+        lab_match = _match_lab_by_text(scoped_labs, vendor_lower) or _match_lab_by_venue_tags(scoped_labs, vendor_lower)
         if lab_match:
-            lab_reason = f"Vendor instruction matched lab '{lab_match.lab_name}'."
+            lab_reason = f"Vendor instructions matched lab '{lab_match.lab_name}'."
 
+    # Step 3: Check if "requester name" field = Lab IC name
     if not lab_match and req_clean:
         lab_match = _match_lab_by_requestor(db, scoped_labs, req_clean)
         if lab_match:
-            lab_reason = f"Requestor matched lab '{lab_match.lab_name}'."
+            lab_reason = f"Requestor matched Lab IC for '{lab_match.lab_name}'."
 
-    if not lab_match:
-        lab_match = _match_lab_by_text(scoped_labs, text_lower)
-        if lab_match:
-            lab_reason = f"Row context matched lab '{lab_match.lab_name}'."
-
+    # Step 4: WBS Explicit match (If group has only 1 lab, it's safe to assume)
     if not lab_match and matched_group:
-        lab_reason = f"WBS matched Lab Group '{matched_group.lab_group_name}'."
+        if len(scoped_labs) == 1:
+            lab_match = scoped_labs[0]
+            lab_reason = f"Inherited from explicit Lab Group WBS match '{matched_group.lab_group_name}'."
+            
+    # Step 5: Scan full row_text as absolute last resort (Safety net)
+    if not lab_match:
+        lab_match = _match_lab_by_text(scoped_labs, text_lower) or _match_lab_by_venue_tags(scoped_labs, text_lower)
+        if lab_match:
+            lab_reason = f"Row context explicitly mentioned lab '{lab_match.lab_name}'."
 
+    # Step 4 (Fallbacks): Classify under "General" for Team Lead to sort
+    if not lab_match and matched_group:
+        lab_reason = f"WBS matched Lab Group '{matched_group.lab_group_name}', but specific lab was unclear."
+        
     if not lab_match and not matched_group:
-        lab_reason = "Insufficient lab context clues."
+        lab_reason = "Insufficient lab context clues. Flagged for review."
 
-    # 2. --- CATEGORY MATCHING (Uses Req Type Only) ---
+    # 2. --- STRICT CATEGORY MATCHING ---
     category_match = None
     cat_reason = ""
 
     explicit_cat = (req_type or pr_category or "").strip()
 
     if explicit_cat:
-        # Pass the Excel string into the Scorer to find the best match
-        category_match = _match_category_by_text(categories, explicit_cat)
-        if category_match:
-            cat_reason = f"Excel column '{explicit_cat}' scored highest for category '{category_match.category_name}'."
-
-    if not category_match:
-        cat_reason = "Could not auto-determine category."
+        matched_categories = _find_matching_categories(categories, explicit_cat)
+        
+        if len(matched_categories) == 1:
+            category_match = matched_categories[0]
+            cat_reason = f"Matched category '{category_match.category_name}'."
+        elif len(matched_categories) > 1:
+            cat_names = ", ".join([c.category_name for c in matched_categories])
+            cat_reason = f"Conflict detected (matched: {cat_names}). Flagged for manual review."
+            category_match = None
+        else:
+            cat_reason = "Could not auto-determine category."
+    else:
+        cat_reason = "No category data provided."
 
     combined_reason = f"{lab_reason} {cat_reason}".strip()
     group_id = getattr(matched_group, "lab_group_id", None) or getattr(
@@ -135,20 +129,12 @@ def _match_lab_group_by_wbs(lab_groups: list, wbs: str):
     wbs_clean = (wbs or "").lower().strip()
     if not wbs_clean:
         return None
-    exact_matches = []
-    partial_matches = []
-    for group in lab_groups:
+        
+    for group in sorted(lab_groups, key=lambda g: len(g.wbs_code or ""), reverse=True):
         code = (getattr(group, "wbs_code", "") or "").lower().strip()
-        if not code:
-            continue
-        if code == wbs_clean:
-            exact_matches.append(group)
-        elif code in wbs_clean or wbs_clean in code:
-            partial_matches.append(group)
-    if exact_matches:
-        return max(exact_matches, key=lambda group: len(group.wbs_code or ""))
-    if partial_matches:
-        return max(partial_matches, key=lambda group: len(group.wbs_code or ""))
+        if code and (wbs_clean == code or wbs_clean.startswith(f"{code}.") or wbs_clean.startswith(f"{code}-")):
+            return group
+            
     return None
 
 
@@ -162,21 +148,16 @@ def _filter_labs_by_group(labs: list, group):
 def _match_lab_by_venue_tags(labs: list, text_lower: str):
     if not text_lower:
         return None
-
-    best_match = None
-    highest_match_len = 0
-
+        
     for lab in labs:
         venue_str = getattr(lab, "venue", "") or ""
         tags = [t.strip().lower() for t in venue_str.split(",") if t.strip()]
 
         for tag in tags:
-            if len(tag) > 2 and _is_smart_match(text_lower, tag):
-                if len(tag) > highest_match_len:
-                    highest_match_len = len(tag)
-                    best_match = lab
-
-    return best_match
+            if tag and _is_smart_match(text_lower, tag):
+                return lab
+                
+    return None
 
 
 def _match_lab_by_text(labs: list, text: str):
@@ -185,88 +166,77 @@ def _match_lab_by_text(labs: list, text: str):
         return None
 
     for lab in labs:
+        # Strictly check lab code
         code_clean = (getattr(lab, "lab_code", "") or "").lower().strip()
-        if code_clean and code_clean in text_lower:
+        if code_clean and _is_smart_match(text_lower, code_clean):
+            return lab
+            
+        # Strictly check lab name
+        name_clean = (getattr(lab, "lab_name", "") or "").lower().strip()
+        if name_clean and _is_smart_match(text_lower, name_clean):
             return lab
 
-    best_match_lab = None
-    highest_clue_count = 0
-    for lab in labs:
-        clues = extract_core_clues(getattr(lab, "lab_name", "") or "")
-        clues_found = sum(1 for clue in clues if clue in text_lower)
-        if clues_found > highest_clue_count:
-            highest_clue_count = clues_found
-            best_match_lab = lab
-
-    return best_match_lab
-
-
-def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
-    lab_by_id = {getattr(lab, "lab_id", None): lab for lab in labs}
-    for mapping in db.query(RequesterLabMapping).all():
-        db_name = (getattr(mapping, "requester_name", "") or "").strip().lower()
-        if db_name and (db_name in requestor_name or requestor_name in db_name):
-            return lab_by_id.get(getattr(mapping, "default_lab_id", None))
     return None
 
 
-# --- Position-Based Scoring Category Matcher ---
-def _match_category_by_text(categories: list, text: str):
+def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
+    """Matches normalized Excel requestor against the Lab IC's full name in the database."""
+    lab_by_id = {getattr(lab, "lab_id", None): lab for lab in labs}
+    
+    # 1. Check against actual User table (Lab ICs currently assigned to a lab)
+    lab_ics = db.query(User).filter(User.lab_id.isnot(None)).all()
+    for ic in lab_ics:
+        ic_name = (getattr(ic, "full_name", "") or "").strip().lower()
+        if ic_name:
+            ic_name_clean = ic_name.replace(".", " ").replace("_", " ")
+            
+            # Check for match (e.g., 'bobby joon' == 'bobby joon')
+            if ic_name_clean == requestor_name or ic_name_clean in requestor_name or requestor_name in ic_name_clean:
+                matched_lab = lab_by_id.get(ic.lab_id)
+                if matched_lab:
+                    return matched_lab
+
+    # 2. Fallback to the explicit RequesterLabMapping table (Just in case!)
+    for mapping in db.query(RequesterLabMapping).all():
+        db_name = (getattr(mapping, "requester_name", "") or "").strip().lower()
+        if db_name:
+            db_name_clean = db_name.replace(".", " ").replace("_", " ")
+            if db_name_clean in requestor_name or requestor_name in db_name_clean:
+                matched_lab = lab_by_id.get(getattr(mapping, "default_lab_id", None))
+                if matched_lab:
+                    return matched_lab
+                    
+    return None
+
+def _find_matching_categories(categories: list, text: str) -> list:
     text_lower = (text or "").lower()
     if not text_lower:
-        return None
+        return []
 
-    best_match = None
-    highest_score = 0
-
-    # Helper function to dynamically score words based on WHERE they appear
-    def score_word(word):
-        word = word.strip().lower()
-        if len(word) <= 2 or not _is_smart_match(text_lower, word):
-            return 0
-
-        # Find where the word is located in the text
-        idx = text_lower.find(word)
-        if idx == -1:
-            return 15  # Fuzzy match fallback score
-
-        # Calculate how early in the sentence it appears (0.0 = very beginning, 1.0 = very end)
-        position_ratio = idx / max(len(text_lower), 1)
-
-        if position_ratio <= 0.25:
-            return 30  # Primary Subject (Start of sentence)
-        elif position_ratio <= 0.60:
-            return 20  # Secondary Context (Middle)
-        else:
-            return 10  # Modifier / Afterthought (End of sentence / parentheses)
+    matched_cats = []
 
     for cat in categories:
         name = (getattr(cat, "category_name", "") or "").lower().strip()
         if name == "general":
             continue
+            
+        is_match = False
+        
+        # 1. Check exact name using boundaries
+        if name and _is_smart_match(text_lower, name):
+            is_match = True
+                
+        # 2. Check tags if name didn't match
+        if not is_match:
+            desc = getattr(cat, "description", "") or ""
+            if desc:
+                tags = [t.strip().lower() for t in desc.split(",") if t.strip()]
+                for tag in tags:
+                    if tag and _is_smart_match(text_lower, tag):
+                        is_match = True
+                        break
+        
+        if is_match:
+            matched_cats.append(cat)
 
-        current_cat_score = 0
-
-        # 1. Score the exact Category Name
-        if name:
-            points = score_word(name)
-            if points > 0:
-                current_cat_score += (
-                    points + 5
-                )  # +5 Bonus for exactly matching the category title
-
-        # 2. Score the Custom Description Tags
-        desc = getattr(cat, "description", "") or ""
-        if desc:
-            tags = [t.strip().lower() for t in desc.split(",") if t.strip()]
-            for tag in tags:
-                points = score_word(tag)
-                if points > 0:
-                    current_cat_score += points
-
-        # Declare the highest-scoring category the winner
-        if current_cat_score > highest_score:
-            highest_score = current_cat_score
-            best_match = cat
-
-    return best_match
+    return matched_cats
