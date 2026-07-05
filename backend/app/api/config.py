@@ -435,12 +435,9 @@ def create_lab(
 def update_lab(
     lab_id: int,
     lab_in: LabCreate,
+    background_tasks: BackgroundTasks,
     period_id: int | None = None,
     db: Session = Depends(get_db),
-    lab_id: int, 
-    lab_in: LabCreate, 
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
 ):
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab:
