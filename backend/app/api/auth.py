@@ -14,7 +14,12 @@ from app.schemas.auth_schema import (
     AssignLabGroupSchema,
     AssignLabSchema,
 )
-from app.services.auth_service import AuthService
+from app.services.auth_service import (
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    COOKIE_NAME,
+    COOKIE_SECURE,
+    AuthService,
+)
 from app.repositories.auth_repository import AuthRepository
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -212,3 +217,40 @@ async def admin_send_reset(
         )
     service.forgot_password(user.email)
     return {"message": f"Temporary password sent to {user.email}."}
+
+
+@router.post("/refresh")
+async def refresh_session(
+    response: Response,
+    access_token: str | None = Cookie(None),
+    service: AuthService = Depends(get_auth_service),
+):
+    """Reissue a fresh JWT cookie to extend the session."""
+    current_user = service.get_current_user(access_token)
+
+    if current_user.get("must_reset_password", True):
+        # Fail closed: if the flag is missing OR true, don't refresh.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password reset required before session can be extended.",
+        )
+
+    token_payload = {
+        "sub": str(current_user["id"]),
+        "email": current_user["email"],
+        "role": current_user["role"],
+        "lab_group_id": current_user["lab_group_id"],
+        "lab_id": current_user["lab_id"],
+        "must_reset_password": current_user["must_reset_password"],
+    }
+    token = service._create_access_token(data=token_payload)
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        httponly=True,
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        samesite="lax",
+        secure=COOKIE_SECURE,
+        path="/",
+    )
+    return {"message": "Session extended."}

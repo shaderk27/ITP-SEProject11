@@ -1,4 +1,4 @@
-import { createBrowserRouter, Link } from "react-router";
+import { createBrowserRouter } from "react-router";
 import { RootLayout } from "./components/layouts/RootLayout";
 import { LoginPage } from "./pages/LoginPage";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -29,7 +29,7 @@ export const router = createBrowserRouter([
     Component: ForgotPasswordPage,
   },
   {
-    path: "/reset-password",//used to enforce password reset when logging in with temp pw
+    path: "/reset-password",
     Component: ResetPasswordPage,
   },
   {
@@ -47,6 +47,7 @@ export const router = createBrowserRouter([
         <RootLayout />
       </ProtectedRoute>
     ),
+    errorElement: <NotFound />,
     children: [
       {
         index: true,
@@ -147,5 +148,9 @@ export const router = createBrowserRouter([
         ),
       },
     ],
+  },
+  {
+    path: "*",
+    element: <NotFound />,
   },
 ]);
