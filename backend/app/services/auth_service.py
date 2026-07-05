@@ -405,20 +405,9 @@ class AuthService:
             raise HTTPException(
                 status_code=400, detail="Only Lab IC users can be assigned to a lab."
             )
-
         lab = self.repository.get_lab_by_id(self.db, lab_id)
         if not lab:
             raise HTTPException(status_code=404, detail="Lab not found.")
-
-        if user.lab_id is not None and user.lab_id != lab_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This Lab IC is already assigned to another lab. "
-                    "Unassign them before assigning a new lab."
-                ),
-            )
-
         assigned_user = self.repository.get_user_by_role_and_lab(
             self.db, user.role_id, lab_id
         )
@@ -430,12 +419,10 @@ class AuthService:
                     f"{assigned_user.full_name}."
                 ),
             )
-
         user.lab_id = lab_id
         user.lab_group_id = None  # enforce mutual exclusion constraint
         self.db.commit()
         self.db.refresh(user)
-
         return {
             "user_id": user.user_id,
             "full_name": user.full_name,
@@ -459,14 +446,7 @@ class AuthService:
         if not lab_group:
             raise HTTPException(status_code=404, detail="Lab group not found.")
 
-        if user.lab_group_id is not None and user.lab_group_id != lab_group_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    "This Team Lead is already assigned to another lab group. "
-                    "Unassign them before assigning a new lab group."
-                ),
-            )
+
 
         assigned_user = self.repository.get_user_by_role_and_lab_group(
             self.db, user.role_id, lab_group_id
