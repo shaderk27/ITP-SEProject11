@@ -450,7 +450,7 @@ export function SystemConfigPage() {
                     {labGroups.map((group) => {
                       const isExpanded = expandedGroups.includes(group.id);
                       const groupLabs = labs.filter(l => l.group_id === group.id);
-                      const spent = 0; 
+                      const spent = group.spent || 0; 
                       const availableBalance = group.budget - spent;
                       const teamlead = teamleadUsers.find(u => u.lab_group_id === group.id);
 
@@ -568,10 +568,10 @@ export function SystemConfigPage() {
                                                 )}
                                               </td>
                                               <td className="p-3 text-sm text-right text-gray-500">${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                                              <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                              <td className="p-3 text-sm text-right font-semibold text-[#16a34a]">${(lab.budget - (lab.spent || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                               <td className="p-3 text-center flex justify-center gap-2">
-                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-400 hover:text-gray-700" /></Button>
-                                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleUnassignLab(lab.id, lab.name)}><X className="h-3 w-3 text-red-400 hover:text-red-700" /></Button>
+                                                <Button size="sm" variant="outline" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3" /></Button>
+                                                <Button size="sm" variant="outline" onClick={() => handleUnassignLab(lab.id, lab.name)} className="text-[#dc2626]"><X className="h-3 w-3" /></Button>
                                               </td>
                                             </tr>
                                           );
@@ -616,7 +616,7 @@ export function SystemConfigPage() {
                   </thead>
                   <tbody>
                     {labs.map((lab) => {
-                      const labAvailable = lab.budget - 0; // Mocked until expenses are tracked
+                      const labAvailable = lab.budget - (lab.spent || 0);
                       const labic = labicUsers.find(u => u.lab_id === lab.id);
                       return (
                         <tr key={lab.id} className="border-b border-border hover:bg-[#f8f9fa]">

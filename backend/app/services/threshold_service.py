@@ -27,6 +27,17 @@ def check_and_notify_lab_thresholds(db: Session, lab_id: int):
     # 3. Calculate Utilization Percentage
     utilization_pct = (float(total_spent) / float(total_budget)) * 100
 
+    # --- SMART FLAG RESET ---
+    # If the budget is INCREASED later, we must reset the flags 
+    # so they can receive warnings again in the future!
+    if utilization_pct < 95 and lab.notified_95:
+        lab.notified_95 = False
+    if utilization_pct < 80 and lab.notified_80:
+        lab.notified_80 = False
+    if utilization_pct < 50 and lab.notified_50:
+        lab.notified_50 = False
+    # ------------------------
+
     # Determine which threshold we just crossed (check highest first)
     threshold_hit = None
     if utilization_pct >= 95 and not lab.notified_95:
@@ -42,10 +53,11 @@ def check_and_notify_lab_thresholds(db: Session, lab_id: int):
         threshold_hit = 50
         lab.notified_50 = True
 
-    if not threshold_hit:
-        return # No new thresholds crossed, exit silently
+    # Save the flags to the database IMMEDIATELY (even if we just reset them to False)
+    db.commit() 
 
-    db.commit() # Save the anti-spam flags
+    if not threshold_hit:
+        return # No NEW thresholds crossed, exit silently
 
     # 4. Gather Recipients (Lab IC & Team Lead)
     recipients = []

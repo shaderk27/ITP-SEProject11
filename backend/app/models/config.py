@@ -118,6 +118,7 @@ class LabGroupOut(BaseModel):
     wbs_code: str | None = None
     description: str | None = None
     budget: float
+    spent: float = 0.0
     threshold: int
 
 
@@ -129,6 +130,7 @@ class LabOut(BaseModel):
     group_id: int
     venue: str | None = None
     budget: float
+    spent: float = 0.0
     ic_name: str | None = None
     ic_email: str | None = None
     budgets: dict[str, float] = {}

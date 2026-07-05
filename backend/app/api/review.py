@@ -98,7 +98,7 @@ class LabGroupOption(BaseModel):
 class LabOption(BaseModel):
     lab_id: int
     lab_name: str
-    lab_group_id: int
+    lab_group_id: int | None
     is_general: bool
 
 
