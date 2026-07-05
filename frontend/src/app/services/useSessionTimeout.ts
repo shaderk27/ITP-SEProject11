@@ -1,4 +1,4 @@
-// src/app/hooks/useSessionTimeout.ts
+
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router";
@@ -6,7 +6,7 @@ import { useNavigate } from "react-router";
 export const WARNING_BEFORE_EXPIRY_MS = 5 * 60 * 1000; // show warning 5 mins before expiry
 const DEFAULT_SESSION_MINUTES = 6;
 const configuredMinutes = Number(
-  import.meta.env.VITE_ACCESS_TOKEN_EXPIRE_MINUTES,
+  import.meta.env.ACCESS_TOKEN_EXPIRE_MINUTES,
 );
 
 const SESSION_DURATION_MINUTES =
