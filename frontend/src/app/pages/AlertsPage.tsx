@@ -5,11 +5,44 @@ import { AlertCircle, TrendingUp, Info, AlertTriangle, Search, X, FileText } fro
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 
+// --- Types to clear ESLint warnings ---
+interface Category {
+  id: number;
+  name: string;
+}
+
+interface LabData {
+  id: number;
+  group_id: number;
+  group: string;
+  code: string;
+  name: string;
+  budget: number;
+  spent: number;
+  budgets: Record<string, number>;
+  spent_by_category: Record<string, number>;
+}
+
+interface AlertData {
+  id: string;
+  labGroupId: number;
+  labGroupName: string;
+  labCode: string;
+  labName: string;
+  budget: number;
+  actual: number;
+  utilization: number;
+  type: string;
+  threshold: number;
+  budgets: Record<string, number>;
+  spentByCategory: Record<string, number>;
+}
+
 export function AlertsPage() {
   const { user, hasPermission, canAccessLabGroup } = useAuth();
   
-  const [labs, setLabs] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
+  const [labs, setLabs] = useState<LabData[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Filter States
@@ -18,7 +51,7 @@ export function AlertsPage() {
   const [selectedGroup, setSelectedGroup] = useState("all");
   
   // Modal State
-  const [selectedLabDetails, setSelectedLabDetails] = useState<any>(null);
+  const [selectedLabDetails, setSelectedLabDetails] = useState<AlertData | null>(null);
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -40,11 +73,6 @@ export function AlertsPage() {
     };
     fetchData();
   }, [API_BASE_URL]);
-
-  // Page-level guard
-  if (!hasPermission("alerts:view")) {
-    return <Navigate to="/403" replace />;
-  }
 
   // 2. Dynamically Generate Alerts based on Real Math
   const allAlerts = useMemo(() => {
@@ -105,11 +133,19 @@ export function AlertsPage() {
   }, [allAlerts, searchTerm, selectedType, selectedGroup]);
 
 
-  const showLabBanner = user?.role !== "admin" && user?.labGroupId != null;
+  // =========================================================================
+  // GUARDS MUST BE HERE (Below all useMemo / useEffect hooks!)
+  // =========================================================================
+
+  if (!hasPermission("alerts:view")) {
+    return <Navigate to="/403" replace />;
+  }
 
   if (isLoading) {
     return <div className="p-8 text-center text-muted-foreground">Loading Alerts...</div>;
   }
+
+  const showLabBanner = user?.role !== "admin" && user?.labGroupId != null;
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa] relative">
