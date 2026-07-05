@@ -228,6 +228,7 @@ class AuthService:
             "role": user.role.role_name if user.role else None,
             "lab_group_id": user.lab_group_id,
             "lab_id": user.lab_id,
+            "must_reset_password": bool(payload.get("must_reset_password", False)),
             "assignedLabs": [user.lab.lab_code]
             if user.lab
             else ([user.lab_group.wbs_code] if user.lab_group else []),
