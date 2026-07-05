@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card } from "../components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
-import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker, Mail, UserRound, CheckCircle2, UserPlus } from "lucide-react";
+import { Plus, Trash2, Edit, X, ChevronDown, ChevronRight, Beaker, Mail, UserRound, CheckCircle2, UserPlus, Unlink } from "lucide-react";
 import { UserManagement } from "../components/config/UserManagement";
 
 // --- NEW: DYNAMIC TAG GENERATOR ---
@@ -244,6 +244,28 @@ export function SystemConfigPage() {
     }
   };
 
+  const handleUnassignLabIC = async (labic: any) => {
+    if (!labic) return;
+    if (!window.confirm(`Clear Lab IC assignment for ${labic.full_name}?`)) return;
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/auth/users/${labic.user_id}/unassign-scope`,
+        {
+          method: "PUT",
+          credentials: "include",
+        }
+      );
+      if (res.ok) {
+        fetchConfigData();
+      } else {
+        alert(await readErrorDetail(res, "Failed to clear Lab IC assignment."));
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Failed to clear Lab IC assignment.");
+    }
+  };
+
   const openAssignTeamLeadModal = (group: any) => {
     setAssignTargetGroup(group);
     const current = teamleadUsers.find(u => u.lab_group_id === group.id);
@@ -277,6 +299,28 @@ export function SystemConfigPage() {
       }
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  const handleUnassignTeamLead = async (teamlead: any) => {
+    if (!teamlead) return;
+    if (!window.confirm(`Clear Team Lead assignment for ${teamlead.full_name}?`)) return;
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/auth/users/${teamlead.user_id}/unassign-scope`,
+        {
+          method: "PUT",
+          credentials: "include",
+        }
+      );
+      if (res.ok) {
+        fetchConfigData();
+      } else {
+        alert(await readErrorDetail(res, "Failed to clear Team Lead assignment."));
+      }
+    } catch (error) {
+      console.error(error);
+      alert("Failed to clear Team Lead assignment.");
     }
   };
 
@@ -349,14 +393,21 @@ export function SystemConfigPage() {
                             <td className="p-4 text-sm text-muted-foreground">{group.wbs_code || "-"}</td>
                             <td className="p-4 text-sm text-muted-foreground">
                               {teamlead ? (
-                                <button
-                                  onClick={() => openAssignTeamLeadModal(group)}
-                                  className="text-left hover:opacity-70 transition-opacity"
-                                  title="Click to reassign"
-                                >
-                                  <p className="font-medium text-foreground">{teamlead.full_name}</p>
-                                  <p className="text-xs text-muted-foreground">{teamlead.email}</p>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-left">
+                                    <p className="font-medium text-foreground">{teamlead.full_name}</p>
+                                    <p className="text-xs text-muted-foreground">{teamlead.email}</p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0 shrink-0"
+                                    title="Clear Team Lead assignment"
+                                    onClick={() => handleUnassignTeamLead(teamlead)}
+                                  >
+                                    <Unlink className="h-3 w-3 text-gray-400 hover:text-red-600" />
+                                  </Button>
+                                </div>
                               ) : (
                                 <Button
                                   size="sm"
@@ -416,14 +467,21 @@ export function SystemConfigPage() {
                                               <td className="p-3 text-sm text-gray-700">{lab.name}</td>
                                               <td className="p-3 text-sm">
                                                 {labic ? (
-                                                  <button
-                                                    onClick={() => openAssignLabICModal(lab)}
-                                                    className="text-left hover:opacity-70 transition-opacity"
-                                                    title="Click to reassign"
-                                                  >
-                                                    <p className="font-medium text-gray-800">{labic.full_name}</p>
-                                                    <p className="text-xs text-gray-400">{labic.email}</p>
-                                                  </button>
+                                                  <div className="flex items-center gap-2">
+                                                    <div className="text-left">
+                                                      <p className="font-medium text-gray-800">{labic.full_name}</p>
+                                                      <p className="text-xs text-gray-400">{labic.email}</p>
+                                                    </div>
+                                                    <Button
+                                                      size="sm"
+                                                      variant="ghost"
+                                                      className="h-6 w-6 p-0 shrink-0"
+                                                      title="Clear Lab IC assignment"
+                                                      onClick={() => handleUnassignLabIC(labic)}
+                                                    >
+                                                      <Unlink className="h-3 w-3 text-gray-400 hover:text-red-600" />
+                                                    </Button>
+                                                  </div>
                                                 ) : (
                                                   <Button
                                                     size="sm"
@@ -496,14 +554,21 @@ export function SystemConfigPage() {
                           </td>
                           <td className="p-4 text-sm text-muted-foreground">
                             {labic ? (
-                              <button
-                                onClick={() => openAssignLabICModal(lab)}
-                                className="text-left hover:opacity-70 transition-opacity"
-                                title="Click to reassign"
-                              >
-                                <p className="font-medium text-foreground">{labic.full_name}</p>
-                                <p className="text-xs text-muted-foreground">{labic.email}</p>
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <div className="text-left">
+                                  <p className="font-medium text-foreground">{labic.full_name}</p>
+                                  <p className="text-xs text-muted-foreground">{labic.email}</p>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0 shrink-0"
+                                  title="Clear Lab IC assignment"
+                                  onClick={() => handleUnassignLabIC(labic)}
+                                >
+                                  <Unlink className="h-3 w-3 text-gray-400 hover:text-red-600" />
+                                </Button>
+                              </div>
                             ) : (
                               <Button
                                 size="sm"
