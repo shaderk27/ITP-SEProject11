@@ -134,6 +134,7 @@ class LabOut(BaseModel):
     ic_name: str | None = None
     ic_email: str | None = None
     budgets: dict[str, float] = {}
+    spent_by_category: dict[str, float] = {}
 
 
 class CategoryOut(BaseModel):

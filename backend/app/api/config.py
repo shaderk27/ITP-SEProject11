@@ -382,6 +382,15 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
             PurchaseRequestLine.lab_id == lab.lab_id
         ).scalar() or 0
 
+        spent_data = db.query(
+            PurchaseRequestLine.category_id,
+            func.sum(PurchaseRequestLine.amount_gst)
+        ).filter(
+            PurchaseRequestLine.lab_id == lab.lab_id
+        ).group_by(PurchaseRequestLine.category_id).all()
+        
+        spent_by_cat = {str(cat_id): float(amount) for cat_id, amount in spent_data if cat_id is not None}
+
         result.append(
             {
                 "id": lab.lab_id,
@@ -395,6 +404,7 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
                 "ic_name": "",
                 "ic_email": "",
                 "budgets": budget_map,
+                "spent_by_category": spent_by_cat,
             }
         )
     return result
