@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import MagicMock, patch
 
 from app.services.threshold_service import check_and_notify_lab_thresholds

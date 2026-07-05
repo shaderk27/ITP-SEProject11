@@ -322,10 +322,11 @@ def create_lab(lab_in: LabCreate, db: Session = Depends(get_db)):
 
 @router.put("/labs/{lab_id}", response_model=LabOut)
 def update_lab(
-    lab_id: int, 
-    lab_in: LabCreate, 
+    lab_id: int,
+    lab_in: LabCreate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    period_id: int | None = None,
+    db: Session = Depends(get_db),
 ):
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab:
