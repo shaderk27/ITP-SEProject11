@@ -227,13 +227,21 @@ async def refresh_session(
 ):
     """Reissue a fresh JWT cookie to extend the session."""
     current_user = service.get_current_user(access_token)
+
+    if current_user.get("must_reset_password", True):
+        # Fail closed: if the flag is missing OR true, don't refresh.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password reset required before session can be extended.",
+        )
+
     token_payload = {
         "sub": str(current_user["id"]),
         "email": current_user["email"],
         "role": current_user["role"],
         "lab_group_id": current_user["lab_group_id"],
         "lab_id": current_user["lab_id"],
-        "must_reset_password": current_user.get("must_reset_password", False),
+        "must_reset_password": current_user["must_reset_password"],
     }
     token = service._create_access_token(data=token_payload)
     response.set_cookie(
