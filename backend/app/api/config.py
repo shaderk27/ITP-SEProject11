@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from typing import List
 from datetime import date
 from sqlalchemy.exc import IntegrityError
@@ -24,7 +24,7 @@ from app.dependencies.auth import get_current_user
 from app.models.auth import User
 
 from app.services.threshold_service import check_and_notify_lab_thresholds
-from app.models.staging import PurchaseRequestLine
+from app.models.staging import PurchaseRequestLine, PurchaseRequest
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
@@ -119,19 +119,10 @@ def get_lab_groups(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Role scoping:
-      - Admin     → every lab group.
-      - Team Lead → only their assigned lab_group_id.
-      - Lab IC    → empty list (lab groups aren't in scope for them).
-
-    ``period_id`` scopes the Allocated Budget total to one fiscal year
-    (defaults to the current FY).
-    """
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
     )
-    # period_id: >0 = that fiscal year; 0 = all fiscal years (sum); None = current.
+
     if period_id == 0:
         pid = None
     elif period_id is not None:
@@ -149,6 +140,9 @@ def get_lab_groups(
 
     groups = query.all()
     result = []
+
+    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
+
     for g in groups:
         budget_q = db.query(func.sum(Budget.budget_amount)).filter(
             Budget.lab_group_id == g.lab_group_id
@@ -157,13 +151,28 @@ def get_lab_groups(
             budget_q = budget_q.filter(Budget.period_id == pid)
         total_budget = budget_q.scalar() or 0
 
-        total_spent = (
-            db.query(func.sum(PurchaseRequestLine.amount_gst))
-            .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
-            .filter(Lab.lab_group_id == g.lab_group_id)
-            .scalar()
-            or 0
-        )
+        if active_period:
+            total_spent = (
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+                .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+                .filter(
+                    Lab.lab_group_id == g.lab_group_id,
+                    PurchaseRequest.request_date >= active_period.start_date,
+                    PurchaseRequest.request_date <= active_period.end_date,
+                    or_(
+                        PurchaseRequestLine.pr_status.is_(None),
+                        and_(
+                            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                            PurchaseRequestLine.pr_status.not_ilike("%cancel%")
+                        )
+                    )
+                )
+                .scalar()
+                or 0
+            )
+        else:
+            total_spent = 0
 
         result.append(
             {
@@ -187,9 +196,8 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
         description=group.description,
     )
     db.add(new_group)
-    db.flush()  # Flush to generate the new ID without committing yet
+    db.flush()
 
-    # Bulk Claim Orphaned Labs & Sync Budgets Explicitly
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         labs_to_update = (
             db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
@@ -228,7 +236,6 @@ def update_lab_group(
     db_group.wbs_code = group.wbs_code
     db_group.description = group.description
 
-    # Bulk Claim Orphaned Labs during Edit & Sync Budgets Explicitly
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         labs_to_update = (
             db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
@@ -256,17 +263,14 @@ def update_lab_group(
 
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
-    # 1. Unassign the group from all Budgets first explicitly
     budgets = db.query(Budget).filter(Budget.lab_group_id == group_id).all()
     for b in budgets:
         b.lab_group_id = None
 
-    # 2. Unassign the group from all Labs explicitly
     labs = db.query(Lab).filter(Lab.lab_group_id == group_id).all()
     for lab in labs:
         lab.lab_group_id = None
 
-    # 3. Safely delete the Lab Group
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Lab Group not found")
@@ -341,13 +345,12 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found.")
 
-    # --- Graceful Rejection on Foreign Key Violations ---
     try:
         db.delete(cat)
         db.commit()
         return {"success": True}
     except IntegrityError:
-        db.rollback()  # VERY IMPORTANT: Rollback the broken transaction!
+        db.rollback()
         raise HTTPException(
             status_code=400,
             detail=f"Cannot delete '{cat.category_name}' because it is currently assigned to one or more labs. Please remove the budgets for this category first.",
@@ -371,6 +374,9 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
     labs = db.query(Lab).all()
     result = []
+
+    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
+
     for lab in labs:
         budgets = (
             db.query(Budget)
@@ -380,28 +386,55 @@ def get_labs(period_id: int | None = None, db: Session = Depends(get_db)):
         total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
 
-        total_spent = (
-            db.query(func.sum(PurchaseRequestLine.amount_gst))
-            .filter(PurchaseRequestLine.lab_id == lab.lab_id)
-            .scalar()
-            or 0
-        )
-
-        spent_data = (
-            db.query(
-                PurchaseRequestLine.category_id,
-                func.sum(PurchaseRequestLine.amount_gst),
+        if active_period:
+            total_spent = (
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+                .filter(
+                    PurchaseRequestLine.lab_id == lab.lab_id,
+                    PurchaseRequest.request_date >= active_period.start_date,
+                    PurchaseRequest.request_date <= active_period.end_date,
+                    or_(
+                        PurchaseRequestLine.pr_status.is_(None),
+                        and_(
+                            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                            PurchaseRequestLine.pr_status.not_ilike("%cancel%")
+                        )
+                    )
+                )
+                .scalar()
+                or 0
             )
-            .filter(PurchaseRequestLine.lab_id == lab.lab_id)
-            .group_by(PurchaseRequestLine.category_id)
-            .all()
-        )
 
-        spent_by_cat = {
-            str(cat_id): float(amount)
-            for cat_id, amount in spent_data
-            if cat_id is not None
-        }
+            spent_data = (
+                db.query(
+                    PurchaseRequestLine.category_id,
+                    func.sum(PurchaseRequestLine.amount_gst),
+                )
+                .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+                .filter(
+                    PurchaseRequestLine.lab_id == lab.lab_id,
+                    PurchaseRequest.request_date >= active_period.start_date,
+                    PurchaseRequest.request_date <= active_period.end_date,
+                    or_(
+                        PurchaseRequestLine.pr_status.is_(None),
+                        and_(
+                            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                            PurchaseRequestLine.pr_status.not_ilike("%cancel%")
+                        )
+                    )
+                )
+                .group_by(PurchaseRequestLine.category_id)
+                .all()
+            )
+            spent_by_cat = {
+                str(cat_id): float(amount)
+                for cat_id, amount in spent_data
+                if cat_id is not None
+            }
+        else:
+            total_spent = 0
+            spent_by_cat = {}
 
         result.append(
             {
@@ -487,7 +520,7 @@ def update_lab(
     db_lab.lab_name = lab_in.lab_name
     db_lab.lab_group_id = lab_in.lab_group_id
     db_lab.venue = lab_in.venue
-    # Only clear THIS fiscal year's budgets — other years' budgets are untouched.
+
     db.query(Budget).filter(
         Budget.lab_id == lab_id, Budget.period_id == current_period_id
     ).delete()
@@ -508,16 +541,31 @@ def update_lab(
     db.commit()
     db.refresh(db_lab)
 
-    # --- TRIGGER NOTIFICATION CHECK ---
     background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
 
-    # Get real spent value so UI updates immediately
-    total_spent = (
-        db.query(func.sum(PurchaseRequestLine.amount_gst))
-        .filter(PurchaseRequestLine.lab_id == db_lab.lab_id)
-        .scalar()
-        or 0
-    )
+    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == current_period_id).first()
+
+    if active_period:
+        total_spent = (
+            db.query(func.sum(PurchaseRequestLine.amount_gst))
+            .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+            .filter(
+                PurchaseRequestLine.lab_id == db_lab.lab_id,
+                PurchaseRequest.request_date >= active_period.start_date,
+                PurchaseRequest.request_date <= active_period.end_date,
+                or_(
+                    PurchaseRequestLine.pr_status.is_(None),
+                    and_(
+                        PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                        PurchaseRequestLine.pr_status.not_ilike("%cancel%")
+                    )
+                )
+            )
+            .scalar()
+            or 0
+        )
+    else:
+        total_spent = 0
 
     return {
         "id": db_lab.lab_id,
@@ -549,10 +597,8 @@ def unassign_lab_from_group(lab_id: int, db: Session = Depends(get_db)):
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
 
-    # 1. Unassign Lab
     lab.lab_group_id = None
 
-    # 2. Unassign Budgets explicitly
     budgets = db.query(Budget).filter(Budget.lab_id == lab_id).all()
     for b in budgets:
         b.lab_group_id = None

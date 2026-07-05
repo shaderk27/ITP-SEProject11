@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, BackgroundTasks
 
 from app.api.config import (
     PeriodCreate,
@@ -77,6 +77,7 @@ def test_update_lab_only_clears_the_selected_fiscal_year(db):
             lab_group_id=group.lab_group_id,
             budgets={cat_key: 7000.0},
         ),
+        background_tasks=BackgroundTasks(), # Added the required background_tasks object
         period_id=fy_b,
         db=db,
     )

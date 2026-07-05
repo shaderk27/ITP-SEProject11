@@ -968,7 +968,7 @@ def commit_batch(
     # TRIGGER THRESHOLD EMAILS
     # Will instantly run the math and send emails for the specific labs involved in this commit
     for lab_id in affected_lab_ids:
-        background_tasks.add_task(check_and_notify_lab_thresholds, db, lab_id)
+        background_tasks.add_task(check_and_notify_lab_thresholds, lab_id)
 
     return CommitResponse(
         success=True,

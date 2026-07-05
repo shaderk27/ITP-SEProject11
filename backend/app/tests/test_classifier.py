@@ -55,7 +55,7 @@ class FakeDb:
             ),
         ]
         self.requester_mappings = [
-            SimpleNamespace(requester_name="Randy Kwok", default_lab_id=30),
+            SimpleNamespace(requester_name="Bobby Jones", default_lab_id=30),
         ]
         self.categories = [
             SimpleNamespace(
@@ -81,8 +81,8 @@ class FakeDb:
         self.users = [
             SimpleNamespace(
                 user_id=1,
-                full_name="Randy Kwok",
-                email="randy@sit.edu",
+                full_name="Bobby Jones",
+                email="bobby@sit.edu",
                 lab_id=30,
                 lab_group_id=1,
             )
