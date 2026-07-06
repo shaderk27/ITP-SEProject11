@@ -47,16 +47,16 @@ def classify_line_item(
     lab_reason = ""
 
     if not lab_match:
-        lab_match = _match_lab_by_text(scoped_labs, purpose_lower) or _match_lab_by_venue_tags(
+        lab_match = _match_lab_by_text(
             scoped_labs, purpose_lower
-        )
+        ) or _match_lab_by_venue_tags(scoped_labs, purpose_lower)
         if lab_match:
             lab_reason = f"Purpose field matched lab '{lab_match.lab_name}'."
 
     if not lab_match:
-        lab_match = _match_lab_by_text(scoped_labs, vendor_lower) or _match_lab_by_venue_tags(
+        lab_match = _match_lab_by_text(
             scoped_labs, vendor_lower
-        )
+        ) or _match_lab_by_venue_tags(scoped_labs, vendor_lower)
         if lab_match:
             lab_reason = f"Vendor instructions matched lab '{lab_match.lab_name}'."
 
@@ -67,21 +67,17 @@ def classify_line_item(
 
     if not lab_match and matched_group and len(scoped_labs) == 1:
         lab_match = scoped_labs[0]
-        lab_reason = (
-            f"Inherited from explicit Lab Group WBS match '{matched_group.lab_group_name}'."
-        )
+        lab_reason = f"Inherited from explicit Lab Group WBS match '{matched_group.lab_group_name}'."
 
     if not lab_match:
-        lab_match = _match_lab_by_text(scoped_labs, text_lower) or _match_lab_by_venue_tags(
+        lab_match = _match_lab_by_text(
             scoped_labs, text_lower
-        )
+        ) or _match_lab_by_venue_tags(scoped_labs, text_lower)
         if lab_match:
             lab_reason = f"Row context explicitly mentioned lab '{lab_match.lab_name}'."
 
     if not lab_match and matched_group:
-        lab_reason = (
-            f"WBS matched Lab Group '{matched_group.lab_group_name}', but specific lab was unclear."
-        )
+        lab_reason = f"WBS matched Lab Group '{matched_group.lab_group_name}', but specific lab was unclear."
 
     if not lab_match and not matched_group:
         lab_reason = "Insufficient lab context clues. Flagged for review."
@@ -96,8 +92,12 @@ def classify_line_item(
             category_match = matched_categories[0]
             cat_reason = f"Matched category '{category_match.category_name}'."
         elif len(matched_categories) > 1:
-            cat_names = ", ".join([category.category_name for category in matched_categories])
-            cat_reason = f"Conflict detected (matched: {cat_names}). Flagged for manual review."
+            cat_names = ", ".join(
+                [category.category_name for category in matched_categories]
+            )
+            cat_reason = (
+                f"Conflict detected (matched: {cat_names}). Flagged for manual review."
+            )
         else:
             cat_reason = "Could not auto-determine category."
     else:
@@ -219,7 +219,9 @@ def _find_matching_categories(categories: list, text: str) -> list:
 
         if not is_match:
             description = getattr(category, "description", "") or ""
-            tags = [tag.strip().lower() for tag in description.split(",") if tag.strip()]
+            tags = [
+                tag.strip().lower() for tag in description.split(",") if tag.strip()
+            ]
             is_match = any(_is_smart_match(text_lower, tag) for tag in tags)
 
         if is_match:
