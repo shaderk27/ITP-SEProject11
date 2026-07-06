@@ -13,12 +13,19 @@ import {
   Percent,
   Clock,
   Activity,
+  Settings,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../components/ui/popover";
+import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
 import { DatePickerField } from "../components/shared/DatePickerField";
 import { RoleInfo } from "../components/shared/RoleInfo";
@@ -125,6 +132,29 @@ const FISCAL_MONTHS = [
   { value: 3, label: "March" },
 ];
 
+// Toggleable dashboard charts (KPI cards always show). Order = display order.
+const DASHBOARD_CHARTS = [
+  { id: "utilisation", label: "Budget Utilisation" },
+  { id: "actualVsBudget", label: "Actual vs Budget" },
+  { id: "category", label: "Spending by Category" },
+  { id: "monthly", label: "Monthly Spending Trend" },
+  { id: "categoryMix", label: "Category Mix" },
+  { id: "yoy", label: "Year-over-Year" },
+] as const;
+
+// Load per-user chart visibility from localStorage; default everything shown.
+function loadChartVisibility(key: string): Record<string, boolean> {
+  const defaults = Object.fromEntries(DASHBOARD_CHARTS.map((c) => [c.id, true]));
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw)
+      return { ...defaults, ...(JSON.parse(raw) as Record<string, boolean>) };
+  } catch {
+    /* ignore malformed storage */
+  }
+  return defaults;
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -182,6 +212,23 @@ export function DashboardPage() {
       else next.add(id);
       return next;
     });
+  // Chart show/hide, persisted per user in localStorage. Reloaded on the render-
+  // time key guard (below) so switching users swaps in their saved layout.
+  const chartsStorageKey = `dashboard_charts_v1:${user?.id ?? "anon"}`;
+  const [chartVisibility, setChartVisibility] = useState<Record<string, boolean>>(
+    () => loadChartVisibility(chartsStorageKey),
+  );
+  const [prevChartsKey, setPrevChartsKey] = useState(chartsStorageKey);
+  if (chartsStorageKey !== prevChartsKey) {
+    setPrevChartsKey(chartsStorageKey);
+    setChartVisibility(loadChartVisibility(chartsStorageKey));
+  }
+  const toggleChart = (id: string) =>
+    setChartVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
+  const resetCharts = () =>
+    setChartVisibility(
+      Object.fromEntries(DASHBOARD_CHARTS.map((c) => [c.id, true])),
+    );
 
   // Auto-lock the dropdown to the Team Lead's own lab group whenever the user
   // changes (e.g. login/logout switching identities). Admins keep "all".
@@ -267,6 +314,15 @@ export function DashboardPage() {
       cancelled = true;
     };
   }, [yoyMonth, yoyYearIds, selectedGroupId, selectedLabId, periods]);
+
+  // Persist chart visibility whenever it changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(chartsStorageKey, JSON.stringify(chartVisibility));
+    } catch {
+      /* ignore */
+    }
+  }, [chartsStorageKey, chartVisibility]);
 
   // Effective spend window: the selected FY's span, narrowed by a preset/custom.
   const [effStart, effEnd] = useMemo(() => {
@@ -720,7 +776,7 @@ export function DashboardPage() {
           />
         </div>
 
-        {/* Drilldown: Lab Group → Lab → Category */}
+        {/* Drilldown: Lab Group → Lab → Category (always shown) */}
         <Card className="p-6 bg-white border-border">
           <h3 className="text-lg font-semibold mb-4 text-foreground">
             Budget Breakdown
@@ -816,10 +872,50 @@ export function DashboardPage() {
           )}
         </Card>
 
+        {/* Customize which charts are shown (below the always-on breakdown table) */}
+        <div className="flex justify-end">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-2">
+                <Settings className="h-4 w-4" />
+                Customize charts
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-64 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-foreground">Show charts</p>
+                <button
+                  type="button"
+                  onClick={resetCharts}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  Reset
+                </button>
+              </div>
+              <div className="space-y-2">
+                {DASHBOARD_CHARTS.map((c) => (
+                  <label
+                    key={c.id}
+                    className="flex items-center gap-2 text-sm cursor-pointer text-foreground"
+                  >
+                    <Checkbox
+                      checked={chartVisibility[c.id] ?? true}
+                      onCheckedChange={() => toggleChart(c.id)}
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </div>
+
         {/* Charts row 1 — lab-group level */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Budget Utilisation by Lab Group / Lab */}
-          <Card className="p-6 bg-white border-border">
+          <Card
+            className={`p-6 bg-white border-border ${chartVisibility.utilisation ? "" : "hidden"}`}
+          >
             <div className="flex items-center justify-between mb-4 gap-2">
               <h3 className="text-lg font-semibold text-foreground">
                 Budget Utilisation by {utilViewBy === "lab" ? "Lab" : "Lab Group"}
@@ -872,7 +968,9 @@ export function DashboardPage() {
           </Card>
 
           {/* Actual vs Budget by Lab Group / Lab */}
-          <Card className="p-6 bg-white border-border">
+          <Card
+            className={`p-6 bg-white border-border ${chartVisibility.actualVsBudget ? "" : "hidden"}`}
+          >
             <div className="flex items-center justify-between mb-4 gap-2">
               <h3 className="text-lg font-semibold text-foreground">
                 Actual vs Budget by {avbViewBy === "lab" ? "Lab" : "Lab Group"}
@@ -908,7 +1006,9 @@ export function DashboardPage() {
         {/* Charts row 2 — category + monthly */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Spending by Category */}
-          <Card className="p-6 bg-white border-border">
+          <Card
+            className={`p-6 bg-white border-border ${chartVisibility.category ? "" : "hidden"}`}
+          >
             <h3 className="text-lg font-semibold mb-4 text-foreground">
               Spending by Category
             </h3>
@@ -929,7 +1029,9 @@ export function DashboardPage() {
           </Card>
 
           {/* Monthly Spending Trend — approved committed spend by month */}
-          <Card className="p-6 bg-white border-border">
+          <Card
+            className={`p-6 bg-white border-border ${chartVisibility.monthly ? "" : "hidden"}`}
+          >
             <h3 className="text-lg font-semibold mb-4 text-foreground">
               Monthly Spending Trend
             </h3>
@@ -955,7 +1057,9 @@ export function DashboardPage() {
         </div>
 
         {/* Category mix — stacked bar per lab group / lab */}
-        <Card className="p-6 bg-white border-border">
+        <Card
+          className={`p-6 bg-white border-border ${chartVisibility.categoryMix ? "" : "hidden"}`}
+        >
           <div className="flex items-center justify-between mb-4 gap-2">
             <h3 className="text-lg font-semibold text-foreground">
               Category Mix by {stackViewBy === "lab" ? "Lab" : "Lab Group"}
@@ -993,7 +1097,9 @@ export function DashboardPage() {
         </Card>
 
         {/* Same-month Year-over-Year comparison across fiscal years */}
-        <Card className="p-6 bg-white border-border">
+        <Card
+          className={`p-6 bg-white border-border ${chartVisibility.yoy ? "" : "hidden"}`}
+        >
           <div className="flex flex-wrap items-center justify-between mb-4 gap-3">
             <h3 className="text-lg font-semibold text-foreground">
               Year-over-Year —{" "}
