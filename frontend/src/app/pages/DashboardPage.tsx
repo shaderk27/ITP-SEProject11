@@ -4,6 +4,7 @@ import {
   useMemo,
   useState,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import {
@@ -13,7 +14,6 @@ import {
   Percent,
   Clock,
   Activity,
-  Settings,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -21,11 +21,11 @@ import { KPICard } from "../components/shared/KPICard";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "../components/ui/popover";
-import { Checkbox } from "../components/ui/checkbox";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
 import { FilterBar } from "../components/shared/FilterBar";
 import { DatePickerField } from "../components/shared/DatePickerField";
 import { RoleInfo } from "../components/shared/RoleInfo";
@@ -142,17 +142,32 @@ const DASHBOARD_CHARTS = [
   { id: "yoy", label: "Year-over-Year" },
 ] as const;
 
-// Load per-user chart visibility from localStorage; default everything shown.
-function loadChartVisibility(key: string): Record<string, boolean> {
-  const defaults = Object.fromEntries(DASHBOARD_CHARTS.map((c) => [c.id, true]));
+// Options offered in each slot's title dropdown (the charts + Empty).
+const SLOT_OPTIONS = [...DASHBOARD_CHARTS, { id: "empty", label: "Empty" }];
+
+// Default slot layout: 6 slots, each showing its original chart.
+const DEFAULT_SLOTS = [
+  "utilisation",
+  "actualVsBudget",
+  "category",
+  "monthly",
+  "categoryMix",
+  "yoy",
+];
+
+// Load per-user slot layout from localStorage; default = DEFAULT_SLOTS.
+function loadSlots(key: string): string[] {
   try {
     const raw = localStorage.getItem(key);
-    if (raw)
-      return { ...defaults, ...(JSON.parse(raw) as Record<string, boolean>) };
+    if (raw) {
+      const parsed = JSON.parse(raw) as string[];
+      if (Array.isArray(parsed) && parsed.length === DEFAULT_SLOTS.length)
+        return parsed;
+    }
   } catch {
     /* ignore malformed storage */
   }
-  return defaults;
+  return [...DEFAULT_SLOTS];
 }
 
 export function DashboardPage() {
@@ -212,23 +227,18 @@ export function DashboardPage() {
       else next.add(id);
       return next;
     });
-  // Chart show/hide, persisted per user in localStorage. Reloaded on the render-
-  // time key guard (below) so switching users swaps in their saved layout.
-  const chartsStorageKey = `dashboard_charts_v1:${user?.id ?? "anon"}`;
-  const [chartVisibility, setChartVisibility] = useState<Record<string, boolean>>(
-    () => loadChartVisibility(chartsStorageKey),
-  );
-  const [prevChartsKey, setPrevChartsKey] = useState(chartsStorageKey);
-  if (chartsStorageKey !== prevChartsKey) {
-    setPrevChartsKey(chartsStorageKey);
-    setChartVisibility(loadChartVisibility(chartsStorageKey));
+  // Per-slot chart choice, persisted per user in localStorage. Reloaded on the
+  // render-time key guard so switching users swaps in their saved layout.
+  const slotsStorageKey = `dashboard_slots_v1:${user?.id ?? "anon"}`;
+  const [slots, setSlots] = useState<string[]>(() => loadSlots(slotsStorageKey));
+  const [prevSlotsKey, setPrevSlotsKey] = useState(slotsStorageKey);
+  if (slotsStorageKey !== prevSlotsKey) {
+    setPrevSlotsKey(slotsStorageKey);
+    setSlots(loadSlots(slotsStorageKey));
   }
-  const toggleChart = (id: string) =>
-    setChartVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
-  const resetCharts = () =>
-    setChartVisibility(
-      Object.fromEntries(DASHBOARD_CHARTS.map((c) => [c.id, true])),
-    );
+  const setSlot = (index: number, chartId: string) =>
+    setSlots((prev) => prev.map((s, i) => (i === index ? chartId : s)));
+  const resetSlots = () => setSlots([...DEFAULT_SLOTS]);
 
   // Auto-lock the dropdown to the Team Lead's own lab group whenever the user
   // changes (e.g. login/logout switching identities). Admins keep "all".
@@ -315,14 +325,14 @@ export function DashboardPage() {
     };
   }, [yoyMonth, yoyYearIds, selectedGroupId, selectedLabId, periods]);
 
-  // Persist chart visibility whenever it changes.
+  // Persist the slot layout whenever it changes.
   useEffect(() => {
     try {
-      localStorage.setItem(chartsStorageKey, JSON.stringify(chartVisibility));
+      localStorage.setItem(slotsStorageKey, JSON.stringify(slots));
     } catch {
       /* ignore */
     }
-  }, [chartsStorageKey, chartVisibility]);
+  }, [slotsStorageKey, slots]);
 
   // Effective spend window: the selected FY's span, narrowed by a preset/custom.
   const [effStart, effEnd] = useMemo(() => {
@@ -624,6 +634,278 @@ export function DashboardPage() {
   const avbAll = avbViewBy === "lab" ? avbData.lab : avbData.group;
   const avbVisible = avbAll.filter((d) => !avbHidden.has(d.name));
 
+  // Render the body (chart-specific controls + chart) for a given chart id.
+  // Any slot can render any chart, so this lives in one place.
+  function renderChartBody(chartId: string): ReactNode {
+    switch (chartId) {
+      case "utilisation":
+        return (
+          <>
+            <div className="flex justify-end mb-3">
+              <select
+                value={utilViewBy}
+                onChange={(e) =>
+                  setUtilViewBy(e.target.value as "group" | "lab")
+                }
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <EntityChips
+              names={utilAll.map((d) => d.name)}
+              hidden={utilHidden}
+              onToggle={toggleHidden(setUtilHidden)}
+            />
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={utilVisible} barCategoryGap="25%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
+                <Tooltip formatter={(v: number) => `${v}%`} />
+                <ReferenceLine
+                  y={50}
+                  stroke="#f59e0b"
+                  strokeDasharray="4 4"
+                  label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                />
+                <ReferenceLine
+                  y={80}
+                  stroke="#f97316"
+                  strokeDasharray="4 4"
+                  label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                />
+                <ReferenceLine
+                  y={95}
+                  stroke="#ef4444"
+                  strokeDasharray="4 4"
+                  label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                />
+                <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
+                  {utilVisible.map((d, i) => (
+                    <Cell key={i} fill={utilColor(d.util)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </>
+        );
+      case "actualVsBudget":
+        return (
+          <>
+            <div className="flex justify-end mb-3">
+              <select
+                value={avbViewBy}
+                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <EntityChips
+              names={avbAll.map((d) => d.name)}
+              hidden={avbHidden}
+              onToggle={toggleHidden(setAvbHidden)}
+            />
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                <Legend />
+                <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </>
+        );
+      case "category":
+        return (
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={categoryData} layout="vertical" barCategoryGap="20%">
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis type="number" stroke="#6b7280" />
+              <YAxis
+                dataKey="category"
+                type="category"
+                stroke="#6b7280"
+                width={100}
+              />
+              <Tooltip />
+              <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        );
+      case "monthly":
+        return (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={monthlyData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="month" stroke="#6b7280" />
+              <YAxis stroke="#6b7280" />
+              <Tooltip
+                formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+              />
+              <Line
+                type="monotone"
+                dataKey="amount"
+                stroke="#3b82f6"
+                strokeWidth={2}
+                name="Actual spend"
+                dot
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        );
+      case "categoryMix":
+        return (
+          <>
+            <div className="flex justify-end mb-3">
+              <select
+                value={stackViewBy}
+                onChange={(e) =>
+                  setStackViewBy(e.target.value as "group" | "lab")
+                }
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart
+                data={stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group}
+                barCategoryGap="20%"
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                <Legend />
+                {stackedCategory.categories.map((cat, i) => (
+                  <Bar
+                    key={cat}
+                    dataKey={cat}
+                    stackId="spend"
+                    fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                    name={cat}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </>
+        );
+      case "yoy":
+        return (
+          <>
+            <div className="flex flex-wrap items-center justify-end mb-3 gap-2">
+              <label className="text-sm text-muted-foreground">Month</label>
+              <select
+                value={yoyMonth}
+                onChange={(e) => setYoyMonth(Number(e.target.value))}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+              >
+                {FISCAL_MONTHS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-3">
+              {periods.map((p) => {
+                const on = yoyYearIds.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => toggleYoyYear(p.id)}
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      on
+                        ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
+                        : "bg-white text-muted-foreground border-border opacity-60"
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                );
+              })}
+            </div>
+            {yoyData.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Pick at least one fiscal year to compare.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={yoyData} barCategoryGap="30%" margin={{ top: 24 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="name" stroke="#6b7280" />
+                  <YAxis stroke="#6b7280" />
+                  <Tooltip
+                    formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                  />
+                  <Bar dataKey="amount" name="Approved spend" radius={[4, 4, 0, 0]}>
+                    {yoyData.map((_, i) => (
+                      <Cell
+                        key={i}
+                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                      />
+                    ))}
+                    <LabelList
+                      dataKey="label"
+                      position="top"
+                      fontSize={12}
+                      fill="#374151"
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </>
+        );
+      default:
+        return (
+          <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+            Empty slot — click the title above to add a chart.
+          </div>
+        );
+    }
+  }
+
+  // One dashboard slot: a card whose clickable title picks which chart it shows.
+  function renderSlot(index: number) {
+    const chartId = slots[index] ?? "empty";
+    const current = SLOT_OPTIONS.find((o) => o.id === chartId);
+    return (
+      <Card key={index} className="p-6 bg-white border-border">
+        <div className="mb-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-lg font-semibold text-foreground hover:text-blue-700"
+              >
+                {current?.label ?? "Empty"}
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {SLOT_OPTIONS.map((o) => (
+                <DropdownMenuItem key={o.id} onClick={() => setSlot(index, o.id)}>
+                  {o.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {renderChartBody(chartId)}
+      </Card>
+    );
+  }
+
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       {/* Filters */}
@@ -872,304 +1154,30 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* Customize which charts are shown (below the always-on breakdown table) */}
+        {/* Reset the slot layout to defaults */}
         <div className="flex justify-end">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-2">
-                <Settings className="h-4 w-4" />
-                Customize charts
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-64 p-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-foreground">Show charts</p>
-                <button
-                  type="button"
-                  onClick={resetCharts}
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  Reset
-                </button>
-              </div>
-              <div className="space-y-2">
-                {DASHBOARD_CHARTS.map((c) => (
-                  <label
-                    key={c.id}
-                    className="flex items-center gap-2 text-sm cursor-pointer text-foreground"
-                  >
-                    <Checkbox
-                      checked={chartVisibility[c.id] ?? true}
-                      onCheckedChange={() => toggleChart(c.id)}
-                    />
-                    {c.label}
-                  </label>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+          <Button variant="outline" size="sm" onClick={resetSlots}>
+            Reset layout
+          </Button>
         </div>
 
-        {/* Charts row 1 — lab-group level */}
+        {/* Chart slots row 1 — click a title to choose the chart */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Budget Utilisation by Lab Group / Lab */}
-          <Card
-            className={`p-6 bg-white border-border ${chartVisibility.utilisation ? "" : "hidden"}`}
-          >
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <h3 className="text-lg font-semibold text-foreground">
-                Budget Utilisation by {utilViewBy === "lab" ? "Lab" : "Lab Group"}
-              </h3>
-              <select
-                value={utilViewBy}
-                onChange={(e) => setUtilViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityChips
-              names={utilAll.map((d) => d.name)}
-              hidden={utilHidden}
-              onToggle={toggleHidden(setUtilHidden)}
-            />
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={utilVisible} barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
-                <Tooltip formatter={(v: number) => `${v}%`} />
-                <ReferenceLine
-                  y={50}
-                  stroke="#f59e0b"
-                  strokeDasharray="4 4"
-                  label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
-                />
-                <ReferenceLine
-                  y={80}
-                  stroke="#f97316"
-                  strokeDasharray="4 4"
-                  label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
-                />
-                <ReferenceLine
-                  y={95}
-                  stroke="#ef4444"
-                  strokeDasharray="4 4"
-                  label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
-                />
-                <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                  {utilVisible.map((d, i) => (
-                    <Cell key={i} fill={utilColor(d.util)} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Actual vs Budget by Lab Group / Lab */}
-          <Card
-            className={`p-6 bg-white border-border ${chartVisibility.actualVsBudget ? "" : "hidden"}`}
-          >
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <h3 className="text-lg font-semibold text-foreground">
-                Actual vs Budget by {avbViewBy === "lab" ? "Lab" : "Lab Group"}
-              </h3>
-              <select
-                value={avbViewBy}
-                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityChips
-              names={avbAll.map((d) => d.name)}
-              hidden={avbHidden}
-              onToggle={toggleHidden(setAvbHidden)}
-            />
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-                <Legend />
-                <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
+          {renderSlot(0)}
+          {renderSlot(1)}
         </div>
 
-        {/* Charts row 2 — category + monthly */}
+        {/* Chart slots row 2 */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Spending by Category */}
-          <Card
-            className={`p-6 bg-white border-border ${chartVisibility.category ? "" : "hidden"}`}
-          >
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Spending by Category
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={categoryData} layout="vertical" barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" stroke="#6b7280" />
-                <YAxis
-                  dataKey="category"
-                  type="category"
-                  stroke="#6b7280"
-                  width={100}
-                />
-                <Tooltip />
-                <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Monthly Spending Trend — approved committed spend by month */}
-          <Card
-            className={`p-6 bg-white border-border ${chartVisibility.monthly ? "" : "hidden"}`}
-          >
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Monthly Spending Trend
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="month" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip
-                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="amount"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  name="Actual spend"
-                  dot
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
+          {renderSlot(2)}
+          {renderSlot(3)}
         </div>
 
-        {/* Category mix — stacked bar per lab group / lab */}
-        <Card
-          className={`p-6 bg-white border-border ${chartVisibility.categoryMix ? "" : "hidden"}`}
-        >
-          <div className="flex items-center justify-between mb-4 gap-2">
-            <h3 className="text-lg font-semibold text-foreground">
-              Category Mix by {stackViewBy === "lab" ? "Lab" : "Lab Group"}
-            </h3>
-            <select
-              value={stackViewBy}
-              onChange={(e) => setStackViewBy(e.target.value as "group" | "lab")}
-              className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-            >
-              <option value="group">By Lab Group</option>
-              <option value="lab">By Lab</option>
-            </select>
-          </div>
-          <ResponsiveContainer width="100%" height={320}>
-            <BarChart
-              data={stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group}
-              barCategoryGap="20%"
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="name" stroke="#6b7280" />
-              <YAxis stroke="#6b7280" />
-              <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-              <Legend />
-              {stackedCategory.categories.map((cat, i) => (
-                <Bar
-                  key={cat}
-                  dataKey={cat}
-                  stackId="spend"
-                  fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                  name={cat}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
+        {/* Chart slot 5 */}
+        {renderSlot(4)}
 
-        {/* Same-month Year-over-Year comparison across fiscal years */}
-        <Card
-          className={`p-6 bg-white border-border ${chartVisibility.yoy ? "" : "hidden"}`}
-        >
-          <div className="flex flex-wrap items-center justify-between mb-4 gap-3">
-            <h3 className="text-lg font-semibold text-foreground">
-              Year-over-Year —{" "}
-              {FISCAL_MONTHS.find((m) => m.value === yoyMonth)?.label}
-            </h3>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-muted-foreground">Month</label>
-              <select
-                value={yoyMonth}
-                onChange={(e) => setYoyMonth(Number(e.target.value))}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
-              >
-                {FISCAL_MONTHS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5 mb-3">
-            {periods.map((p) => {
-              const on = yoyYearIds.has(p.id);
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => toggleYoyYear(p.id)}
-                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                    on
-                      ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
-                      : "bg-white text-muted-foreground border-border opacity-60"
-                  }`}
-                >
-                  {p.name}
-                </button>
-              );
-            })}
-          </div>
-          {yoyData.length === 0 ? (
-            <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-              Pick at least one fiscal year to compare.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={yoyData} barCategoryGap="30%" margin={{ top: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip
-                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                />
-                <Bar dataKey="amount" name="Approved spend" radius={[4, 4, 0, 0]}>
-                  {yoyData.map((_, i) => (
-                    <Cell
-                      key={i}
-                      fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                    />
-                  ))}
-                  <LabelList
-                    dataKey="label"
-                    position="top"
-                    fontSize={12}
-                    fill="#374151"
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
+        {/* Chart slot 6 */}
+        {renderSlot(5)}
       </div>
     </div>
   );
