@@ -142,8 +142,9 @@ const DASHBOARD_CHARTS = [
   { id: "yoy", label: "Year-over-Year" },
 ] as const;
 
-// Options offered in each slot's title dropdown (the charts + Empty).
-const SLOT_OPTIONS = [...DASHBOARD_CHARTS, { id: "empty", label: "Empty" }];
+// Options offered in each slot's title dropdown.
+const SLOT_OPTIONS = [...DASHBOARD_CHARTS];
+const CHART_IDS = new Set<string>(DASHBOARD_CHARTS.map((c) => c.id));
 
 // Default slot layout: 6 slots, each showing its original chart.
 const DEFAULT_SLOTS = [
@@ -156,13 +157,14 @@ const DEFAULT_SLOTS = [
 ];
 
 // Load per-user slot layout from localStorage; default = DEFAULT_SLOTS.
+// Any unknown/legacy value (e.g. an old "empty") falls back to that slot's default.
 function loadSlots(key: string): string[] {
   try {
     const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw) as string[];
       if (Array.isArray(parsed) && parsed.length === DEFAULT_SLOTS.length)
-        return parsed;
+        return parsed.map((s, i) => (CHART_IDS.has(s) ? s : DEFAULT_SLOTS[i]));
     }
   } catch {
     /* ignore malformed storage */
@@ -869,7 +871,7 @@ export function DashboardPage() {
       default:
         return (
           <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-            Empty slot — click the title above to add a chart.
+            No chart selected.
           </div>
         );
     }
