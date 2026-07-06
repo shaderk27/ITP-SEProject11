@@ -43,6 +43,7 @@ import {
   BarChart,
   Bar,
   Cell,
+  LabelList,
   LineChart,
   Line,
   XAxis,
@@ -108,6 +109,22 @@ const CATEGORY_COLORS = [
   "#6b7280",
 ];
 
+// Fiscal-year month order (Apr→Mar); value = calendar month number.
+const FISCAL_MONTHS = [
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+];
+
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -151,6 +168,20 @@ export function DashboardPage() {
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
+  // Same-month Year-over-Year comparison: chosen fiscal month (calendar 1–12)
+  // and which fiscal years to compare; the bars are computed by the effect below.
+  const [yoyMonth, setYoyMonth] = useState(3); // default March
+  const [yoyYearIds, setYoyYearIds] = useState<Set<number>>(new Set());
+  const [yoyData, setYoyData] = useState<
+    { name: string; amount: number; label: string }[]
+  >([]);
+  const toggleYoyYear = (id: number) =>
+    setYoyYearIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   // Auto-lock the dropdown to the Team Lead's own lab group whenever the user
   // changes (e.g. login/logout switching identities). Admins keep "all".
@@ -179,6 +210,8 @@ export function DashboardPage() {
         if (!cancelled) {
           setPeriods(data);
           if (data.length) setSelectedFYPeriodId(data[0].id);
+          // Default the YoY comparison to the two most recent fiscal years.
+          setYoyYearIds(new Set(data.slice(0, 2).map((p) => p.id)));
         }
       })
       .catch(() => {});
@@ -186,6 +219,54 @@ export function DashboardPage() {
       cancelled = true;
     };
   }, []);
+
+  // Same-month Year-over-Year bars: for each selected fiscal year, fetch that
+  // year's monthly spend (scoped to the current lab group / lab) and pull the
+  // chosen fiscal month's bucket. Independent of the global FY selector.
+  useEffect(() => {
+    let cancelled = false;
+    const gid = selectedGroupId !== "all" ? Number(selectedGroupId) : undefined;
+    const lid = selectedLabId !== "all" ? Number(selectedLabId) : undefined;
+    // Empty selection falls through: Promise.all([]) resolves to [] async,
+    // avoiding a synchronous setState in the effect.
+    const chosen = periods.filter((p) => yoyYearIds.has(p.id));
+    Promise.all(
+      chosen.map((p) =>
+        getMonthly(p.start_date, p.end_date, gid, lid).then((pts) => {
+          // Fiscal Apr–Dec sit in the FY's start year; Jan–Mar roll into +1.
+          const startYear = Number(p.start_date.slice(0, 4));
+          const calYear = yoyMonth >= 4 ? startYear : startYear + 1;
+          const key = `${calYear}-${String(yoyMonth).padStart(2, "0")}`;
+          const found = pts.find((x) => x.month === key);
+          return { name: p.name, amount: found ? Number(found.amount) : 0 };
+        }),
+      ),
+    )
+      .then((rows) => {
+        if (cancelled) return;
+        rows.sort((a, b) => a.name.localeCompare(b.name)); // oldest → newest
+        // Bar label = value + % change vs the previous selected year.
+        const labelled = rows.map((r, i) => {
+          const prev = rows[i - 1];
+          let label = `$${r.amount.toLocaleString()}`;
+          if (prev && prev.amount > 0) {
+            const pct = ((r.amount - prev.amount) / prev.amount) * 100;
+            const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "";
+            label += `  ${arrow}${Math.abs(pct).toFixed(0)}%`;
+          } else if (prev && r.amount > 0) {
+            label += "  (new)";
+          }
+          return { ...r, label };
+        });
+        setYoyData(labelled);
+      })
+      .catch(() => {
+        if (!cancelled) setYoyData([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [yoyMonth, yoyYearIds, selectedGroupId, selectedLabId, periods]);
 
   // Effective spend window: the selected FY's span, narrowed by a preset/custom.
   const [effStart, effEnd] = useMemo(() => {
@@ -909,6 +990,79 @@ export function DashboardPage() {
               ))}
             </BarChart>
           </ResponsiveContainer>
+        </Card>
+
+        {/* Same-month Year-over-Year comparison across fiscal years */}
+        <Card className="p-6 bg-white border-border">
+          <div className="flex flex-wrap items-center justify-between mb-4 gap-3">
+            <h3 className="text-lg font-semibold text-foreground">
+              Year-over-Year —{" "}
+              {FISCAL_MONTHS.find((m) => m.value === yoyMonth)?.label}
+            </h3>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-muted-foreground">Month</label>
+              <select
+                value={yoyMonth}
+                onChange={(e) => setYoyMonth(Number(e.target.value))}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+              >
+                {FISCAL_MONTHS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {periods.map((p) => {
+              const on = yoyYearIds.has(p.id);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => toggleYoyYear(p.id)}
+                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                    on
+                      ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
+                      : "bg-white text-muted-foreground border-border opacity-60"
+                  }`}
+                >
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
+          {yoyData.length === 0 ? (
+            <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+              Pick at least one fiscal year to compare.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={yoyData} barCategoryGap="30%" margin={{ top: 24 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="name" stroke="#6b7280" />
+                <YAxis stroke="#6b7280" />
+                <Tooltip
+                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                />
+                <Bar dataKey="amount" name="Approved spend" radius={[4, 4, 0, 0]}>
+                  {yoyData.map((_, i) => (
+                    <Cell
+                      key={i}
+                      fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                    />
+                  ))}
+                  <LabelList
+                    dataKey="label"
+                    position="top"
+                    fontSize={12}
+                    fill="#374151"
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </Card>
       </div>
     </div>
