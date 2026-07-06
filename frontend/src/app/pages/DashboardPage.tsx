@@ -9,7 +9,6 @@ import {
 import {
   DollarSign,
   TrendingUp,
-  AlertCircle,
   Wallet,
   Percent,
   Clock,
@@ -22,7 +21,6 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
 import { DatePickerField } from "../components/shared/DatePickerField";
-import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
 import { format, subDays } from "date-fns";
@@ -55,13 +53,6 @@ import {
   ReferenceLine,
   ResponsiveContainer,
 } from "recharts";
-
-
-const recentUploads = [
-  { id: "UP-2024-152", date: "2026-05-20", records: 45, status: "processed" },
-  { id: "UP-2024-151", date: "2026-05-18", records: 28, status: "review" },
-  { id: "UP-2024-150", date: "2026-05-15", records: 62, status: "processed" },
-];
 
 // Utilisation threshold colour: green <50%, amber <80%, orange <95%, red ≥95%.
 function utilColor(pct: number): string {
@@ -919,80 +910,6 @@ export function DashboardPage() {
             </BarChart>
           </ResponsiveContainer>
         </Card>
-
-        {/* Recent Activity */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Recent Uploads
-            </h3>
-            <div className="space-y-3">
-              {recentUploads.map((upload) => (
-                <div
-                  key={upload.id}
-                  className="flex items-center justify-between py-3 border-b border-border last:border-0"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      {upload.id}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {upload.date} • {upload.records} records
-                    </p>
-                  </div>
-                  <StatusBadge
-                    status={
-                      upload.status === "processed" ? "approved" : "pending"
-                    }
-                  >
-                    {upload.status === "processed" ? "Processed" : "Review"}
-                  </StatusBadge>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Active Alerts
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-start gap-3 p-3 bg-[#fef2f2] rounded-lg border border-[#fecaca]">
-                <AlertCircle className="h-5 w-5 text-[#dc2626] mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#dc2626]">
-                    Budget Exceeded
-                  </p>
-                  <p className="text-xs text-[#991b1b] mt-1">
-                    W3L1 - Food Processing exceeded threshold by 12%
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 bg-[#fef3c7] rounded-lg border border-[#fde68a]">
-                <AlertCircle className="h-5 w-5 text-[#d97706] mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#d97706]">
-                    Approaching Threshold
-                  </p>
-                  <p className="text-xs text-[#92400e] mt-1">
-                    W4L2 - Materials Testing at 88% utilization
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 bg-[#fef3c7] rounded-lg border border-[#fde68a]">
-                <AlertCircle className="h-5 w-5 text-[#d97706] mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#d97706]">
-                    Review Required
-                  </p>
-                  <p className="text-xs text-[#92400e] mt-1">
-                    28 records pending team lead approval
-                  </p>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </div>
       </div>
     </div>
   );
