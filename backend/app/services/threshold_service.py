@@ -150,7 +150,7 @@ def check_and_notify_lab_thresholds(lab_id: int):
             <div style="padding: 24px;">
                 <p style="font-size: 16px; color: #374151;">Hello,</p>
                 <p style="font-size: 16px; color: #374151;">
-                    This is an automated notification that <strong>{lab.lab_code} - {lab.lab_name}</strong> has crossed the 
+                    This is an automated notification that <strong>{lab.lab_code} - {lab.lab_name}</strong> has crossed the
                     <strong style="color: {color};">{threshold_hit}%</strong> budget utilization threshold.
                 </p>
                 <div style="background-color: #f3f4f6; padding: 16px; border-radius: 6px; margin: 20px 0;">

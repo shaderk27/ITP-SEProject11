@@ -40,7 +40,7 @@ interface AlertData {
 
 export function AlertsPage() {
   const { user, hasPermission, canAccessLabGroup } = useAuth();
-  
+
   const [labs, setLabs] = useState<LabData[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -49,7 +49,7 @@ export function AlertsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("all");
   const [selectedGroup, setSelectedGroup] = useState("all");
-  
+
   // Modal State
   const [selectedLabDetails, setSelectedLabDetails] = useState<AlertData | null>(null);
 
@@ -80,10 +80,10 @@ export function AlertsPage() {
       .filter((lab) => lab.budget > 0) // Only look at labs with a budget
       .map((lab) => {
         const util = (lab.spent / lab.budget) * 100;
-        
+
         let type = "none";
         let threshold = 0;
-        
+
         if (util >= 100) { type = "exceeded"; threshold = 100; }
         else if (util >= 95) { type = "critical"; threshold = 95; }
         else if (util >= 80) { type = "alert"; threshold = 80; }
@@ -127,7 +127,7 @@ export function AlertsPage() {
       const matchesType = selectedType === "all" || a.type === selectedType;
       const matchesGroup =
         selectedGroup === "all" || a.labGroupId.toString() === selectedGroup;
-      
+
       return matchesSearch && matchesType && matchesGroup;
     });
   }, [allAlerts, searchTerm, selectedType, selectedGroup]);
@@ -149,7 +149,7 @@ export function AlertsPage() {
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa] relative">
-      
+
       {/* FILTER BAR */}
       <div className="bg-white p-4 border-b border-border flex flex-col sm:flex-row gap-4 items-center justify-between shadow-sm">
         <div className="relative w-full sm:w-96">
@@ -174,7 +174,7 @@ export function AlertsPage() {
             <option value="alert">Alert (80%)</option>
             <option value="warning">Warning (50%)</option>
           </select>
-          
+
           <select
             className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
             value={selectedGroup}
@@ -289,7 +289,7 @@ export function AlertsPage() {
           ) : (
             <div className="divide-y divide-border">
               {filteredAlerts.map((alert) => {
-                
+
                 const alertConfig =
                   alert.type === "exceeded" ? {
                     bgColor: "bg-[#fef2f2]", borderColor: "border-[#fecaca]", iconColor: "text-[#dc2626]", barColor: "bg-[#dc2626]", label: "Exceeded",
@@ -358,9 +358,9 @@ export function AlertsPage() {
                           </div>
 
                           <div className="flex items-center justify-end">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              variant="outline"
+                              size="sm"
                               className="bg-white h-8 text-xs font-semibold"
                               onClick={() => setSelectedLabDetails(alert)}
                             >
@@ -390,7 +390,7 @@ export function AlertsPage() {
               </div>
               <Button variant="ghost" size="sm" onClick={() => setSelectedLabDetails(null)}><X className="h-4 w-4" /></Button>
             </div>
-            
+
             <div className="p-6">
               <table className="w-full text-sm text-left border-collapse">
                 <thead className="bg-gray-50 border-y border-gray-200">
@@ -406,12 +406,12 @@ export function AlertsPage() {
                     // Extract data based on Category ID
                     const allocated = selectedLabDetails.budgets?.[cat.id] || 0;
                     const spent = selectedLabDetails.spentByCategory?.[cat.id] || 0;
-                    
+
                     // Hide categories that have no allocation AND no spending
                     if (allocated === 0 && spent === 0) return null;
-                    
+
                     const balance = allocated - spent;
-                    
+
                     return (
                       <tr key={cat.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="p-3 font-medium text-gray-800">{cat.name}</td>

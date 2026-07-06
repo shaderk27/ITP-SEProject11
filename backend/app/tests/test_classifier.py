@@ -121,7 +121,7 @@ def test_requestor_name_matches_lab_ic() -> None:
     result = classify_line_item(
         FakeDb(),
         row_text="general items",
-        requestor_name="Randy.Kwok",
+        requestor_name="Bobby.Jones",
         wbs="WBS-100",
         purpose="General items",
     )

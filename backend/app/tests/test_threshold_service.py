@@ -37,11 +37,11 @@ def test_check_and_notify_lab_thresholds_80_percent(
         query_mock = MagicMock()
         model = args[0]
 
-        if model == Lab:
+        if model is Lab:
             query_mock.filter.return_value.first.return_value = fake_lab
-        elif model == BudgetPeriod:
+        elif model is BudgetPeriod:
             query_mock.filter.return_value.first.return_value = fake_period
-        elif model == User:
+        elif model is User:
             query_mock.filter.return_value.first.side_effect = [fake_ic, fake_lead]
         else:
             # Handle both direct filters and join().filter() chains

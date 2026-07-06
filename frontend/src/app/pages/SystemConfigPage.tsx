@@ -9,7 +9,7 @@ import { UserManagement } from "../components/config/UserManagement";
 const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => {
   try {
     const tags = new Set<string>();
-    
+
     // Safely convert to strings and trim
     const code = rawCode ? String(rawCode).trim() : "";
     const name = rawName ? String(rawName).trim() : "";
@@ -33,16 +33,16 @@ const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => 
         const room = match[3].toUpperCase();
         const levelShort = parseInt(levelRaw, 10).toString();
 
-        
+
         // Short variations
-        tags.add(`${block}L${levelShort}R${room}`); 
-        tags.add(`${block}-L${levelShort}-${room}`); 
+        tags.add(`${block}L${levelShort}R${room}`);
+        tags.add(`${block}-L${levelShort}-${room}`);
         tags.add(`${block}L${levelShort}${room}`);
-        tags.add(code.toUpperCase()); 
-        
+        tags.add(code.toUpperCase());
+
         if (name) {
           const shortName = name.toLowerCase().endsWith(" lab") ? name.substring(0, name.length - 4).trim() : name;
-          tags.add(`${block}L${levelShort} ${shortName}`); 
+          tags.add(`${block}L${levelShort} ${shortName}`);
         }
       } else {
         tags.add(code.toUpperCase());
@@ -62,11 +62,11 @@ export function SystemConfigPage() {
   const [labs, setLabs] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [orphanedLabs, setOrphanedLabs] = useState<any[]>([]);
-  const [labicUsers, setLabicUsers] = useState<any[]>([]); 
-  const [teamleadUsers, setTeamleadUsers] = useState<any[]>([]); 
+  const [labicUsers, setLabicUsers] = useState<any[]>([]);
+  const [teamleadUsers, setTeamleadUsers] = useState<any[]>([]);
   const [selectedLabIds, setSelectedLabIds] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
 
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
@@ -187,7 +187,7 @@ export function SystemConfigPage() {
   };
 
   const toggleOrphanedLab = (labId: number) => {
-    setSelectedLabIds(prev => 
+    setSelectedLabIds(prev =>
       prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
     );
   };
@@ -206,7 +206,7 @@ export function SystemConfigPage() {
     if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE" });
-      
+
       if (res.ok) {
         fetchConfigData();
       } else {
@@ -214,8 +214,8 @@ export function SystemConfigPage() {
         const errorMsg = await readErrorDetail(res, `Failed to delete ${name}.`);
         alert(errorMsg);
       }
-    } catch (error) { 
-      console.error(error); 
+    } catch (error) {
+      console.error(error);
       alert("A network error occurred while trying to delete.");
     }
   };
@@ -244,14 +244,14 @@ export function SystemConfigPage() {
   const openEditLab = (lab: any) => {
     setEditingLabId(lab.id);
     // Explicitly fallback all nullable fields to "" so React never locks the input
-    setNewLabForm({ 
-      lab_code: lab.code || "", 
-      lab_name: lab.name || "", 
-      lab_group_id: lab.group_id || "", 
-      ic_name: lab.ic_name || "", 
-      ic_email: lab.ic_email || "", 
-      venue: lab.venue || "", 
-      budgets: lab.budgets || {} 
+    setNewLabForm({
+      lab_code: lab.code || "",
+      lab_name: lab.name || "",
+      lab_group_id: lab.group_id || "",
+      ic_name: lab.ic_name || "",
+      ic_email: lab.ic_email || "",
+      venue: lab.venue || "",
+      budgets: lab.budgets || {}
     });
     setIsLabModalOpen(true);
   };
@@ -437,7 +437,7 @@ export function SystemConfigPage() {
                 <table className="w-full">
                   <thead className="bg-[#f8f9fa]">
                     <tr className="border-b border-border text-sm font-medium text-muted-foreground">
-                      <th className="w-12 p-4"></th> 
+                      <th className="w-12 p-4"></th>
                       <th className="text-left p-4">Lab Group Name</th>
                       <th className="text-left p-4">Lab Group Code</th>
                       <th className="text-left p-4">Team Lead</th>
@@ -450,7 +450,7 @@ export function SystemConfigPage() {
                     {labGroups.map((group) => {
                       const isExpanded = expandedGroups.includes(group.id);
                       const groupLabs = labs.filter(l => l.group_id === group.id);
-                      const spent = group.spent || 0; 
+                      const spent = group.spent || 0;
                       const availableBalance = group.budget - spent;
                       const teamlead = teamleadUsers.find(u => u.lab_group_id === group.id);
 
@@ -506,7 +506,7 @@ export function SystemConfigPage() {
                               </div>
                             </td>
                           </tr>
-                          
+
                           {/* THE EXPANDING NESTED LABS TABLE */}
                           {isExpanded && (
                             <tr className="bg-gray-50 border-b border-border shadow-inner">
@@ -516,7 +516,7 @@ export function SystemConfigPage() {
                                     <Beaker className="h-4 w-4 text-gray-400 mr-2" />
                                     <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Assigned Labs</h4>
                                   </div>
-                                  
+
                                   {groupLabs.length === 0 ? (
                                     <p className="text-sm text-gray-400 italic bg-white p-4 rounded-md border border-gray-200">No labs currently assigned to this group.</p>
                                   ) : (
@@ -713,7 +713,7 @@ export function SystemConfigPage() {
       </div>
 
       {/* --- MODALS --- */}
-      
+
       {/* LAB GROUP MODAL */}
       {isGroupModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -722,30 +722,30 @@ export function SystemConfigPage() {
               <h3 className="text-lg font-bold">{editingGroupId ? "Edit Lab Group" : "Add New Lab Group"}</h3>
               <Button variant="ghost" size="sm" onClick={resetGroupModal}><X className="h-4 w-4" /></Button>
             </div>
-            <form onSubmit={(e) => { 
-              e.preventDefault(); 
+            <form onSubmit={(e) => {
+              e.preventDefault();
               const endpoint = editingGroupId ? `/api/config/labgroups/${editingGroupId}` : "/api/config/labgroups";
               const method = editingGroupId ? "PUT" : "POST";
-              
+
               // ALWAYS append assigned lab IDs, regardless of Create or Edit mode!
               const payload = { ...newGroupForm, assigned_lab_ids: selectedLabIds };
-              
-              handleSave(endpoint, method, payload, resetGroupModal); 
+
+              handleSave(endpoint, method, payload, resetGroupModal);
             }} className="space-y-4 p-6">
               <div><label className="text-sm font-medium">Group Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.name} onChange={(e) => setNewGroupForm({...newGroupForm, name: e.target.value})} /></div>
               <div><label className="text-sm font-medium">WBS Prefix</label><input type="text" className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.wbs_code} onChange={(e) => setNewGroupForm({...newGroupForm, wbs_code: e.target.value})} /></div>
               <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newGroupForm.description} onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})} /></div>
-              
+
               {/* THE NEW ORPHANED LABS CHECKLIST */}
               {orphanedLabs.length > 0 && (
                 <div className="mt-4 p-4 border rounded-md bg-gray-50 border-blue-100">
                   <h4 className="text-sm font-semibold text-blue-900 mb-1">Unassigned Labs Detected ({orphanedLabs.length})</h4>
                   <p className="text-xs text-gray-500 mb-3">Select labs to automatically assign to this group.</p>
-                  
+
                   <div className="max-h-36 overflow-y-auto space-y-2 pr-2">
                     {orphanedLabs.map(lab => (
                       <div key={lab.lab_id} className="flex items-center space-x-2">
-                        <input 
+                        <input
                           type="checkbox"
                           id={`lab-${lab.lab_id}`}
                           checked={selectedLabIds.includes(lab.lab_id)}
@@ -775,11 +775,11 @@ export function SystemConfigPage() {
               <h3 className="text-lg font-bold">{editingCategoryId ? "Edit Category" : "Add Spending Category"}</h3>
               <Button variant="ghost" size="sm" onClick={resetCategoryModal}><X className="h-4 w-4" /></Button>
             </div>
-            <form onSubmit={(e) => { 
-              e.preventDefault(); 
+            <form onSubmit={(e) => {
+              e.preventDefault();
               const endpoint = editingCategoryId ? `/api/config/categories/${editingCategoryId}` : "/api/config/categories";
               const method = editingCategoryId ? "PUT" : "POST";
-              handleSave(endpoint, method, newCategoryForm, resetCategoryModal); 
+              handleSave(endpoint, method, newCategoryForm, resetCategoryModal);
             }} className="space-y-4 p-6">
               <div><label className="text-sm font-medium">Category Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" placeholder="e.g. Consumables" value={newCategoryForm.name} onChange={(e) => setNewCategoryForm({...newCategoryForm, name: e.target.value})} /></div>
               <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newCategoryForm.description} onChange={(e) => setNewCategoryForm({...newCategoryForm, description: e.target.value})} /></div>
@@ -846,44 +846,44 @@ export function SystemConfigPage() {
               <h3 className="text-xl font-bold">{editingLabId ? "Edit Lab" : "Add New Lab"}</h3>
               <Button variant="ghost" size="sm" onClick={resetLabModal}><X className="h-5 w-5" /></Button>
             </div>
-            <form onSubmit={(e) => { 
-              e.preventDefault(); 
+            <form onSubmit={(e) => {
+              e.preventDefault();
               const base = editingLabId ? `/api/config/labs/${editingLabId}` : "/api/config/labs";
               const endpoint = `${base}?period_id=${selectedPeriodId}`;
               const method = editingLabId ? "PUT" : "POST";
               handleSave(endpoint, method, { ...newLabForm, lab_group_id: Number(newLabForm.lab_group_id) }, resetLabModal);
             }} className="space-y-4 p-6">
               <div className="grid grid-cols-2 gap-4">
-                
+
                 {/* SMART LAB CODE INPUT */}
                 <div>
                   <label className="text-sm font-medium text-gray-700">Lab Code</label>
-                  <input 
-                    type="text" 
-                    required 
-                    className="w-full mt-1 p-2 border rounded-md uppercase" 
-                    value={newLabForm.lab_code || ""} 
-                    onChange={(e) => { 
-                      const code = String(e.target.value).toUpperCase(); 
+                  <input
+                    type="text"
+                    required
+                    className="w-full mt-1 p-2 border rounded-md uppercase"
+                    value={newLabForm.lab_code || ""}
+                    onChange={(e) => {
+                      const code = String(e.target.value).toUpperCase();
                       const autoVenue = generateVenueTags(code, newLabForm.lab_name);
-                      setNewLabForm({...newLabForm, lab_code: code, venue: autoVenue}); 
-                    }} 
+                      setNewLabForm({...newLabForm, lab_code: code, venue: autoVenue});
+                    }}
                   />
                 </div>
 
                 {/* SMART LAB NAME INPUT */}
                 <div>
                   <label className="text-sm font-medium text-gray-700">Lab Name</label>
-                  <input 
-                    type="text" 
-                    required 
-                    className="w-full mt-1 p-2 border rounded-md" 
-                    value={newLabForm.lab_name || ""} 
-                    onChange={(e) => { 
+                  <input
+                    type="text"
+                    required
+                    className="w-full mt-1 p-2 border rounded-md"
+                    value={newLabForm.lab_name || ""}
+                    onChange={(e) => {
                       const name = String(e.target.value);
                       const autoVenue = generateVenueTags(newLabForm.lab_code, name);
-                      setNewLabForm({...newLabForm, lab_name: name, venue: autoVenue}); 
-                    }} 
+                      setNewLabForm({...newLabForm, lab_name: name, venue: autoVenue});
+                    }}
                   />
                 </div>
 
@@ -894,22 +894,22 @@ export function SystemConfigPage() {
                     {labGroups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
                   </select>
                 </div>
-                
+
                 {/* UNLOCKED & MULTI-LINE VENUE TEXTAREA */}
                 <div className="col-span-2">
                   <label className="text-sm font-medium text-gray-700">Venue / Location Tags</label>
-                  <textarea 
+                  <textarea
                     rows={3}
-                    className="w-full mt-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all resize-y" 
+                    className="w-full mt-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#1e3a8a] focus:border-[#1e3a8a] outline-none transition-all resize-y"
                     placeholder="e.g. Block W2, Level 05, Room 12, SR4A..."
-                    value={newLabForm.venue || ""} 
+                    value={newLabForm.venue || ""}
                     onChange={(e) => setNewLabForm({...newLabForm, venue: String(e.target.value)})}
                   />
                   <p className="text-xs text-muted-foreground mt-1">
                     Tags for location mapping & matching (Separate each tag with a comma).
                   </p>
                 </div>
-                
+
                 <div className="col-span-2 mt-4 pt-4 border-t border-gray-200">
                   <h4 className="font-semibold text-gray-800 mb-4">Set Lab Budgets by Category</h4>
                   {categories.length === 0 ? (
@@ -929,7 +929,7 @@ export function SystemConfigPage() {
                   )}
                 </div>
               </div>
-              
+
               <div className="flex justify-end gap-3 pt-6 mt-4 border-t">
                 <Button type="button" variant="outline" onClick={resetLabModal}>Cancel</Button>
                 <Button type="submit" className="bg-[#1e3a8a] text-white">{editingLabId ? "Save Changes" : "Create Lab"}</Button>
