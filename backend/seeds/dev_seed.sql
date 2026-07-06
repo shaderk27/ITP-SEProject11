@@ -24,7 +24,9 @@ ALTER TABLE purchase_request_lines ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50
 ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_50 BOOLEAN DEFAULT FALSE;
 ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_80 BOOLEAN DEFAULT FALSE;
 ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_95 BOOLEAN DEFAULT FALSE;
-
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
+ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
+ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
 
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
