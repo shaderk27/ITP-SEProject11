@@ -14,6 +14,9 @@ interface FilterBarProps {
   filters?: {
     label: string;
     options: { value: string; label: string }[];
+    // Optional controlled value. If provided, the dropdown reflects this
+    // state externally (instead of being uncontrolled).
+    value?: string;
   }[];
   onSearchChange?: (value: string) => void;
   onFilterChange?: (filterId: string, value: string) => void;
@@ -45,6 +48,7 @@ export function FilterBar({
       {filters.map((filter, index) => (
         <Select
           key={index}
+          value={filter.value}
           onValueChange={(value) => onFilterChange?.(filter.label, value)}
         >
           <SelectTrigger className="w-[180px]">

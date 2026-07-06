@@ -2,12 +2,15 @@ import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
+import { DatePickerField } from "../components/shared/DatePickerField";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 import { ExportConfirmDialog } from "../components/shared/ExportConfirmDialog";
 import { toast } from "sonner";
 import { listCommittedPRs } from "../services/recordsService";
+import { listPeriods, type Period } from "../services/dashboardService";
+import { format, subDays } from "date-fns";
 import type { CommittedPR } from "../types/records";
 
 export function RecordsPage() {
@@ -19,12 +22,43 @@ export function RecordsPage() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [expandedPr, setExpandedPr] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [labGroupFilter, setLabGroupFilter] = useState("all");
+  // Fiscal year is the master time scope; the presets/custom narrow within it.
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
+  const [dateRange, setDateRange] = useState("all");
+  // Custom date range (overrides the preset when either is set).
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const customActive = Boolean(startDate || endDate);
 
   const fetchRecords = async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await listCommittedPRs();
+      // Base window = the selected fiscal year's Apr–Mar span.
+      const period = periods.find((p) => p.id === selectedFYPeriodId);
+      const fyStart = period?.start_date ?? "";
+      const fyEnd = period?.end_date ?? "";
+      // Optional sub-window: custom range wins, else a preset.
+      let rawStart = "";
+      let rawEnd = "";
+      if (startDate || endDate) {
+        rawStart = startDate;
+        rawEnd = endDate;
+      } else if (dateRange === "30d" || dateRange === "90d") {
+        const days = dateRange === "30d" ? 30 : 90;
+        rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
+        rawEnd = format(new Date(), "yyyy-MM-dd");
+      } else if (dateRange === "ytd") {
+        rawStart = `${new Date().getFullYear()}-01-01`;
+        rawEnd = format(new Date(), "yyyy-MM-dd");
+      }
+      // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
+      const effStart = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
+      const effEnd = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
+
+      const data = await listCommittedPRs("all", effStart, effEnd);
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
         setExpandedPr(data[0].pr_id);
@@ -37,11 +71,21 @@ export function RecordsPage() {
     }
   };
 
+  // Load fiscal years once; default to the newest (current FY).
+  useEffect(() => {
+    listPeriods()
+      .then((data) => {
+        setPeriods(data);
+        if (data.length) setSelectedFYPeriodId(data[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchRecords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.email]);
+  }, [user?.email, selectedFYPeriodId, dateRange, startDate, endDate, periods]);
 
   const handleExport = () => {
     // Real CSV/Excel export is future work; for now confirm the click.
@@ -57,35 +101,67 @@ export function RecordsPage() {
   ).map((name) => ({ value: name.toLowerCase(), label: name }));
 
   const q = searchQuery.trim().toLowerCase();
-  const filteredRecords = q
-    ? records.filter((pr) => {
-        if (pr.source_pr_number?.toLowerCase().includes(q)) return true;
-        if (pr.requestor_name?.toLowerCase().includes(q)) return true;
-        if (pr.wbs_code?.toLowerCase().includes(q)) return true;
-        if (pr.lab_group_name?.toLowerCase().includes(q)) return true;
-        return pr.lines.some(
-          (line) =>
-            line.item_description?.toLowerCase().includes(q) ||
-            line.lab_name?.toLowerCase().includes(q) ||
-            line.pr_status?.toLowerCase().includes(q),
-        );
-      })
-    : records;
+  const filteredRecords = records.filter((pr) => {
+    // Lab Group dropdown filter (option value is the lowercased group name).
+    if (
+      labGroupFilter !== "all" &&
+      pr.lab_group_name?.toLowerCase() !== labGroupFilter
+    ) {
+      return false;
+    }
+    if (!q) return true;
+    if (pr.source_pr_number?.toLowerCase().includes(q)) return true;
+    if (pr.requestor_name?.toLowerCase().includes(q)) return true;
+    if (pr.wbs_code?.toLowerCase().includes(q)) return true;
+    if (pr.lab_group_name?.toLowerCase().includes(q)) return true;
+    return pr.lines.some(
+      (line) =>
+        line.item_description?.toLowerCase().includes(q) ||
+        line.lab_name?.toLowerCase().includes(q) ||
+        line.pr_status?.toLowerCase().includes(q),
+    );
+  });
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       <FilterBar
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
+        onFilterChange={(filterId, value) => {
+          if (filterId === "Fiscal Year")
+            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
+          if (filterId === "Lab Group") setLabGroupFilter(value);
+          if (filterId === "Date Range") {
+            // Picking a preset clears any custom range so the preset applies.
+            setDateRange(value);
+            setStartDate("");
+            setEndDate("");
+          }
+        }}
         filters={[
           {
+            label: "Fiscal Year",
+            value:
+              selectedFYPeriodId == null
+                ? ""
+                : selectedFYPeriodId === 0
+                  ? "all"
+                  : String(selectedFYPeriodId),
+            options: [
+              { value: "all", label: "All time" },
+              ...periods.map((p) => ({ value: String(p.id), label: p.name })),
+            ],
+          },
+          {
             label: "Lab Group",
+            value: labGroupFilter,
             options: [{ value: "all", label: "All Lab Groups" }, ...labGroupOptions],
           },
           {
             label: "Date Range",
+            value: dateRange,
             options: [
-              { value: "all", label: "All time" },
+              { value: "all", label: "Whole year" },
               { value: "30d", label: "Last 30 days" },
               { value: "90d", label: "Last 90 days" },
               { value: "ytd", label: "Year to date" },
@@ -96,6 +172,44 @@ export function RecordsPage() {
         onExport={() => setShowExportDialog(true)}
       />
 
+      {/* Custom date range — overrides the preset when set. */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
+        <span className="text-muted-foreground">Custom range:</span>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">From</span>
+          <DatePickerField
+            value={startDate}
+            maxDate={endDate || undefined}
+            onChange={setStartDate}
+          />
+        </label>
+        <label className="flex items-center gap-1.5">
+          <span className="text-muted-foreground">To</span>
+          <DatePickerField
+            value={endDate}
+            minDate={startDate || undefined}
+            onChange={setEndDate}
+          />
+        </label>
+        {customActive && (
+          <>
+            <span className="text-xs text-blue-600">
+              Custom range active — preset ignored
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setStartDate("");
+                setEndDate("");
+              }}
+            >
+              Clear
+            </Button>
+          </>
+        )}
+      </div>
+
       <div className="p-6">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
@@ -105,10 +219,12 @@ export function RecordsPage() {
                 ? "Loading…"
                 : q
                   ? `${filteredRecords.length} of ${records.length} committed purchase request${records.length === 1 ? "" : "s"} match "${searchQuery.trim()}".`
-                  : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
+                  : labGroupFilter !== "all"
+                    ? `${filteredRecords.length} of ${records.length} committed purchase request${records.length === 1 ? "" : "s"} shown.`
+                    : `${records.length} committed purchase request${records.length === 1 ? "" : "s"}.`}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={fetchRecords} disabled={loading}>
+          <Button size="sm" variant="outline" onClick={() => fetchRecords()} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-1 ${loading ? "animate-spin" : ""}`} />
             Refresh
           </Button>
@@ -178,6 +294,7 @@ export function RecordsPage() {
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground">Lab</th>
                           <th className="text-left p-3 text-xs font-medium text-muted-foreground">Category</th>
+                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">PR Date</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Qty</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Unit Rate</th>
                           <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
@@ -194,6 +311,9 @@ export function RecordsPage() {
                               <td className="p-3 text-sm text-foreground">{line.item_description || "—"}</td>
                               <td className="p-3 text-sm text-muted-foreground">{line.lab_name}</td>
                               <td className="p-3 text-sm text-muted-foreground">{line.category_name}</td>
+                              <td className="p-3 text-sm text-muted-foreground">
+                                {pr.request_date ? formatDateOnly(pr.request_date) : "—"}
+                              </td>
                               <td className="p-3 text-sm text-right text-muted-foreground">
                                 {line.qty ?? "—"}
                               </td>
@@ -249,6 +369,18 @@ function formatDate(iso: string): string {
   } catch {
     return iso;
   }
+}
+
+// Date-only formatter for PR Sub Date. Parses the yyyy-mm-dd parts as a local
+// date so a UTC-midnight ISO string never shifts to the previous day.
+function formatDateOnly(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+  });
 }
 
 function formatAmount(raw: string): string {

@@ -281,6 +281,9 @@ function PRGroupCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const total = pr.lines.length;
+  const openCount = pr.lines.filter((l) => l.queue_status === "open").length;
+  const allResolved = openCount === 0;
   return (
     <div className="rounded-md border border-border bg-white overflow-hidden">
       <button
@@ -293,12 +296,18 @@ function PRGroupCard({
           <div>
             <p className="text-sm font-semibold text-foreground">{pr.source_pr_number}</p>
             <p className="text-xs text-muted-foreground">
-              {pr.lines.length} line error{pr.lines.length === 1 ? "" : "s"}
+              {allResolved
+                ? `${total} line${total === 1 ? "" : "s"} · all resolved`
+                : `${openCount} unresolved of ${total} line${total === 1 ? "" : "s"}`}
               {pr.requestor_name ? ` · ${pr.requestor_name}` : ""}
             </p>
           </div>
         </div>
-        <StatusBadge status="warning">Needs line edits</StatusBadge>
+        {allResolved ? (
+          <StatusBadge status="healthy">Resolved</StatusBadge>
+        ) : (
+          <StatusBadge status="warning">Needs line edits</StatusBadge>
+        )}
       </button>
 
       {isExpanded && (
@@ -312,6 +321,7 @@ function PRGroupCard({
                 <th className="text-left p-3 text-xs font-medium text-muted-foreground">Current Classification</th>
                 <th className="text-left p-3 text-xs font-medium text-muted-foreground">Issue</th>
                 <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
+                <th className="text-center p-3 text-xs font-medium text-muted-foreground">Status</th>
                 <th className="text-center p-3 text-xs font-medium text-muted-foreground">Action</th>
               </tr>
             </thead>
@@ -353,6 +363,13 @@ function LineRow({ line }: { line: ReviewQueueLine }) {
         <td className="p-3 text-xs text-muted-foreground max-w-sm">{line.review_reason}</td>
         <td className="p-3 text-sm text-right font-medium text-foreground">
           ${formatAmount(line.amount_gst)}
+        </td>
+        <td className="p-3 text-center">
+          {line.queue_status === "resolved" ? (
+            <StatusBadge status="healthy">Resolved</StatusBadge>
+          ) : (
+            <StatusBadge status="warning">Open</StatusBadge>
+          )}
         </td>
         <td className="p-3 text-center">
           <Link to={`/review/${line.review_queue_id}`}>
