@@ -879,7 +879,7 @@ export function DashboardPage() {
 
   // One dashboard slot: a card whose clickable title picks which chart it shows.
   function renderSlot(index: number) {
-    const chartId = slots[index] ?? "empty";
+    const chartId = slots[index] ?? DASHBOARD_CHARTS[0].id;
     const current = SLOT_OPTIONS.find((o) => o.id === chartId);
     return (
       <Card key={index} className="p-6 bg-white border-border">
@@ -890,7 +890,7 @@ export function DashboardPage() {
                 type="button"
                 className="inline-flex items-center gap-1 text-lg font-semibold text-foreground hover:text-blue-700"
               >
-                {current?.label ?? "Empty"}
+                {current?.label ?? "Select chart"}
                 <ChevronDown className="h-4 w-4" />
               </button>
             </DropdownMenuTrigger>
