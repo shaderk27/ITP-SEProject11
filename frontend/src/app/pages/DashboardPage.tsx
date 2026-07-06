@@ -14,6 +14,7 @@ import {
   Percent,
   Clock,
   Activity,
+  Filter,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -26,6 +27,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../components/ui/popover";
+import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
 import { DatePickerField } from "../components/shared/DatePickerField";
 import { RoleInfo } from "../components/shared/RoleInfo";
@@ -70,36 +77,81 @@ function utilColor(pct: number): string {
   return "#10b981";
 }
 
-// Toggle chips to include/exclude specific entities from a comparison chart.
-function EntityChips({
+// Max entities shown at once in a comparison chart.
+const MAX_COMPARE = 5;
+
+// Searchable selector: pick up to `max` entities to display in a comparison chart.
+// Starts empty — the user checks what they want to see.
+function EntityFilter({
   names,
-  hidden,
+  selected,
   onToggle,
+  max,
 }: {
   names: string[];
-  hidden: Set<string>;
+  selected: Set<string>;
   onToggle: (name: string) => void;
+  max: number;
 }) {
-  if (names.length <= 1) return null;
+  const [query, setQuery] = useState("");
+  if (names.length === 0) return null;
+  const atMax = selected.size >= max;
+  const filtered = names.filter((n) =>
+    n.toLowerCase().includes(query.toLowerCase()),
+  );
   return (
-    <div className="flex flex-wrap gap-1.5 mb-3">
-      {names.map((n) => {
-        const on = !hidden.has(n);
-        return (
-          <button
-            key={n}
-            type="button"
-            onClick={() => onToggle(n)}
-            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-              on
-                ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
-                : "bg-white text-muted-foreground border-border line-through opacity-60"
-            }`}
-          >
-            {n}
-          </button>
-        );
-      })}
+    <div className="mb-3">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-2">
+            <Filter className="h-4 w-4" />
+            Select ({selected.size}/{max})
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-2">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search…"
+            className="w-full text-sm border border-border rounded-md px-2 py-1 mb-2"
+          />
+          <div className="max-h-60 overflow-y-auto space-y-1">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-1 py-2">
+                No matches.
+              </p>
+            ) : (
+              filtered.map((n) => {
+                const on = selected.has(n);
+                const disabled = !on && atMax;
+                return (
+                  <label
+                    key={n}
+                    className={`flex items-center gap-2 text-sm px-1 py-0.5 rounded ${
+                      disabled
+                        ? "opacity-40 cursor-not-allowed"
+                        : "cursor-pointer hover:bg-muted"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={on}
+                      disabled={disabled}
+                      onCheckedChange={() => onToggle(n)}
+                    />
+                    <span className="truncate">{n}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+          {atMax && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Max {max} selected — uncheck one to swap.
+            </p>
+          )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -201,14 +253,15 @@ export function DashboardPage() {
   const [avbViewBy, setAvbViewBy] = useState<"group" | "lab">("group");
   const [stackViewBy, setStackViewBy] = useState<"group" | "lab">("group");
   // Per-chart entity include/exclude (by name) for the comparison bar charts.
-  const [utilHidden, setUtilHidden] = useState<Set<string>>(new Set());
-  const [avbHidden, setAvbHidden] = useState<Set<string>>(new Set());
-  const toggleHidden =
+  const [utilShown, setUtilShown] = useState<Set<string>>(new Set());
+  const [avbShown, setAvbShown] = useState<Set<string>>(new Set());
+  // Toggle an entity in/out of a chart's shown set, capped at MAX_COMPARE.
+  const toggleShown =
     (setter: Dispatch<SetStateAction<Set<string>>>) => (name: string) =>
       setter((prev) => {
         const next = new Set(prev);
         if (next.has(name)) next.delete(name);
-        else next.add(name);
+        else if (next.size < MAX_COMPARE) next.add(name);
         return next;
       });
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -632,9 +685,31 @@ export function DashboardPage() {
   // Comparison-chart series: the full entity list (for the chips) and the
   // subset actually plotted (chips deselected → excluded).
   const utilAll = utilViewBy === "lab" ? utilData.lab : utilData.group;
-  const utilVisible = utilAll.filter((d) => !utilHidden.has(d.name));
   const avbAll = avbViewBy === "lab" ? avbData.lab : avbData.group;
-  const avbVisible = avbAll.filter((d) => !avbHidden.has(d.name));
+  // Seed each chart's selection when its entity list changes: ≤ MAX_COMPARE
+  // auto-shows all; more than that starts empty so the user picks up to the cap.
+  const utilNames = utilAll.map((d) => d.name).join("|");
+  const [prevUtilNames, setPrevUtilNames] = useState(utilNames);
+  if (utilNames !== prevUtilNames) {
+    setPrevUtilNames(utilNames);
+    setUtilShown(
+      utilAll.length <= MAX_COMPARE
+        ? new Set(utilAll.map((d) => d.name))
+        : new Set(),
+    );
+  }
+  const avbNames = avbAll.map((d) => d.name).join("|");
+  const [prevAvbNames, setPrevAvbNames] = useState(avbNames);
+  if (avbNames !== prevAvbNames) {
+    setPrevAvbNames(avbNames);
+    setAvbShown(
+      avbAll.length <= MAX_COMPARE
+        ? new Set(avbAll.map((d) => d.name))
+        : new Set(),
+    );
+  }
+  const utilVisible = utilAll.filter((d) => utilShown.has(d.name));
+  const avbVisible = avbAll.filter((d) => avbShown.has(d.name));
 
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
@@ -655,42 +730,50 @@ export function DashboardPage() {
                 <option value="lab">By Lab</option>
               </select>
             </div>
-            <EntityChips
+            <EntityFilter
               names={utilAll.map((d) => d.name)}
-              hidden={utilHidden}
-              onToggle={toggleHidden(setUtilHidden)}
+              selected={utilShown}
+              onToggle={toggleShown(setUtilShown)}
+              max={MAX_COMPARE}
             />
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={utilVisible} barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
-                <Tooltip formatter={(v: number) => `${v}%`} />
-                <ReferenceLine
-                  y={50}
-                  stroke="#f59e0b"
-                  strokeDasharray="4 4"
-                  label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
-                />
-                <ReferenceLine
-                  y={80}
-                  stroke="#f97316"
-                  strokeDasharray="4 4"
-                  label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
-                />
-                <ReferenceLine
-                  y={95}
-                  stroke="#ef4444"
-                  strokeDasharray="4 4"
-                  label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
-                />
-                <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                  {utilVisible.map((d, i) => (
-                    <Cell key={i} fill={utilColor(d.util)} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            {utilVisible.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Use the Select button above to choose up to {MAX_COMPARE} to
+                display.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={utilVisible} barCategoryGap="25%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="name" stroke="#6b7280" />
+                  <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
+                  <Tooltip formatter={(v: number) => `${v}%`} />
+                  <ReferenceLine
+                    y={50}
+                    stroke="#f59e0b"
+                    strokeDasharray="4 4"
+                    label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                  />
+                  <ReferenceLine
+                    y={80}
+                    stroke="#f97316"
+                    strokeDasharray="4 4"
+                    label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                  />
+                  <ReferenceLine
+                    y={95}
+                    stroke="#ef4444"
+                    strokeDasharray="4 4"
+                    label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                  />
+                  <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
+                    {utilVisible.map((d, i) => (
+                      <Cell key={i} fill={utilColor(d.util)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </>
         );
       case "actualVsBudget":
@@ -706,22 +789,30 @@ export function DashboardPage() {
                 <option value="lab">By Lab</option>
               </select>
             </div>
-            <EntityChips
+            <EntityFilter
               names={avbAll.map((d) => d.name)}
-              hidden={avbHidden}
-              onToggle={toggleHidden(setAvbHidden)}
+              selected={avbShown}
+              onToggle={toggleShown(setAvbShown)}
+              max={MAX_COMPARE}
             />
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-                <Legend />
-                <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            {avbVisible.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Use the Select button above to choose up to {MAX_COMPARE} to
+                display.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="name" stroke="#6b7280" />
+                  <YAxis stroke="#6b7280" />
+                  <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                  <Legend />
+                  <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </>
         );
       case "category":
