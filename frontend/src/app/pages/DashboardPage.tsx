@@ -247,18 +247,61 @@ function trunc(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n)}..` : s;
 }
 
+// Wrap a label to <=2 lines at word boundaries; if a word can't fit, truncate.
+function wrapLabel(s: string, n: number): string[] {
+  if (s.length <= n) return [s];
+  const words = s.split(" ");
+  let line1 = "";
+  let i = 0;
+  while (i < words.length) {
+    const w = words[i] ?? "";
+    const candidate = line1 ? `${line1} ${w}` : w;
+    if (candidate.length > n) break;
+    line1 = candidate;
+    i++;
+  }
+  const rest = words.slice(i).join(" ");
+  if (line1 && rest && rest.length <= n) return [line1, rest];
+  return [trunc(s, n)];
+}
+
+// Multi-line x-axis tick: wraps long labels instead of truncating when there's room.
+function WrapTick(props: {
+  x?: number;
+  y?: number;
+  payload?: { value?: string | number };
+  charsPerLine: number;
+}) {
+  const { x = 0, y = 0, payload, charsPerLine } = props;
+  const lines = wrapLabel(String(payload?.value ?? ""), charsPerLine);
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {lines.map((line, i) => (
+        <text
+          key={i}
+          x={0}
+          dy={16 + i * 14}
+          textAnchor="middle"
+          fill="#6b7280"
+          fontSize={12}
+        >
+          {line}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 // Wraps a bar chart and measures its width so x-axis labels only truncate when
 // the card is too narrow to fit them. Wide cards show full names.
 function AdaptiveBarChart({
   height,
   bars,
-  maxLabelLen,
   children,
 }: {
   height: number;
   bars: number;
-  maxLabelLen: number;
-  children: (maxChars: number) => ReactElement;
+  children: (charsPerLine: number) => ReactElement;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -271,15 +314,15 @@ function AdaptiveBarChart({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // Space each bar's label gets (minus the y-axis gutter). Show full names if
-  // they fit with a gap; otherwise truncate to fit. ~7.5px/char, ~14px gap.
+  // Chars that fit per label line (minus the y-axis gutter + a gap). ~7.5px/char.
+  // Before the first measurement, assume wide (no wrap/truncate).
   const band = width === 0 || bars === 0 ? 0 : (width - 50) / bars;
-  const fits = band === 0 || band >= maxLabelLen * 7.5 + 22;
-  const maxChars = fits ? 999 : Math.max(4, Math.floor((band - 22) / 7.5));
+  const charsPerLine =
+    band === 0 ? 999 : Math.max(4, Math.floor((band - 22) / 7.5));
   return (
     <div ref={ref}>
       <ResponsiveContainer width="100%" height={height}>
-        {children(maxChars)}
+        {children(charsPerLine)}
       </ResponsiveContainer>
     </div>
   );
@@ -825,11 +868,7 @@ export function DashboardPage() {
                 display.
               </div>
             ) : (
-              <AdaptiveBarChart
-                height={300}
-                bars={utilVisible.length}
-                maxLabelLen={Math.max(0, ...utilVisible.map((d) => d.name.length))}
-              >
+              <AdaptiveBarChart height={300} bars={utilVisible.length}>
                 {(maxChars) => (
                   <BarChart data={utilVisible} barCategoryGap="25%">
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -837,7 +876,8 @@ export function DashboardPage() {
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      tickFormatter={(s: string) => trunc(s, maxChars)}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
                     />
                     <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
                     <Tooltip formatter={(v: number) => `${v}%`} />
@@ -896,11 +936,7 @@ export function DashboardPage() {
                 display.
               </div>
             ) : (
-              <AdaptiveBarChart
-                height={300}
-                bars={avbVisible.length}
-                maxLabelLen={Math.max(0, ...avbVisible.map((d) => d.name.length))}
-              >
+              <AdaptiveBarChart height={300} bars={avbVisible.length}>
                 {(maxChars) => (
                   <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -908,7 +944,8 @@ export function DashboardPage() {
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      tickFormatter={(s: string) => trunc(s, maxChars)}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
                     />
                     <YAxis stroke="#6b7280" />
                     <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
@@ -987,14 +1024,7 @@ export function DashboardPage() {
                 display.
               </div>
             ) : (
-              <AdaptiveBarChart
-                height={320}
-                bars={stackVisible.length}
-                maxLabelLen={Math.max(
-                  0,
-                  ...stackVisible.map((r) => String(r.name).length),
-                )}
-              >
+              <AdaptiveBarChart height={320} bars={stackVisible.length}>
                 {(maxChars) => (
                   <BarChart data={stackVisible} barCategoryGap="20%">
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -1002,7 +1032,8 @@ export function DashboardPage() {
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      tickFormatter={(s: string) => trunc(s, maxChars)}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
                     />
                     <YAxis stroke="#6b7280" />
                     <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
