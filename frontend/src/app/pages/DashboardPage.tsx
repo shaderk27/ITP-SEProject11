@@ -2,8 +2,10 @@ import {
   Fragment,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
+  type ReactElement,
   type ReactNode,
   type SetStateAction,
 } from "react";
@@ -238,6 +240,49 @@ function loadSlots(key: string): string[] {
     /* ignore malformed storage */
   }
   return [...DEFAULT_SLOTS];
+}
+
+// Truncate a label to n chars (full name still shows in the tooltip).
+function trunc(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}..` : s;
+}
+
+// Wraps a bar chart and measures its width so x-axis labels only truncate when
+// the card is too narrow to fit them. Wide cards show full names.
+function AdaptiveBarChart({
+  height,
+  bars,
+  maxLabelLen,
+  children,
+}: {
+  height: number;
+  bars: number;
+  maxLabelLen: number;
+  children: (maxChars: number) => ReactElement;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setWidth(entries[0]?.contentRect.width ?? 0);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Space each bar's label gets (minus the y-axis gutter). Show full names if
+  // they fit with a gap; otherwise truncate to fit. ~7.5px/char, ~14px gap.
+  const band = width === 0 || bars === 0 ? 0 : (width - 50) / bars;
+  const fits = band === 0 || band >= maxLabelLen * 7.5 + 22;
+  const maxChars = fits ? 999 : Math.max(4, Math.floor((band - 22) / 7.5));
+  return (
+    <div ref={ref}>
+      <ResponsiveContainer width="100%" height={height}>
+        {children(maxChars)}
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
 export function DashboardPage() {
@@ -780,37 +825,48 @@ export function DashboardPage() {
                 display.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={utilVisible} barCategoryGap="25%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="name" stroke="#6b7280" />
-                  <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
-                  <Tooltip formatter={(v: number) => `${v}%`} />
-                  <ReferenceLine
-                    y={50}
-                    stroke="#f59e0b"
-                    strokeDasharray="4 4"
-                    label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
-                  />
-                  <ReferenceLine
-                    y={80}
-                    stroke="#f97316"
-                    strokeDasharray="4 4"
-                    label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
-                  />
-                  <ReferenceLine
-                    y={95}
-                    stroke="#ef4444"
-                    strokeDasharray="4 4"
-                    label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
-                  />
-                  <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                    {utilVisible.map((d, i) => (
-                      <Cell key={i} fill={utilColor(d.util)} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+              <AdaptiveBarChart
+                height={300}
+                bars={utilVisible.length}
+                maxLabelLen={Math.max(0, ...utilVisible.map((d) => d.name.length))}
+              >
+                {(maxChars) => (
+                  <BarChart data={utilVisible} barCategoryGap="25%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      tickFormatter={(s: string) => trunc(s, maxChars)}
+                    />
+                    <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
+                    <Tooltip formatter={(v: number) => `${v}%`} />
+                    <ReferenceLine
+                      y={50}
+                      stroke="#f59e0b"
+                      strokeDasharray="4 4"
+                      label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                    />
+                    <ReferenceLine
+                      y={80}
+                      stroke="#f97316"
+                      strokeDasharray="4 4"
+                      label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                    />
+                    <ReferenceLine
+                      y={95}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                    />
+                    <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
+                      {utilVisible.map((d, i) => (
+                        <Cell key={i} fill={utilColor(d.util)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
             )}
           </>
         );
@@ -840,17 +896,28 @@ export function DashboardPage() {
                 display.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="name" stroke="#6b7280" />
-                  <YAxis stroke="#6b7280" />
-                  <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-                  <Legend />
-                  <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <AdaptiveBarChart
+                height={300}
+                bars={avbVisible.length}
+                maxLabelLen={Math.max(0, ...avbVisible.map((d) => d.name.length))}
+              >
+                {(maxChars) => (
+                  <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      tickFormatter={(s: string) => trunc(s, maxChars)}
+                    />
+                    <YAxis stroke="#6b7280" />
+                    <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                    <Legend />
+                    <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
             )}
           </>
         );
@@ -920,24 +987,38 @@ export function DashboardPage() {
                 display.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={320}>
-                <BarChart data={stackVisible} barCategoryGap="20%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="name" stroke="#6b7280" />
-                  <YAxis stroke="#6b7280" />
-                  <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-                  <Legend />
-                  {stackedCategory.categories.map((cat, i) => (
-                    <Bar
-                      key={cat}
-                      dataKey={cat}
-                      stackId="spend"
-                      fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                      name={cat}
+              <AdaptiveBarChart
+                height={320}
+                bars={stackVisible.length}
+                maxLabelLen={Math.max(
+                  0,
+                  ...stackVisible.map((r) => String(r.name).length),
+                )}
+              >
+                {(maxChars) => (
+                  <BarChart data={stackVisible} barCategoryGap="20%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      tickFormatter={(s: string) => trunc(s, maxChars)}
                     />
-                  ))}
-                </BarChart>
-              </ResponsiveContainer>
+                    <YAxis stroke="#6b7280" />
+                    <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                    <Legend />
+                    {stackedCategory.categories.map((cat, i) => (
+                      <Bar
+                        key={cat}
+                        dataKey={cat}
+                        stackId="spend"
+                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                        name={cat}
+                      />
+                    ))}
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
             )}
           </>
         );
