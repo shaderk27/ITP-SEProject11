@@ -90,12 +90,14 @@ function EntityFilter({
   onToggle,
   onClear,
   max,
+  label = "Select",
 }: {
   names: string[];
   selected: Set<string>;
   onToggle: (name: string) => void;
   onClear: () => void;
   max: number;
+  label?: string;
 }) {
   const [query, setQuery] = useState("");
   if (names.length === 0) return null;
@@ -109,7 +111,7 @@ function EntityFilter({
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Filter className="h-4 w-4" />
-            Select ({selected.size}/{max})
+            {label} ({selected.size}/{max})
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-2">
@@ -360,6 +362,7 @@ export function DashboardPage() {
   const [utilShown, setUtilShown] = useState<Set<string>>(new Set());
   const [avbShown, setAvbShown] = useState<Set<string>>(new Set());
   const [stackShown, setStackShown] = useState<Set<string>>(new Set());
+  const [categoryShown, setCategoryShown] = useState<Set<string>>(new Set());
   // Toggle an entity in/out of a chart's shown set, capped at MAX_COMPARE.
   const toggleShown =
     (setter: Dispatch<SetStateAction<Set<string>>>) => (name: string) =>
@@ -377,9 +380,10 @@ export function DashboardPage() {
   // and which fiscal years to compare; the bars are computed by the effect below.
   const [yoyMonth, setYoyMonth] = useState(3); // default March
   const [yoyYearIds, setYoyYearIds] = useState<Set<number>>(new Set());
-  const [yoyData, setYoyData] = useState<
-    { name: string; amount: number; label: string }[]
-  >([]);
+  const [yoyViewBy, setYoyViewBy] = useState<"group" | "lab">("group");
+  // One row per entity (lab group / lab), with a spend value keyed by each year.
+  const [yoyData, setYoyData] = useState<Record<string, number | string>[]>([]);
+  const [yoyEntityShown, setYoyEntityShown] = useState<Set<string>>(new Set());
   // Toggle a fiscal year (by name) in the YoY comparison, capped at MAX_COMPARE.
   const toggleYoyYearByName = (name: string) =>
     setYoyYearIds((prev) => {
@@ -440,45 +444,57 @@ export function DashboardPage() {
     };
   }, []);
 
-  // Same-month Year-over-Year bars: for each selected fiscal year, fetch that
-  // year's monthly spend (scoped to the current lab group / lab) and pull the
-  // chosen fiscal month's bucket. Independent of the global FY selector.
+  // Year-over-Year: for each selected fiscal year, fetch that year's spend for
+  // the chosen month via the breakdown (one call per year), then group entities
+  // (lab groups or labs) side by side with a bar per year.
   useEffect(() => {
     let cancelled = false;
-    const gid = selectedGroupId !== "all" ? Number(selectedGroupId) : undefined;
-    const lid = selectedLabId !== "all" ? Number(selectedLabId) : undefined;
-    // Empty selection falls through: Promise.all([]) resolves to [] async,
-    // avoiding a synchronous setState in the effect.
+    // Empty selection falls through: Promise.all([]) resolves to [] async.
     const chosen = periods.filter((p) => yoyYearIds.has(p.id));
     Promise.all(
-      chosen.map((p) =>
-        getMonthly(p.start_date, p.end_date, gid, lid).then((pts) => {
-          // Fiscal Apr–Dec sit in the FY's start year; Jan–Mar roll into +1.
-          const startYear = Number(p.start_date.slice(0, 4));
-          const calYear = yoyMonth >= 4 ? startYear : startYear + 1;
-          const key = `${calYear}-${String(yoyMonth).padStart(2, "0")}`;
-          const found = pts.find((x) => x.month === key);
-          return { name: p.name, amount: found ? Number(found.amount) : 0 };
-        }),
-      ),
+      chosen.map((p) => {
+        // Fiscal Apr–Dec sit in the FY's start year; Jan–Mar roll into +1.
+        const startYear = Number(p.start_date.slice(0, 4));
+        const calYear = yoyMonth >= 4 ? startYear : startYear + 1;
+        const mm = String(yoyMonth).padStart(2, "0");
+        const last = new Date(calYear, yoyMonth, 0).getDate();
+        const start = `${calYear}-${mm}-01`;
+        const end = `${calYear}-${mm}-${String(last).padStart(2, "0")}`;
+        return getBreakdown("all", start, end, p.id).then((resp) => ({
+          year: p.name,
+          resp,
+        }));
+      }),
     )
-      .then((rows) => {
+      .then((results) => {
         if (cancelled) return;
-        rows.sort((a, b) => a.name.localeCompare(b.name)); // oldest → newest
-        // Bar label = value + % change vs the previous selected year.
-        const labelled = rows.map((r, i) => {
-          const prev = rows[i - 1];
-          let label = `$${r.amount.toLocaleString()}`;
-          if (prev && prev.amount > 0) {
-            const pct = ((r.amount - prev.amount) / prev.amount) * 100;
-            const arrow = pct > 0 ? "▲" : pct < 0 ? "▼" : "";
-            label += `  ${arrow}${Math.abs(pct).toFixed(0)}%`;
-          } else if (prev && r.amount > 0) {
-            label += "  (new)";
+        const map = new Map<string, Record<string, number | string>>();
+        for (const { year, resp } of results) {
+          for (const g of resp.lab_groups) {
+            if (g.lab_group_name === "General") continue;
+            if (yoyViewBy === "group") {
+              const row = map.get(g.lab_group_name) ?? {
+                name: g.lab_group_name,
+              };
+              row[year] = Number(g.actual_spend_sgd);
+              map.set(g.lab_group_name, row);
+            } else {
+              for (const l of g.labs) {
+                if (l.lab_name === "General") continue;
+                const row = map.get(l.lab_name) ?? { name: l.lab_name };
+                row[year] = Number(l.actual_spend_sgd);
+                map.set(l.lab_name, row);
+              }
+            }
           }
-          return { ...r, label };
-        });
-        setYoyData(labelled);
+        }
+        const yearNames = results.map((r) => r.year);
+        const rows = Array.from(map.values());
+        for (const row of rows)
+          for (const yn of yearNames)
+            if (row[yn] === undefined) row[yn] = 0;
+        rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        setYoyData(rows);
       })
       .catch(() => {
         if (!cancelled) setYoyData([]);
@@ -486,7 +502,7 @@ export function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [yoyMonth, yoyYearIds, selectedGroupId, selectedLabId, periods]);
+  }, [yoyMonth, yoyYearIds, yoyViewBy, periods]);
 
   // Persist the slot layout whenever it changes.
   useEffect(() => {
@@ -834,10 +850,41 @@ export function DashboardPage() {
   const utilVisible = utilAll.filter((d) => utilShown.has(d.name));
   const avbVisible = avbAll.filter((d) => avbShown.has(d.name));
   const stackVisible = stackAll.filter((r) => stackShown.has(String(r.name)));
+  // Category chart filter (choose which categories to show).
+  const categoryKey = categoryData.map((d) => d.category).join("|");
+  const [prevCategoryKey, setPrevCategoryKey] = useState(categoryKey);
+  if (categoryKey !== prevCategoryKey) {
+    setPrevCategoryKey(categoryKey);
+    setCategoryShown(
+      categoryData.length <= MAX_COMPARE
+        ? new Set(categoryData.map((d) => d.category))
+        : new Set(),
+    );
+  }
+  const categoryVisible = categoryData.filter((d) =>
+    categoryShown.has(d.category),
+  );
   // YoY selected fiscal years exposed as names for the shared Select filter.
   const yoyYearNames = new Set(
     periods.filter((p) => yoyYearIds.has(p.id)).map((p) => p.name),
   );
+  // Years to plot as grouped bars (sorted oldest → newest).
+  const yoySelectedYears = periods
+    .filter((p) => yoyYearIds.has(p.id))
+    .map((p) => p.name)
+    .sort();
+  // Entity Select seeding (≤ MAX_COMPARE auto-shows all), like the other charts.
+  const yoyEntityKey = yoyData.map((r) => String(r.name)).join("|");
+  const [prevYoyEntityKey, setPrevYoyEntityKey] = useState(yoyEntityKey);
+  if (yoyEntityKey !== prevYoyEntityKey) {
+    setPrevYoyEntityKey(yoyEntityKey);
+    setYoyEntityShown(
+      yoyData.length <= MAX_COMPARE
+        ? new Set(yoyData.map((r) => String(r.name)))
+        : new Set(),
+    );
+  }
+  const yoyVisible = yoyData.filter((r) => yoyEntityShown.has(String(r.name)));
 
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
@@ -992,38 +1039,54 @@ export function DashboardPage() {
         );
       case "category":
         return (
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart
-              data={categoryData}
-              layout="vertical"
-              barCategoryGap="20%"
-              margin={{ right: 64, left: 8 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis type="number" stroke="#6b7280" />
-              <YAxis
-                dataKey="category"
-                type="category"
-                stroke="#6b7280"
-                width={120}
-              />
-              <Tooltip />
-              <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
-                <LabelList
-                  dataKey="amount"
-                  position="right"
-                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                  fontSize={11}
-                  fill="#374151"
-                />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <>
+            <EntityFilter
+              names={categoryData.map((d) => d.category)}
+              selected={categoryShown}
+              onToggle={toggleShown(setCategoryShown)}
+              onClear={() => setCategoryShown(new Set())}
+              max={MAX_COMPARE}
+              label="Categories"
+            />
+            {categoryVisible.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Select a category to display.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={categoryVisible}
+                  layout="vertical"
+                  barCategoryGap="20%"
+                  margin={{ right: 64, left: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis type="number" stroke="#6b7280" />
+                  <YAxis
+                    dataKey="category"
+                    type="category"
+                    stroke="#6b7280"
+                    width={120}
+                  />
+                  <Tooltip />
+                  <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
+                    <LabelList
+                      dataKey="amount"
+                      position="right"
+                      formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                      fontSize={11}
+                      fill="#374151"
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </>
         );
       case "monthly":
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={monthlyData} margin={{ top: 24, right: 16, left: 12 }}>
+            <LineChart data={monthlyData} margin={{ top: 24, right: 32, left: 12 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis dataKey="month" stroke="#6b7280" />
               <YAxis stroke="#6b7280" />
@@ -1040,10 +1103,41 @@ export function DashboardPage() {
               >
                 <LabelList
                   dataKey="amount"
-                  position="top"
-                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                  fontSize={10}
-                  fill="#374151"
+                  content={(props: {
+                    x?: number;
+                    y?: number;
+                    value?: number | string;
+                    index?: number;
+                  }) => {
+                    const idx = props.index ?? 0;
+                    const val = Number(props.value ?? 0);
+                    const prev = monthlyData[idx - 1]?.amount ?? val;
+                    const next = monthlyData[idx + 1]?.amount ?? val;
+                    const isFirst = idx === 0;
+                    const isLast = idx === monthlyData.length - 1;
+                    // Endpoints go above and anchor to the edge so they don't
+                    // clip; middle valleys go below the line.
+                    const below =
+                      !isFirst && !isLast && val <= prev && val <= next;
+                    return (
+                      <text
+                        x={Number(props.x ?? 0)}
+                        y={Number(props.y ?? 0)}
+                        dy={below ? 16 : -8}
+                        textAnchor={
+                          isFirst ? "start" : isLast ? "end" : "middle"
+                        }
+                        fontSize={10}
+                        fill="#374151"
+                        stroke="#ffffff"
+                        strokeWidth={3}
+                        strokeLinejoin="round"
+                        style={{ paintOrder: "stroke" }}
+                      >
+                        {`$${val.toLocaleString()}`}
+                      </text>
+                    );
+                  }}
                 />
               </Line>
             </LineChart>
@@ -1148,43 +1242,80 @@ export function DashboardPage() {
                   </option>
                 ))}
               </select>
+              <select
+                value={yoyViewBy}
+                onChange={(e) => setYoyViewBy(e.target.value as "group" | "lab")}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
             </div>
-            <EntityFilter
-              names={periods.map((p) => p.name)}
-              selected={yoyYearNames}
-              onToggle={toggleYoyYearByName}
-              onClear={() => setYoyYearIds(new Set())}
-              max={MAX_COMPARE}
-            />
-            {yoyData.length === 0 ? (
+            <div className="flex flex-wrap gap-2 mb-3">
+              <EntityFilter
+                names={periods.map((p) => p.name)}
+                selected={yoyYearNames}
+                onToggle={toggleYoyYearByName}
+                onClear={() => setYoyYearIds(new Set())}
+                max={MAX_COMPARE}
+                label="Years"
+              />
+              <EntityFilter
+                names={yoyData.map((r) => String(r.name))}
+                selected={yoyEntityShown}
+                onToggle={toggleShown(setYoyEntityShown)}
+                onClear={() => setYoyEntityShown(new Set())}
+                max={MAX_COMPARE}
+                label={yoyViewBy === "lab" ? "Labs" : "Groups"}
+              />
+            </div>
+            {yoyVisible.length === 0 || yoySelectedYears.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Pick at least one fiscal year to compare.
+                Pick fiscal years and entities to compare.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={yoyData} barCategoryGap="30%" margin={{ top: 24 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="name" stroke="#6b7280" />
-                  <YAxis stroke="#6b7280" />
-                  <Tooltip
-                    formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                  />
-                  <Bar dataKey="amount" name="Approved spend" radius={[4, 4, 0, 0]}>
-                    {yoyData.map((_, i) => (
-                      <Cell
-                        key={i}
-                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                      />
-                    ))}
-                    <LabelList
-                      dataKey="label"
-                      position="top"
-                      fontSize={12}
-                      fill="#374151"
+              <AdaptiveBarChart height={300} bars={yoyVisible.length}>
+                {(maxChars) => (
+                  <BarChart
+                    data={yoyVisible}
+                    barCategoryGap="20%"
+                    margin={{ top: 24 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
                     />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+                    <YAxis stroke="#6b7280" />
+                    <Tooltip
+                      formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                    />
+                    <Legend />
+                    {yoySelectedYears.map((yn, i) => (
+                      <Bar
+                        key={yn}
+                        dataKey={yn}
+                        name={yn}
+                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                        radius={[4, 4, 0, 0]}
+                      >
+                        <LabelList
+                          dataKey={yn}
+                          position="top"
+                          formatter={(v: number) =>
+                            v ? `$${Number(v).toLocaleString()}` : ""
+                          }
+                          fontSize={9}
+                          fill="#374151"
+                        />
+                      </Bar>
+                    ))}
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
             )}
           </>
         );
