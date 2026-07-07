@@ -292,11 +292,14 @@ export function DashboardPage() {
   const [yoyData, setYoyData] = useState<
     { name: string; amount: number; label: string }[]
   >([]);
-  const toggleYoyYear = (id: number) =>
+  // Toggle a fiscal year (by name) in the YoY comparison, capped at MAX_COMPARE.
+  const toggleYoyYearByName = (name: string) =>
     setYoyYearIds((prev) => {
+      const period = periods.find((p) => p.name === name);
+      if (!period) return prev;
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(period.id)) next.delete(period.id);
+      else if (next.size < MAX_COMPARE) next.add(period.id);
       return next;
     });
   // Per-slot chart choice, persisted per user in localStorage. Reloaded on the
@@ -740,6 +743,10 @@ export function DashboardPage() {
   const utilVisible = utilAll.filter((d) => utilShown.has(d.name));
   const avbVisible = avbAll.filter((d) => avbShown.has(d.name));
   const stackVisible = stackAll.filter((r) => stackShown.has(String(r.name)));
+  // YoY selected fiscal years exposed as names for the shared Select filter.
+  const yoyYearNames = new Set(
+    periods.filter((p) => yoyYearIds.has(p.id)).map((p) => p.name),
+  );
 
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
@@ -951,25 +958,13 @@ export function DashboardPage() {
                 ))}
               </select>
             </div>
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {periods.map((p) => {
-                const on = yoyYearIds.has(p.id);
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => toggleYoyYear(p.id)}
-                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                      on
-                        ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
-                        : "bg-white text-muted-foreground border-border opacity-60"
-                    }`}
-                  >
-                    {p.name}
-                  </button>
-                );
-              })}
-            </div>
+            <EntityFilter
+              names={periods.map((p) => p.name)}
+              selected={yoyYearNames}
+              onToggle={toggleYoyYearByName}
+              onClear={() => setYoyYearIds(new Set())}
+              max={MAX_COMPARE}
+            />
             {yoyData.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 Pick at least one fiscal year to compare.
