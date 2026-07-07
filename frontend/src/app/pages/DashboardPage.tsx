@@ -86,11 +86,13 @@ function EntityFilter({
   names,
   selected,
   onToggle,
+  onClear,
   max,
 }: {
   names: string[];
   selected: Set<string>;
   onToggle: (name: string) => void;
+  onClear: () => void;
   max: number;
 }) {
   const [query, setQuery] = useState("");
@@ -109,6 +111,20 @@ function EntityFilter({
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-muted-foreground">
+              {selected.size} selected
+            </span>
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={onClear}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
           <input
             type="text"
             value={query}
@@ -734,6 +750,7 @@ export function DashboardPage() {
               names={utilAll.map((d) => d.name)}
               selected={utilShown}
               onToggle={toggleShown(setUtilShown)}
+              onClear={() => setUtilShown(new Set())}
               max={MAX_COMPARE}
             />
             {utilVisible.length === 0 ? (
@@ -793,6 +810,7 @@ export function DashboardPage() {
               names={avbAll.map((d) => d.name)}
               selected={avbShown}
               onToggle={toggleShown(setAvbShown)}
+              onClear={() => setAvbShown(new Set())}
               max={MAX_COMPARE}
             />
             {avbVisible.length === 0 ? (
