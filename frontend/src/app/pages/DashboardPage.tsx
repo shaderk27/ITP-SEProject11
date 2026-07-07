@@ -721,13 +721,16 @@ export function DashboardPage() {
     const categories = new Set<string>();
     const rowFor = (name: string, cats: { category_name: string; actual_spend_sgd: string }[][]) => {
       const row: Record<string, number | string> = { name };
+      let total = 0;
       for (const catList of cats) {
         for (const cat of catList) {
           categories.add(cat.category_name);
-          row[cat.category_name] =
-            (Number(row[cat.category_name]) || 0) + Number(cat.actual_spend_sgd);
+          const amt = Number(cat.actual_spend_sgd);
+          row[cat.category_name] = (Number(row[cat.category_name]) || 0) + amt;
+          total += amt;
         }
       }
+      row.__total = total;
       return row;
     };
     const group = scopedBreakdown.map((g) =>
@@ -903,6 +906,14 @@ export function DashboardPage() {
                       {utilVisible.map((d, i) => (
                         <Cell key={i} fill={utilColor(d.util)} />
                       ))}
+                      <LabelList
+                        dataKey="util"
+                        position="insideTop"
+                        formatter={(v: number) => `${Math.round(v)}%`}
+                        fontSize={11}
+                        fontWeight={600}
+                        fill="#ffffff"
+                      />
                     </Bar>
                   </BarChart>
                 )}
@@ -938,7 +949,12 @@ export function DashboardPage() {
             ) : (
               <AdaptiveBarChart height={300} bars={avbVisible.length}>
                 {(maxChars) => (
-                  <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
+                  <BarChart
+                    data={avbVisible}
+                    barGap={8}
+                    barCategoryGap="20%"
+                    margin={{ top: 24, left: 12, right: 8 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
@@ -950,8 +966,24 @@ export function DashboardPage() {
                     <YAxis stroke="#6b7280" />
                     <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
                     <Legend />
-                    <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="budget"
+                        position="top"
+                        formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                        fontSize={10}
+                        fill="#374151"
+                      />
+                    </Bar>
+                    <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="actual"
+                        position="top"
+                        formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                        fontSize={10}
+                        fill="#374151"
+                      />
+                    </Bar>
                   </BarChart>
                 )}
               </AdaptiveBarChart>
@@ -961,24 +993,37 @@ export function DashboardPage() {
       case "category":
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={categoryData} layout="vertical" barCategoryGap="20%">
+            <BarChart
+              data={categoryData}
+              layout="vertical"
+              barCategoryGap="20%"
+              margin={{ right: 64, left: 8 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis type="number" stroke="#6b7280" />
               <YAxis
                 dataKey="category"
                 type="category"
                 stroke="#6b7280"
-                width={100}
+                width={120}
               />
               <Tooltip />
-              <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]} />
+              <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
+                <LabelList
+                  dataKey="amount"
+                  position="right"
+                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                  fontSize={11}
+                  fill="#374151"
+                />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         );
       case "monthly":
         return (
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={monthlyData}>
+            <LineChart data={monthlyData} margin={{ top: 24, right: 16, left: 12 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis dataKey="month" stroke="#6b7280" />
               <YAxis stroke="#6b7280" />
@@ -992,7 +1037,15 @@ export function DashboardPage() {
                 strokeWidth={2}
                 name="Actual spend"
                 dot
-              />
+              >
+                <LabelList
+                  dataKey="amount"
+                  position="top"
+                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                  fontSize={10}
+                  fill="#374151"
+                />
+              </Line>
             </LineChart>
           </ResponsiveContainer>
         );
@@ -1026,7 +1079,11 @@ export function DashboardPage() {
             ) : (
               <AdaptiveBarChart height={320} bars={stackVisible.length}>
                 {(maxChars) => (
-                  <BarChart data={stackVisible} barCategoryGap="20%">
+                  <BarChart
+                    data={stackVisible}
+                    barCategoryGap="20%"
+                    margin={{ top: 20, left: 8 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
@@ -1045,7 +1102,29 @@ export function DashboardPage() {
                         stackId="spend"
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         name={cat}
-                      />
+                      >
+                        <LabelList
+                          dataKey={cat}
+                          position="center"
+                          formatter={(v: number) =>
+                            v ? `$${Number(v).toLocaleString()}` : ""
+                          }
+                          fontSize={10}
+                          fill="#ffffff"
+                        />
+                        {i === stackedCategory.categories.length - 1 && (
+                          <LabelList
+                            dataKey="__total"
+                            position="top"
+                            formatter={(v: number) =>
+                              `$${Number(v).toLocaleString()}`
+                            }
+                            fontSize={11}
+                            fontWeight={600}
+                            fill="#374151"
+                          />
+                        )}
+                      </Bar>
                     ))}
                   </BarChart>
                 )}
