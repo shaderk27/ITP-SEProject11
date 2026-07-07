@@ -964,7 +964,7 @@ export function DashboardPage() {
                       <LabelList
                         dataKey="util"
                         position="insideTop"
-                        formatter={(v: number) => `${Math.round(v)}%`}
+                        formatter={(v: number) => `${Number(v).toFixed(1)}%`}
                         fontSize={11}
                         fontWeight={600}
                         fill="#ffffff"
