@@ -271,6 +271,7 @@ export function DashboardPage() {
   // Per-chart entity include/exclude (by name) for the comparison bar charts.
   const [utilShown, setUtilShown] = useState<Set<string>>(new Set());
   const [avbShown, setAvbShown] = useState<Set<string>>(new Set());
+  const [stackShown, setStackShown] = useState<Set<string>>(new Set());
   // Toggle an entity in/out of a chart's shown set, capped at MAX_COMPARE.
   const toggleShown =
     (setter: Dispatch<SetStateAction<Set<string>>>) => (name: string) =>
@@ -702,6 +703,8 @@ export function DashboardPage() {
   // subset actually plotted (chips deselected → excluded).
   const utilAll = utilViewBy === "lab" ? utilData.lab : utilData.group;
   const avbAll = avbViewBy === "lab" ? avbData.lab : avbData.group;
+  const stackAll =
+    stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group;
   // Seed each chart's selection when its entity list changes: ≤ MAX_COMPARE
   // auto-shows all; more than that starts empty so the user picks up to the cap.
   const utilNames = utilAll.map((d) => d.name).join("|");
@@ -724,8 +727,19 @@ export function DashboardPage() {
         : new Set(),
     );
   }
+  const stackNames = stackAll.map((d) => String(d.name)).join("|");
+  const [prevStackNames, setPrevStackNames] = useState(stackNames);
+  if (stackNames !== prevStackNames) {
+    setPrevStackNames(stackNames);
+    setStackShown(
+      stackAll.length <= MAX_COMPARE
+        ? new Set(stackAll.map((d) => String(d.name)))
+        : new Set(),
+    );
+  }
   const utilVisible = utilAll.filter((d) => utilShown.has(d.name));
   const avbVisible = avbAll.filter((d) => avbShown.has(d.name));
+  const stackVisible = stackAll.filter((r) => stackShown.has(String(r.name)));
 
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
@@ -886,27 +900,38 @@ export function DashboardPage() {
                 <option value="lab">By Lab</option>
               </select>
             </div>
-            <ResponsiveContainer width="100%" height={320}>
-              <BarChart
-                data={stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group}
-                barCategoryGap="20%"
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-                <Legend />
-                {stackedCategory.categories.map((cat, i) => (
-                  <Bar
-                    key={cat}
-                    dataKey={cat}
-                    stackId="spend"
-                    fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                    name={cat}
-                  />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
+            <EntityFilter
+              names={stackAll.map((d) => String(d.name))}
+              selected={stackShown}
+              onToggle={toggleShown(setStackShown)}
+              onClear={() => setStackShown(new Set())}
+              max={MAX_COMPARE}
+            />
+            {stackVisible.length === 0 ? (
+              <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
+                Use the Select button above to choose up to {MAX_COMPARE} to
+                display.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={stackVisible} barCategoryGap="20%">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="name" stroke="#6b7280" />
+                  <YAxis stroke="#6b7280" />
+                  <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                  <Legend />
+                  {stackedCategory.categories.map((cat, i) => (
+                    <Bar
+                      key={cat}
+                      dataKey={cat}
+                      stackId="spend"
+                      fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                      name={cat}
+                    />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </>
         );
       case "yoy":
