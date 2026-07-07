@@ -416,6 +416,14 @@ export function DashboardPage() {
   const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
   if (userKey !== prevUserKey) {
     setPrevUserKey(userKey);
+    // Team Lead / Lab IC only have one lab group, so default every chart to
+    // "By Lab"; Admin keeps "By Lab Group".
+    const defaultViewBy =
+      user?.role === "teamlead" || user?.role === "labic" ? "lab" : "group";
+    setUtilViewBy(defaultViewBy);
+    setAvbViewBy(defaultViewBy);
+    setStackViewBy(defaultViewBy);
+    setYoyViewBy(defaultViewBy);
     if (user?.role === "teamlead" && user.labGroupId) {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
