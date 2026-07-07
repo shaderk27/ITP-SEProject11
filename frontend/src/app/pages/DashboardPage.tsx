@@ -1025,7 +1025,7 @@ export function DashboardPage() {
                       <LabelList
                         dataKey="budget"
                         position="top"
-                        formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                        formatter={(v: number) => compactCurrency(Number(v))}
                         fontSize={10}
                         fill="#374151"
                       />
@@ -1034,7 +1034,7 @@ export function DashboardPage() {
                       <LabelList
                         dataKey="actual"
                         position="top"
-                        formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                        formatter={(v: number) => compactCurrency(Number(v))}
                         fontSize={10}
                         fill="#374151"
                       />
@@ -1650,6 +1650,18 @@ function formatCurrency(amount: number): string {
     currency: "SGD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
+  });
+}
+
+// Compact currency for on-chart value labels (e.g. $88K, $1.2M, $1.4B).
+// Width stays ~constant regardless of magnitude, so adjacent grouped-bar
+// labels don't clip into each other. Full precision stays in the tooltip.
+function compactCurrency(amount: number): string {
+  return amount.toLocaleString("en-SG", {
+    style: "currency",
+    currency: "SGD",
+    notation: "compact",
+    maximumFractionDigits: 1,
   });
 }
 
