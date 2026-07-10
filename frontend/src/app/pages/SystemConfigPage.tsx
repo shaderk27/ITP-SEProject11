@@ -96,7 +96,7 @@ export function SystemConfigPage() {
   const [isPeriodModalOpen, setIsPeriodModalOpen] = useState(false);
   const [newPeriodYear, setNewPeriodYear] = useState("");
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
   const fetchConfigData = async (periodId?: number | null) => {
     const pid = periodId ?? selectedPeriodId;

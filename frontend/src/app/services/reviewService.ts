@@ -7,7 +7,7 @@ import type {
   ReviewBatchSummary,
 } from "../types/review";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 // All calls ship the `access_token` JWT cookie set by /api/auth/login.
 // Backend resolves the user from that cookie (see dependencies/auth.py).

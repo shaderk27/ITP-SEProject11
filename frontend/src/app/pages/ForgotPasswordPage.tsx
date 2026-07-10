@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { AlertCircle, CheckCircle2, ArrowLeft } from "lucide-react";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export function ForgotPasswordPage() {
   const navigate = useNavigate();

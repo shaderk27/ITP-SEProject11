@@ -1,6 +1,6 @@
 import type { UploadProcessResult } from "../types/upload";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 const FETCH_OPTS: RequestInit = { credentials: "include" };
 
