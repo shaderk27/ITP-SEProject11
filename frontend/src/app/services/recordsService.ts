@@ -1,6 +1,6 @@
 import type { CommittedPR } from "../types/records";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const FETCH_OPTS: RequestInit = { credentials: "include" };
 

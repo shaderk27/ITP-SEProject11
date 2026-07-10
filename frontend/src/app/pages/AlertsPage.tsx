@@ -53,7 +53,7 @@ export function AlertsPage() {
   // Modal State
   const [selectedLabDetails, setSelectedLabDetails] = useState<AlertData | null>(null);
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
   // 1. Fetch the Live Lab Data & Categories
   useEffect(() => {
