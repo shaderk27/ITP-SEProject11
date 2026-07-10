@@ -13,6 +13,7 @@ import { AuditLogPage } from "./pages/AuditLogPage";
 import { SystemConfigPage } from "./pages/SystemConfigPage";
 import { ChatbotPage } from "./pages/ChatbotPage";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { FEATURES } from "./config/features";
 import { CreateUserPage } from "./pages/CreateUserPage";
 import { AccessDenied } from "./pages/error/AccessDenied";
 import { NotFound } from "./pages/error/NotFound";
@@ -93,14 +94,20 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      {
-        path: "reports",
-        element: (
-          <ProtectedRoute requiredPermissions={["reports:view"]}>
-            <ReportsPage />
-          </ProtectedRoute>
-        ),
-      },
+      // Reports — detached for ITP1 (flip FEATURES.reports to re-attach).
+      // While off, /reports is unregistered → catch-all 404, even for admin.
+      ...(FEATURES.reports
+        ? [
+            {
+              path: "reports",
+              element: (
+                <ProtectedRoute requiredPermissions={["reports:view"]}>
+                  <ReportsPage />
+                </ProtectedRoute>
+              ),
+            },
+          ]
+        : []),
       {
         path: "alerts",
         element: (
@@ -109,18 +116,23 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      {
-        path: "audit",
-        element: (
-          // Strictly locked to Admins using your allowedRoles logic
-          <ProtectedRoute
-            allowedRoles={["admin"]}
-            requiredPermissions={["audit:view"]}
-          >
-            <AuditLogPage />
-          </ProtectedRoute>
-        ),
-      },
+      // Audit Log — detached until ITP2 (flip FEATURES.auditLog to re-attach).
+      ...(FEATURES.auditLog
+        ? [
+            {
+              path: "audit",
+              element: (
+                // Strictly locked to Admins using your allowedRoles logic
+                <ProtectedRoute
+                  allowedRoles={["admin"]}
+                  requiredPermissions={["audit:view"]}
+                >
+                  <AuditLogPage />
+                </ProtectedRoute>
+              ),
+            },
+          ]
+        : []),
       {
         path: "config",
         element: (
@@ -132,10 +144,17 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      {
-        path: "chatbot",
-        Component: ChatbotPage, // Open to all logged-in roles
-      },
+      // AI Chatbot — detached until ITP2 (flip FEATURES.chatbot to re-attach).
+      // Open to all logged-in roles (parent ProtectedRoute enforces login);
+      // re-check whether role restrictions are needed when enabling (W15-01).
+      ...(FEATURES.chatbot
+        ? [
+            {
+              path: "chatbot",
+              Component: ChatbotPage,
+            },
+          ]
+        : []),
       {
         path: "users/create",
         element: (

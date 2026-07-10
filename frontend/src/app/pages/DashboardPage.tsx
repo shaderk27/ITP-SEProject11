@@ -2,27 +2,41 @@ import {
   Fragment,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
+  type ReactElement,
+  type ReactNode,
   type SetStateAction,
 } from "react";
 import {
   DollarSign,
   TrendingUp,
-  AlertCircle,
   Wallet,
   Percent,
   Clock,
   Activity,
+  Filter,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../components/ui/popover";
+import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
 import { DatePickerField } from "../components/shared/DatePickerField";
-import { StatusBadge } from "../components/shared/StatusBadge";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
 import { format, subDays } from "date-fns";
@@ -45,6 +59,7 @@ import {
   BarChart,
   Bar,
   Cell,
+  LabelList,
   LineChart,
   Line,
   XAxis,
@@ -56,13 +71,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-
-const recentUploads = [
-  { id: "UP-2024-152", date: "2026-05-20", records: 45, status: "processed" },
-  { id: "UP-2024-151", date: "2026-05-18", records: 28, status: "review" },
-  { id: "UP-2024-150", date: "2026-05-15", records: 62, status: "processed" },
-];
-
 // Utilisation threshold colour: green <50%, amber <80%, orange <95%, red ≥95%.
 function utilColor(pct: number): string {
   if (pct >= 95) return "#ef4444";
@@ -71,36 +79,99 @@ function utilColor(pct: number): string {
   return "#10b981";
 }
 
-// Toggle chips to include/exclude specific entities from a comparison chart.
-function EntityChips({
+// Max entities shown at once in a comparison chart.
+const MAX_COMPARE = 5;
+
+// Searchable selector: pick up to `max` entities to display in a comparison chart.
+// Starts empty — the user checks what they want to see.
+function EntityFilter({
   names,
-  hidden,
+  selected,
   onToggle,
+  onClear,
+  max,
+  label = "Select",
 }: {
   names: string[];
-  hidden: Set<string>;
+  selected: Set<string>;
   onToggle: (name: string) => void;
+  onClear: () => void;
+  max: number;
+  label?: string;
 }) {
-  if (names.length <= 1) return null;
+  const [query, setQuery] = useState("");
+  if (names.length === 0) return null;
+  const atMax = selected.size >= max;
+  const filtered = names.filter((n) =>
+    n.toLowerCase().includes(query.toLowerCase()),
+  );
   return (
-    <div className="flex flex-wrap gap-1.5 mb-3">
-      {names.map((n) => {
-        const on = !hidden.has(n);
-        return (
-          <button
-            key={n}
-            type="button"
-            onClick={() => onToggle(n)}
-            className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-              on
-                ? "bg-[#1e3a8a]/10 text-[#1e3a8a] border-[#1e3a8a]/30"
-                : "bg-white text-muted-foreground border-border line-through opacity-60"
-            }`}
-          >
-            {n}
-          </button>
-        );
-      })}
+    <div className="mb-3">
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="sm" className="gap-2">
+            <Filter className="h-4 w-4" />
+            {label} ({selected.size}/{max})
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-64 p-2">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-muted-foreground">
+              {selected.size} selected
+            </span>
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={onClear}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search…"
+            className="w-full text-sm border border-border rounded-md px-2 py-1 mb-2"
+          />
+          <div className="max-h-60 overflow-y-auto space-y-1">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-1 py-2">
+                No matches.
+              </p>
+            ) : (
+              filtered.map((n) => {
+                const on = selected.has(n);
+                const disabled = !on && atMax;
+                return (
+                  <label
+                    key={n}
+                    className={`flex items-center gap-2 text-sm px-1 py-0.5 rounded ${
+                      disabled
+                        ? "opacity-40 cursor-not-allowed"
+                        : "cursor-pointer hover:bg-muted"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={on}
+                      disabled={disabled}
+                      onCheckedChange={() => onToggle(n)}
+                    />
+                    <span className="truncate">{n}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+          {atMax && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Max {max} selected — uncheck one to swap.
+            </p>
+          )}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -116,6 +187,148 @@ const CATEGORY_COLORS = [
   "#ec4899",
   "#6b7280",
 ];
+
+// Fiscal-year month order (Apr→Mar); value = calendar month number.
+const FISCAL_MONTHS = [
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+];
+
+// Toggleable dashboard charts (KPI cards always show). Order = display order.
+const DASHBOARD_CHARTS = [
+  { id: "utilisation", label: "Budget Utilisation" },
+  { id: "actualVsBudget", label: "Actual vs Budget" },
+  { id: "category", label: "Spending by Category" },
+  { id: "monthly", label: "Monthly Spending Trend" },
+  { id: "categoryMix", label: "Category Mix" },
+  { id: "yoy", label: "Year-over-Year" },
+] as const;
+
+// Options offered in each slot's title dropdown.
+const SLOT_OPTIONS = [...DASHBOARD_CHARTS];
+const CHART_IDS = new Set<string>(DASHBOARD_CHARTS.map((c) => c.id));
+
+// Default slot layout: 6 slots, each showing its original chart.
+const DEFAULT_SLOTS = [
+  "utilisation",
+  "actualVsBudget",
+  "category",
+  "monthly",
+  "categoryMix",
+  "yoy",
+];
+
+// Load per-user slot layout from localStorage; default = DEFAULT_SLOTS.
+// Any unknown/legacy value (e.g. an old "empty") falls back to that slot's default.
+function loadSlots(key: string): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw) as string[];
+      if (Array.isArray(parsed) && parsed.length === DEFAULT_SLOTS.length)
+        return parsed.map((s, i) => (CHART_IDS.has(s) ? s : DEFAULT_SLOTS[i]));
+    }
+  } catch {
+    /* ignore malformed storage */
+  }
+  return [...DEFAULT_SLOTS];
+}
+
+// Truncate a label to n chars (full name still shows in the tooltip).
+function trunc(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n)}..` : s;
+}
+
+// Wrap a label to <=2 lines at word boundaries; if a word can't fit, truncate.
+function wrapLabel(s: string, n: number): string[] {
+  if (s.length <= n) return [s];
+  const words = s.split(" ");
+  let line1 = "";
+  let i = 0;
+  while (i < words.length) {
+    const w = words[i] ?? "";
+    const candidate = line1 ? `${line1} ${w}` : w;
+    if (candidate.length > n) break;
+    line1 = candidate;
+    i++;
+  }
+  const rest = words.slice(i).join(" ");
+  if (line1 && rest && rest.length <= n) return [line1, rest];
+  return [trunc(s, n)];
+}
+
+// Multi-line x-axis tick: wraps long labels instead of truncating when there's room.
+function WrapTick(props: {
+  x?: number;
+  y?: number;
+  payload?: { value?: string | number };
+  charsPerLine: number;
+}) {
+  const { x = 0, y = 0, payload, charsPerLine } = props;
+  const lines = wrapLabel(String(payload?.value ?? ""), charsPerLine);
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {lines.map((line, i) => (
+        <text
+          key={i}
+          x={0}
+          dy={16 + i * 14}
+          textAnchor="middle"
+          fill="#6b7280"
+          fontSize={12}
+        >
+          {line}
+        </text>
+      ))}
+    </g>
+  );
+}
+
+// Wraps a bar chart and measures its width so x-axis labels only truncate when
+// the card is too narrow to fit them. Wide cards show full names.
+function AdaptiveBarChart({
+  height,
+  bars,
+  children,
+}: {
+  height: number;
+  bars: number;
+  children: (charsPerLine: number) => ReactElement;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      setWidth(entries[0]?.contentRect.width ?? 0);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // Chars that fit per label line (minus the y-axis gutter + a gap). ~7.5px/char.
+  // Before the first measurement, assume wide (no wrap/truncate).
+  const band = width === 0 || bars === 0 ? 0 : (width - 50) / bars;
+  const charsPerLine =
+    band === 0 ? 999 : Math.max(4, Math.floor((band - 22) / 7.5));
+  return (
+    <div ref={ref}>
+      <ResponsiveContainer width="100%" height={height}>
+        {children(charsPerLine)}
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -146,20 +359,53 @@ export function DashboardPage() {
   const [avbViewBy, setAvbViewBy] = useState<"group" | "lab">("group");
   const [stackViewBy, setStackViewBy] = useState<"group" | "lab">("group");
   // Per-chart entity include/exclude (by name) for the comparison bar charts.
-  const [utilHidden, setUtilHidden] = useState<Set<string>>(new Set());
-  const [avbHidden, setAvbHidden] = useState<Set<string>>(new Set());
-  const toggleHidden =
+  const [utilShown, setUtilShown] = useState<Set<string>>(new Set());
+  const [avbShown, setAvbShown] = useState<Set<string>>(new Set());
+  const [stackShown, setStackShown] = useState<Set<string>>(new Set());
+  const [categoryShown, setCategoryShown] = useState<Set<string>>(new Set());
+  // Toggle an entity in/out of a chart's shown set, capped at MAX_COMPARE.
+  const toggleShown =
     (setter: Dispatch<SetStateAction<Set<string>>>) => (name: string) =>
       setter((prev) => {
         const next = new Set(prev);
         if (next.has(name)) next.delete(name);
-        else next.add(name);
+        else if (next.size < MAX_COMPARE) next.add(name);
         return next;
       });
   const [loadError, setLoadError] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
+  // Same-month Year-over-Year comparison: chosen fiscal month (calendar 1–12)
+  // and which fiscal years to compare; the bars are computed by the effect below.
+  const [yoyMonth, setYoyMonth] = useState(3); // default March
+  const [yoyYearIds, setYoyYearIds] = useState<Set<number>>(new Set());
+  const [yoyViewBy, setYoyViewBy] = useState<"group" | "lab">("group");
+  // One row per entity (lab group / lab), with a spend value keyed by each year.
+  const [yoyData, setYoyData] = useState<Record<string, number | string>[]>([]);
+  const [yoyEntityShown, setYoyEntityShown] = useState<Set<string>>(new Set());
+  // Toggle a fiscal year (by name) in the YoY comparison, capped at MAX_COMPARE.
+  const toggleYoyYearByName = (name: string) =>
+    setYoyYearIds((prev) => {
+      const period = periods.find((p) => p.name === name);
+      if (!period) return prev;
+      const next = new Set(prev);
+      if (next.has(period.id)) next.delete(period.id);
+      else if (next.size < MAX_COMPARE) next.add(period.id);
+      return next;
+    });
+  // Per-slot chart choice, persisted per user in localStorage. Reloaded on the
+  // render-time key guard so switching users swaps in their saved layout.
+  const slotsStorageKey = `dashboard_slots_v1:${user?.id ?? "anon"}`;
+  const [slots, setSlots] = useState<string[]>(() => loadSlots(slotsStorageKey));
+  const [prevSlotsKey, setPrevSlotsKey] = useState(slotsStorageKey);
+  if (slotsStorageKey !== prevSlotsKey) {
+    setPrevSlotsKey(slotsStorageKey);
+    setSlots(loadSlots(slotsStorageKey));
+  }
+  const setSlot = (index: number, chartId: string) =>
+    setSlots((prev) => prev.map((s, i) => (i === index ? chartId : s)));
+  const resetSlots = () => setSlots([...DEFAULT_SLOTS]);
 
   // Auto-lock the dropdown to the Team Lead's own lab group whenever the user
   // changes (e.g. login/logout switching identities). Admins keep "all".
@@ -170,6 +416,14 @@ export function DashboardPage() {
   const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
   if (userKey !== prevUserKey) {
     setPrevUserKey(userKey);
+    // Team Lead / Lab IC only have one lab group, so default every chart to
+    // "By Lab"; Admin keeps "By Lab Group".
+    const defaultViewBy =
+      user?.role === "teamlead" || user?.role === "labic" ? "lab" : "group";
+    setUtilViewBy(defaultViewBy);
+    setAvbViewBy(defaultViewBy);
+    setStackViewBy(defaultViewBy);
+    setYoyViewBy(defaultViewBy);
     if (user?.role === "teamlead" && user.labGroupId) {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
@@ -188,6 +442,8 @@ export function DashboardPage() {
         if (!cancelled) {
           setPeriods(data);
           if (data.length) setSelectedFYPeriodId(data[0].id);
+          // Default the YoY comparison to the two most recent fiscal years.
+          setYoyYearIds(new Set(data.slice(0, 2).map((p) => p.id)));
         }
       })
       .catch(() => {});
@@ -195,6 +451,75 @@ export function DashboardPage() {
       cancelled = true;
     };
   }, []);
+
+  // Year-over-Year: for each selected fiscal year, fetch that year's spend for
+  // the chosen month via the breakdown (one call per year), then group entities
+  // (lab groups or labs) side by side with a bar per year.
+  useEffect(() => {
+    let cancelled = false;
+    // Empty selection falls through: Promise.all([]) resolves to [] async.
+    const chosen = periods.filter((p) => yoyYearIds.has(p.id));
+    Promise.all(
+      chosen.map((p) => {
+        // Fiscal Apr–Dec sit in the FY's start year; Jan–Mar roll into +1.
+        const startYear = Number(p.start_date.slice(0, 4));
+        const calYear = yoyMonth >= 4 ? startYear : startYear + 1;
+        const mm = String(yoyMonth).padStart(2, "0");
+        const last = new Date(calYear, yoyMonth, 0).getDate();
+        const start = `${calYear}-${mm}-01`;
+        const end = `${calYear}-${mm}-${String(last).padStart(2, "0")}`;
+        return getBreakdown("all", start, end, p.id).then((resp) => ({
+          year: p.name,
+          resp,
+        }));
+      }),
+    )
+      .then((results) => {
+        if (cancelled) return;
+        const map = new Map<string, Record<string, number | string>>();
+        for (const { year, resp } of results) {
+          for (const g of resp.lab_groups) {
+            if (g.lab_group_name === "General") continue;
+            if (yoyViewBy === "group") {
+              const row = map.get(g.lab_group_name) ?? {
+                name: g.lab_group_name,
+              };
+              row[year] = Number(g.actual_spend_sgd);
+              map.set(g.lab_group_name, row);
+            } else {
+              for (const l of g.labs) {
+                if (l.lab_name === "General") continue;
+                const row = map.get(l.lab_name) ?? { name: l.lab_name };
+                row[year] = Number(l.actual_spend_sgd);
+                map.set(l.lab_name, row);
+              }
+            }
+          }
+        }
+        const yearNames = results.map((r) => r.year);
+        const rows = Array.from(map.values());
+        for (const row of rows)
+          for (const yn of yearNames)
+            if (row[yn] === undefined) row[yn] = 0;
+        rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        setYoyData(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setYoyData([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [yoyMonth, yoyYearIds, yoyViewBy, periods]);
+
+  // Persist the slot layout whenever it changes.
+  useEffect(() => {
+    try {
+      localStorage.setItem(slotsStorageKey, JSON.stringify(slots));
+    } catch {
+      /* ignore */
+    }
+  }, [slotsStorageKey, slots]);
 
   // Effective spend window: the selected FY's span, narrowed by a preset/custom.
   const [effStart, effEnd] = useMemo(() => {
@@ -420,13 +745,16 @@ export function DashboardPage() {
     const categories = new Set<string>();
     const rowFor = (name: string, cats: { category_name: string; actual_spend_sgd: string }[][]) => {
       const row: Record<string, number | string> = { name };
+      let total = 0;
       for (const catList of cats) {
         for (const cat of catList) {
           categories.add(cat.category_name);
-          row[cat.category_name] =
-            (Number(row[cat.category_name]) || 0) + Number(cat.actual_spend_sgd);
+          const amt = Number(cat.actual_spend_sgd);
+          row[cat.category_name] = (Number(row[cat.category_name]) || 0) + amt;
+          total += amt;
         }
       }
+      row.__total = total;
       return row;
     };
     const group = scopedBreakdown.map((g) =>
@@ -492,9 +820,552 @@ export function DashboardPage() {
   // Comparison-chart series: the full entity list (for the chips) and the
   // subset actually plotted (chips deselected → excluded).
   const utilAll = utilViewBy === "lab" ? utilData.lab : utilData.group;
-  const utilVisible = utilAll.filter((d) => !utilHidden.has(d.name));
   const avbAll = avbViewBy === "lab" ? avbData.lab : avbData.group;
-  const avbVisible = avbAll.filter((d) => !avbHidden.has(d.name));
+  const stackAll =
+    stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group;
+  // Seed each chart's selection when its entity list changes: ≤ MAX_COMPARE
+  // auto-shows all; more than that starts empty so the user picks up to the cap.
+  const utilNames = utilAll.map((d) => d.name).join("|");
+  const [prevUtilNames, setPrevUtilNames] = useState(utilNames);
+  if (utilNames !== prevUtilNames) {
+    setPrevUtilNames(utilNames);
+    setUtilShown(
+      utilAll.length <= MAX_COMPARE
+        ? new Set(utilAll.map((d) => d.name))
+        : new Set(),
+    );
+  }
+  const avbNames = avbAll.map((d) => d.name).join("|");
+  const [prevAvbNames, setPrevAvbNames] = useState(avbNames);
+  if (avbNames !== prevAvbNames) {
+    setPrevAvbNames(avbNames);
+    setAvbShown(
+      avbAll.length <= MAX_COMPARE
+        ? new Set(avbAll.map((d) => d.name))
+        : new Set(),
+    );
+  }
+  const stackNames = stackAll.map((d) => String(d.name)).join("|");
+  const [prevStackNames, setPrevStackNames] = useState(stackNames);
+  if (stackNames !== prevStackNames) {
+    setPrevStackNames(stackNames);
+    setStackShown(
+      stackAll.length <= MAX_COMPARE
+        ? new Set(stackAll.map((d) => String(d.name)))
+        : new Set(),
+    );
+  }
+  const utilVisible = utilAll.filter((d) => utilShown.has(d.name));
+  const avbVisible = avbAll.filter((d) => avbShown.has(d.name));
+  const stackVisible = stackAll.filter((r) => stackShown.has(String(r.name)));
+  // Category chart filter (choose which categories to show).
+  const categoryKey = categoryData.map((d) => d.category).join("|");
+  const [prevCategoryKey, setPrevCategoryKey] = useState(categoryKey);
+  if (categoryKey !== prevCategoryKey) {
+    setPrevCategoryKey(categoryKey);
+    setCategoryShown(
+      categoryData.length <= MAX_COMPARE
+        ? new Set(categoryData.map((d) => d.category))
+        : new Set(),
+    );
+  }
+  const categoryVisible = categoryData.filter((d) =>
+    categoryShown.has(d.category),
+  );
+  // YoY selected fiscal years exposed as names for the shared Select filter.
+  const yoyYearNames = new Set(
+    periods.filter((p) => yoyYearIds.has(p.id)).map((p) => p.name),
+  );
+  // Years to plot as grouped bars (sorted oldest → newest).
+  const yoySelectedYears = periods
+    .filter((p) => yoyYearIds.has(p.id))
+    .map((p) => p.name)
+    .sort();
+  // Entity Select seeding (≤ MAX_COMPARE auto-shows all), like the other charts.
+  const yoyEntityKey = yoyData.map((r) => String(r.name)).join("|");
+  const [prevYoyEntityKey, setPrevYoyEntityKey] = useState(yoyEntityKey);
+  if (yoyEntityKey !== prevYoyEntityKey) {
+    setPrevYoyEntityKey(yoyEntityKey);
+    setYoyEntityShown(
+      yoyData.length <= MAX_COMPARE
+        ? new Set(yoyData.map((r) => String(r.name)))
+        : new Set(),
+    );
+  }
+  const yoyVisible = yoyData.filter((r) => yoyEntityShown.has(String(r.name)));
+
+  // Render the body (chart-specific controls + chart) for a given chart id.
+  // Any slot can render any chart, so this lives in one place.
+  function renderChartBody(chartId: string): ReactNode {
+    switch (chartId) {
+      case "utilisation":
+        return (
+          <>
+            <div className="flex justify-end mb-3">
+              <select
+                value={utilViewBy}
+                onChange={(e) =>
+                  setUtilViewBy(e.target.value as "group" | "lab")
+                }
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <EntityFilter
+              names={utilAll.map((d) => d.name)}
+              selected={utilShown}
+              onToggle={toggleShown(setUtilShown)}
+              onClear={() => setUtilShown(new Set())}
+              max={MAX_COMPARE}
+            />
+            {utilVisible.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Use the Select button above to choose up to {MAX_COMPARE} to
+                display.
+              </div>
+            ) : (
+              <AdaptiveBarChart height={300} bars={utilVisible.length}>
+                {(maxChars) => (
+                  <BarChart data={utilVisible} barCategoryGap="25%">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
+                    />
+                    <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
+                    <Tooltip formatter={(v: number) => `${v}%`} />
+                    <ReferenceLine
+                      y={50}
+                      stroke="#f59e0b"
+                      strokeDasharray="4 4"
+                      label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                    />
+                    <ReferenceLine
+                      y={80}
+                      stroke="#f97316"
+                      strokeDasharray="4 4"
+                      label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                    />
+                    <ReferenceLine
+                      y={95}
+                      stroke="#ef4444"
+                      strokeDasharray="4 4"
+                      label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                    />
+                    <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
+                      {utilVisible.map((d, i) => (
+                        <Cell key={i} fill={utilColor(d.util)} />
+                      ))}
+                      <LabelList
+                        dataKey="util"
+                        position="insideTop"
+                        formatter={(v: number) => `${Number(v).toFixed(1)}%`}
+                        fontSize={11}
+                        fontWeight={600}
+                        fill="#ffffff"
+                      />
+                    </Bar>
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
+            )}
+          </>
+        );
+      case "actualVsBudget":
+        return (
+          <>
+            <div className="flex justify-end mb-3">
+              <select
+                value={avbViewBy}
+                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <EntityFilter
+              names={avbAll.map((d) => d.name)}
+              selected={avbShown}
+              onToggle={toggleShown(setAvbShown)}
+              onClear={() => setAvbShown(new Set())}
+              max={MAX_COMPARE}
+            />
+            {avbVisible.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Use the Select button above to choose up to {MAX_COMPARE} to
+                display.
+              </div>
+            ) : (
+              <AdaptiveBarChart height={300} bars={avbVisible.length}>
+                {(maxChars) => (
+                  <BarChart
+                    data={avbVisible}
+                    barGap={8}
+                    barCategoryGap="20%"
+                    margin={{ top: 24, left: 12, right: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
+                    />
+                    <YAxis stroke="#6b7280" />
+                    <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                    <Legend />
+                    <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="budget"
+                        position="top"
+                        formatter={(v: number) => compactCurrency(Number(v))}
+                        fontSize={10}
+                        fill="#374151"
+                      />
+                    </Bar>
+                    <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]}>
+                      <LabelList
+                        dataKey="actual"
+                        position="top"
+                        formatter={(v: number) => compactCurrency(Number(v))}
+                        fontSize={10}
+                        fill="#374151"
+                      />
+                    </Bar>
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
+            )}
+          </>
+        );
+      case "category":
+        return (
+          <>
+            <EntityFilter
+              names={categoryData.map((d) => d.category)}
+              selected={categoryShown}
+              onToggle={toggleShown(setCategoryShown)}
+              onClear={() => setCategoryShown(new Set())}
+              max={MAX_COMPARE}
+              label="Categories"
+            />
+            {categoryVisible.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Select a category to display.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart
+                  data={categoryVisible}
+                  layout="vertical"
+                  barCategoryGap="20%"
+                  margin={{ right: 64, left: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis type="number" stroke="#6b7280" />
+                  <YAxis
+                    dataKey="category"
+                    type="category"
+                    stroke="#6b7280"
+                    width={120}
+                  />
+                  <Tooltip />
+                  <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
+                    <LabelList
+                      dataKey="amount"
+                      position="right"
+                      formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                      fontSize={11}
+                      fill="#374151"
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </>
+        );
+      case "monthly":
+        return (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={monthlyData} margin={{ top: 24, right: 32, left: 12 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="month" stroke="#6b7280" />
+              <YAxis stroke="#6b7280" />
+              <Tooltip
+                formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+              />
+              <Line
+                type="monotone"
+                dataKey="amount"
+                stroke="#3b82f6"
+                strokeWidth={2}
+                name="Actual spend"
+                dot
+              >
+                <LabelList
+                  dataKey="amount"
+                  content={(props: {
+                    x?: number;
+                    y?: number;
+                    value?: number | string;
+                    index?: number;
+                  }) => {
+                    const idx = props.index ?? 0;
+                    const val = Number(props.value ?? 0);
+                    const prev = monthlyData[idx - 1]?.amount ?? val;
+                    const next = monthlyData[idx + 1]?.amount ?? val;
+                    const isFirst = idx === 0;
+                    const isLast = idx === monthlyData.length - 1;
+                    // Endpoints go above and anchor to the edge so they don't
+                    // clip; middle valleys go below the line.
+                    const below =
+                      !isFirst && !isLast && val <= prev && val <= next;
+                    return (
+                      <text
+                        x={Number(props.x ?? 0)}
+                        y={Number(props.y ?? 0)}
+                        dy={below ? 16 : -8}
+                        textAnchor={
+                          isFirst ? "start" : isLast ? "end" : "middle"
+                        }
+                        fontSize={10}
+                        fill="#374151"
+                        stroke="#ffffff"
+                        strokeWidth={3}
+                        strokeLinejoin="round"
+                        style={{ paintOrder: "stroke" }}
+                      >
+                        {`$${val.toLocaleString()}`}
+                      </text>
+                    );
+                  }}
+                />
+              </Line>
+            </LineChart>
+          </ResponsiveContainer>
+        );
+      case "categoryMix":
+        return (
+          <>
+            <div className="flex justify-end mb-3">
+              <select
+                value={stackViewBy}
+                onChange={(e) =>
+                  setStackViewBy(e.target.value as "group" | "lab")
+                }
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <EntityFilter
+              names={stackAll.map((d) => String(d.name))}
+              selected={stackShown}
+              onToggle={toggleShown(setStackShown)}
+              onClear={() => setStackShown(new Set())}
+              max={MAX_COMPARE}
+            />
+            {stackVisible.length === 0 ? (
+              <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
+                Use the Select button above to choose up to {MAX_COMPARE} to
+                display.
+              </div>
+            ) : (
+              <AdaptiveBarChart height={320} bars={stackVisible.length}>
+                {(maxChars) => (
+                  <BarChart
+                    data={stackVisible}
+                    barCategoryGap="20%"
+                    margin={{ top: 20, left: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
+                    />
+                    <YAxis stroke="#6b7280" />
+                    <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
+                    <Legend />
+                    {stackedCategory.categories.map((cat, i) => (
+                      <Bar
+                        key={cat}
+                        dataKey={cat}
+                        stackId="spend"
+                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                        name={cat}
+                      >
+                        <LabelList
+                          dataKey={cat}
+                          position="center"
+                          formatter={(v: number) =>
+                            v ? `$${Number(v).toLocaleString()}` : ""
+                          }
+                          fontSize={10}
+                          fill="#ffffff"
+                        />
+                        {i === stackedCategory.categories.length - 1 && (
+                          <LabelList
+                            dataKey="__total"
+                            position="top"
+                            formatter={(v: number) =>
+                              `$${Number(v).toLocaleString()}`
+                            }
+                            fontSize={11}
+                            fontWeight={600}
+                            fill="#374151"
+                          />
+                        )}
+                      </Bar>
+                    ))}
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
+            )}
+          </>
+        );
+      case "yoy":
+        return (
+          <>
+            <div className="flex flex-wrap items-center justify-end mb-3 gap-2">
+              <label className="text-sm text-muted-foreground">Month</label>
+              <select
+                value={yoyMonth}
+                onChange={(e) => setYoyMonth(Number(e.target.value))}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+              >
+                {FISCAL_MONTHS.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={yoyViewBy}
+                onChange={(e) => setYoyViewBy(e.target.value as "group" | "lab")}
+                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+              >
+                <option value="group">By Lab Group</option>
+                <option value="lab">By Lab</option>
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <EntityFilter
+                names={periods.map((p) => p.name)}
+                selected={yoyYearNames}
+                onToggle={toggleYoyYearByName}
+                onClear={() => setYoyYearIds(new Set())}
+                max={MAX_COMPARE}
+                label="Years"
+              />
+              <EntityFilter
+                names={yoyData.map((r) => String(r.name))}
+                selected={yoyEntityShown}
+                onToggle={toggleShown(setYoyEntityShown)}
+                onClear={() => setYoyEntityShown(new Set())}
+                max={MAX_COMPARE}
+                label={yoyViewBy === "lab" ? "Labs" : "Groups"}
+              />
+            </div>
+            {yoyVisible.length === 0 || yoySelectedYears.length === 0 ? (
+              <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+                Pick fiscal years and entities to compare.
+              </div>
+            ) : (
+              <AdaptiveBarChart height={300} bars={yoyVisible.length}>
+                {(maxChars) => (
+                  <BarChart
+                    data={yoyVisible}
+                    barCategoryGap="20%"
+                    margin={{ top: 24 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      stroke="#6b7280"
+                      interval={0}
+                      height={42}
+                      tick={<WrapTick charsPerLine={maxChars} />}
+                    />
+                    <YAxis stroke="#6b7280" />
+                    <Tooltip
+                      formatter={(v: number) => `$${Number(v).toLocaleString()}`}
+                    />
+                    <Legend />
+                    {yoySelectedYears.map((yn, i) => (
+                      <Bar
+                        key={yn}
+                        dataKey={yn}
+                        name={yn}
+                        fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
+                        radius={[4, 4, 0, 0]}
+                      >
+                        <LabelList
+                          dataKey={yn}
+                          position="top"
+                          formatter={(v: number) =>
+                            v ? `$${Number(v).toLocaleString()}` : ""
+                          }
+                          fontSize={9}
+                          fill="#374151"
+                        />
+                      </Bar>
+                    ))}
+                  </BarChart>
+                )}
+              </AdaptiveBarChart>
+            )}
+          </>
+        );
+      default:
+        return (
+          <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
+            No chart selected.
+          </div>
+        );
+    }
+  }
+
+  // One dashboard slot: a card whose clickable title picks which chart it shows.
+  function renderSlot(index: number) {
+    const chartId = slots[index] ?? DASHBOARD_CHARTS[0].id;
+    const current = SLOT_OPTIONS.find((o) => o.id === chartId);
+    return (
+      <Card key={index} className="p-6 bg-white border-border">
+        <div className="mb-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-lg font-semibold text-foreground hover:text-blue-700"
+              >
+                {current?.label ?? "Select chart"}
+                <ChevronDown className="h-4 w-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {SLOT_OPTIONS.map((o) => (
+                <DropdownMenuItem key={o.id} onClick={() => setSlot(index, o.id)}>
+                  {o.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {renderChartBody(chartId)}
+      </Card>
+    );
+  }
 
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
@@ -648,7 +1519,7 @@ export function DashboardPage() {
           />
         </div>
 
-        {/* Drilldown: Lab Group → Lab → Category */}
+        {/* Drilldown: Lab Group → Lab → Category (always shown) */}
         <Card className="p-6 bg-white border-border">
           <h3 className="text-lg font-semibold mb-4 text-foreground">
             Budget Breakdown
@@ -744,255 +1615,30 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* Charts row 1 — lab-group level */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Budget Utilisation by Lab Group / Lab */}
-          <Card className="p-6 bg-white border-border">
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <h3 className="text-lg font-semibold text-foreground">
-                Budget Utilisation by {utilViewBy === "lab" ? "Lab" : "Lab Group"}
-              </h3>
-              <select
-                value={utilViewBy}
-                onChange={(e) => setUtilViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityChips
-              names={utilAll.map((d) => d.name)}
-              hidden={utilHidden}
-              onToggle={toggleHidden(setUtilHidden)}
-            />
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={utilVisible} barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
-                <Tooltip formatter={(v: number) => `${v}%`} />
-                <ReferenceLine
-                  y={50}
-                  stroke="#f59e0b"
-                  strokeDasharray="4 4"
-                  label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
-                />
-                <ReferenceLine
-                  y={80}
-                  stroke="#f97316"
-                  strokeDasharray="4 4"
-                  label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
-                />
-                <ReferenceLine
-                  y={95}
-                  stroke="#ef4444"
-                  strokeDasharray="4 4"
-                  label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
-                />
-                <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                  {utilVisible.map((d, i) => (
-                    <Cell key={i} fill={utilColor(d.util)} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Actual vs Budget by Lab Group / Lab */}
-          <Card className="p-6 bg-white border-border">
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <h3 className="text-lg font-semibold text-foreground">
-                Actual vs Budget by {avbViewBy === "lab" ? "Lab" : "Lab Group"}
-              </h3>
-              <select
-                value={avbViewBy}
-                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityChips
-              names={avbAll.map((d) => d.name)}
-              hidden={avbHidden}
-              onToggle={toggleHidden(setAvbHidden)}
-            />
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={avbVisible} barGap={8} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="name" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-                <Legend />
-                <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
+        {/* Reset the slot layout to defaults */}
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" onClick={resetSlots}>
+            Reset layout
+          </Button>
         </div>
 
-        {/* Charts row 2 — category + monthly */}
+        {/* Chart slots row 1 — click a title to choose the chart */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Spending by Category */}
-          <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Spending by Category
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={categoryData} layout="vertical" barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis type="number" stroke="#6b7280" />
-                <YAxis
-                  dataKey="category"
-                  type="category"
-                  stroke="#6b7280"
-                  width={100}
-                />
-                <Tooltip />
-                <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Monthly Spending Trend — approved committed spend by month */}
-          <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Monthly Spending Trend
-            </h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="month" stroke="#6b7280" />
-                <YAxis stroke="#6b7280" />
-                <Tooltip
-                  formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="amount"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  name="Actual spend"
-                  dot
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
+          {renderSlot(0)}
+          {renderSlot(1)}
         </div>
 
-        {/* Category mix — stacked bar per lab group / lab */}
-        <Card className="p-6 bg-white border-border">
-          <div className="flex items-center justify-between mb-4 gap-2">
-            <h3 className="text-lg font-semibold text-foreground">
-              Category Mix by {stackViewBy === "lab" ? "Lab" : "Lab Group"}
-            </h3>
-            <select
-              value={stackViewBy}
-              onChange={(e) => setStackViewBy(e.target.value as "group" | "lab")}
-              className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-            >
-              <option value="group">By Lab Group</option>
-              <option value="lab">By Lab</option>
-            </select>
-          </div>
-          <ResponsiveContainer width="100%" height={320}>
-            <BarChart
-              data={stackViewBy === "lab" ? stackedCategory.lab : stackedCategory.group}
-              barCategoryGap="20%"
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="name" stroke="#6b7280" />
-              <YAxis stroke="#6b7280" />
-              <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
-              <Legend />
-              {stackedCategory.categories.map((cat, i) => (
-                <Bar
-                  key={cat}
-                  dataKey={cat}
-                  stackId="spend"
-                  fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                  name={cat}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-
-        {/* Recent Activity */}
+        {/* Chart slots row 2 */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Recent Uploads
-            </h3>
-            <div className="space-y-3">
-              {recentUploads.map((upload) => (
-                <div
-                  key={upload.id}
-                  className="flex items-center justify-between py-3 border-b border-border last:border-0"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-foreground">
-                      {upload.id}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {upload.date} • {upload.records} records
-                    </p>
-                  </div>
-                  <StatusBadge
-                    status={
-                      upload.status === "processed" ? "approved" : "pending"
-                    }
-                  >
-                    {upload.status === "processed" ? "Processed" : "Review"}
-                  </StatusBadge>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-6 bg-white border-border">
-            <h3 className="text-lg font-semibold mb-4 text-foreground">
-              Active Alerts
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-start gap-3 p-3 bg-[#fef2f2] rounded-lg border border-[#fecaca]">
-                <AlertCircle className="h-5 w-5 text-[#dc2626] mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#dc2626]">
-                    Budget Exceeded
-                  </p>
-                  <p className="text-xs text-[#991b1b] mt-1">
-                    W3L1 - Food Processing exceeded threshold by 12%
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 bg-[#fef3c7] rounded-lg border border-[#fde68a]">
-                <AlertCircle className="h-5 w-5 text-[#d97706] mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#d97706]">
-                    Approaching Threshold
-                  </p>
-                  <p className="text-xs text-[#92400e] mt-1">
-                    W4L2 - Materials Testing at 88% utilization
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-3 p-3 bg-[#fef3c7] rounded-lg border border-[#fde68a]">
-                <AlertCircle className="h-5 w-5 text-[#d97706] mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-[#d97706]">
-                    Review Required
-                  </p>
-                  <p className="text-xs text-[#92400e] mt-1">
-                    28 records pending team lead approval
-                  </p>
-                </div>
-              </div>
-            </div>
-          </Card>
+          {renderSlot(2)}
+          {renderSlot(3)}
         </div>
+
+        {/* Chart slot 5 */}
+        {renderSlot(4)}
+
+        {/* Chart slot 6 */}
+        {renderSlot(5)}
       </div>
     </div>
   );
@@ -1004,6 +1650,18 @@ function formatCurrency(amount: number): string {
     currency: "SGD",
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
+  });
+}
+
+// Compact currency for on-chart value labels (e.g. $88K, $1.2M, $1.4B).
+// Width stays ~constant regardless of magnitude, so adjacent grouped-bar
+// labels don't clip into each other. Full precision stays in the tooltip.
+function compactCurrency(amount: number): string {
+  return amount.toLocaleString("en-SG", {
+    style: "currency",
+    currency: "SGD",
+    notation: "compact",
+    maximumFractionDigits: 1,
   });
 }
 

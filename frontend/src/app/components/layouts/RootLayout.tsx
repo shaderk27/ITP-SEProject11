@@ -20,6 +20,7 @@ import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
 import type { UserRole } from "../../context/AuthContext";
 import { useSessionTimeout, WARNING_BEFORE_EXPIRY_MS } from "../../services/useSessionTimeout";
+import { FEATURES } from "../../config/features";
 
 interface NavItem {
   name: string;
@@ -53,26 +54,45 @@ const navigation: NavItem[] = [
     icon: FileText,
     roles: ["admin", "teamlead", "labic"],
   },
-  {
-    name: "Reports",
-    path: "/reports",
-    icon: BarChart3,
-    roles: ["admin", "teamlead", "labic"],
-  },
+  // Detached tabs below (Reports / Audit Log / AI Chatbot) come back by
+  // flipping their flag in config/features.ts — nav item AND route together.
+  ...(FEATURES.reports
+    ? [
+        {
+          name: "Reports",
+          path: "/reports",
+          icon: BarChart3,
+          roles: ["admin", "teamlead", "labic"] as UserRole[],
+        },
+      ]
+    : []),
   { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead"] },
-  { name: "Audit Log", path: "/audit", icon: FileSearch, roles: ["admin"] },
+  ...(FEATURES.auditLog
+    ? [
+        {
+          name: "Audit Log",
+          path: "/audit",
+          icon: FileSearch,
+          roles: ["admin"] as UserRole[],
+        },
+      ]
+    : []),
   {
     name: "Create User",
     path: "/users/create",
     icon: UserPlus,
     roles: ["admin"],
   },
-  {
-    name: "AI Chatbot",
-    path: "/chatbot",
-    icon: MessageSquare,
-    roles: ["admin", "teamlead", "labic"],
-  },
+  ...(FEATURES.chatbot
+    ? [
+        {
+          name: "AI Chatbot",
+          path: "/chatbot",
+          icon: MessageSquare,
+          roles: ["admin", "teamlead", "labic"] as UserRole[],
+        },
+      ]
+    : []),
   { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
 ];
 
@@ -305,10 +325,14 @@ export function RootLayout() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="relative p-2 hover:bg-muted rounded-lg transition-colors">
-              <Bell className="h-5 w-5 text-muted-foreground" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 bg-[#dc2626] rounded-full"></span>
-            </button>
+            {/* Header notifications — detached stub (hardcoded red dot, no
+                dropdown yet). Flip FEATURES.headerNotifications to re-attach. */}
+            {FEATURES.headerNotifications && (
+              <button className="relative p-2 hover:bg-muted rounded-lg transition-colors">
+                <Bell className="h-5 w-5 text-muted-foreground" />
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 bg-[#dc2626] rounded-full"></span>
+              </button>
+            )}
           </div>
         </header>
 
