@@ -18,7 +18,7 @@ interface UserData {
   is_active: boolean;
 }
 
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+const API = import.meta.env.VITE_API_URL ?? "/api";
 
 interface UserManagementProps {
   onUsersChanged?: () => void;
@@ -31,7 +31,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
   const [error, setError] = useState<string | null>(null);
 
   const loadUsers = useCallback(() => {
-    fetch(`${API}/api/auth/users`, { credentials: "include" })
+    fetch(`${API}/auth/users`, { credentials: "include" })
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load users.");
         return res.json();
@@ -96,7 +96,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
 
     try {
       const res = await fetch(
-        `${API}/api/auth/users/${user.id}/unassign-scope`,
+        `${API}/auth/users/${user.id}/unassign-scope`,
         {
           method: "PUT",
           credentials: "include",
@@ -126,7 +126,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`${API}/api/auth/users/${user.id}/deactivate`, {
+      const res = await fetch(`${API}/auth/users/${user.id}/deactivate`, {
         method: "PUT",
         credentials: "include",
       });
@@ -154,7 +154,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
 
     try {
       const res = await fetch(
-        `${API}/api/auth/users/${resetTargetUser.id}/send-reset`,
+        `${API}/auth/users/${resetTargetUser.id}/send-reset`,
         {
           method: "POST",
           credentials: "include",

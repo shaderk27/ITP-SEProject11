@@ -95,7 +95,7 @@ export function RootLayout() {
   const [profileSuccess, setProfileSuccess] = useState("");
   const { showWarning, secondsRemaining, extendSession, handleExpire } =
     useSessionTimeout();
-  const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+  const API_BASE_URL = import.meta.env.VITE_API_URL ?? "/api";
 
   useEffect(() => {
     if (!user) {

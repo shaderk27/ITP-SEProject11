@@ -77,7 +77,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+const API = import.meta.env.VITE_API_URL ?? "/api";
 
 // Helper function to safely parse backend lab strings/arrays into standard array structures
 function parseAssignedLabs(rawLabs: any): string[] {
@@ -104,11 +104,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // 1. Session Restore on Mount
   useEffect(() => {
-    fetch(`${API}/api/auth/me`, { credentials: "include" })
+    fetch(`${API}/auth/me`, { credentials: "include" })
       .then(async (res) => {
         if (res.status === 403) {
           // May be a temp-reset session
-          const fallback = await fetch(`${API}/api/auth/me/reset`, {
+          const fallback = await fetch(`${API}/auth/me/reset`, {
             credentials: "include",
           });
           if (fallback.ok) {
@@ -156,7 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Make sure to mirror this exact change inside your login function block too:
   const login = async (email: string, password: string) => {
-    const res = await fetch(`${API}/api/auth/login`, {
+    const res = await fetch(`${API}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
@@ -191,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // 3. Functional Logout Handler
   const logout = async () => {
     try {
-      await fetch(`${API}/api/auth/logout`, {
+      await fetch(`${API}/auth/logout`, {
         method: "POST",
         credentials: "include",
       });
