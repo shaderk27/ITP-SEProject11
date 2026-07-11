@@ -59,12 +59,25 @@ def check_and_email_pending_reviews(is_new_upload: bool = False):
 
 
 def start_scheduler():
-    """Attaches the jobs and starts the background timer."""
+    """Attaches the jobs and starts the background timer if it isn't already running."""
     scheduler.add_job(
         check_and_email_pending_reviews,
-        CronTrigger(day_of_week="mon", hour=9, minute=0),
+        CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="Asia/Singapore"),
         id="weekly_pending_review_reminder",
         replace_existing=True,
     )
-    scheduler.start()
-    logger.info("[SCHEDULER] Background scheduler started. Jobs queued.")
+
+    if not scheduler.running:
+        scheduler.start()
+        logger.info(
+            "[SCHEDULER] Background scheduler started. Jobs queued for Asia/Singapore."
+        )
+    else:
+        logger.info("[SCHEDULER] Scheduler is already running. Jobs updated.")
+
+
+def shutdown_scheduler():
+    """Gracefully kills the scheduler to prevent zombie processes."""
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("[SCHEDULER] Background scheduler shut down gracefully.")
