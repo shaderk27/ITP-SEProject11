@@ -15,10 +15,11 @@ from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 async def lifespan(app: FastAPI):
     # Runs on startup
     start_scheduler()
-    
-    yield 
-    
+
+    yield
+
     shutdown_scheduler()
+
 
 app = FastAPI(title="Lab Budget Monitoring API", lifespan=lifespan)
 
