@@ -1,4 +1,3 @@
-import pytest
 from app.models.auth import User
 from app.models.staging import StagingPRLine, ReviewQueueItem
 from app.models.config import LabGroup
