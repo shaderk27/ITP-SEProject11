@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import config
@@ -7,7 +8,20 @@ from app.api.review import router as review_router
 from app.api.upload import router as upload_router
 from app.api.auth import router as auth_router
 
-app = FastAPI(title="Lab Budget Monitoring API")
+# --- IMPORT THE SCHEDULER ---
+from app.services.scheduler_service import start_scheduler
+
+
+# --- LIFESPAN MANAGER ---
+# This ensures the background timer starts exactly when FastAPI boots up
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    start_scheduler()
+    yield
+
+
+# Attach the lifespan to the FastAPI instance
+app = FastAPI(title="Lab Budget Monitoring API", lifespan=lifespan)
 
 app.include_router(config.router)
 
