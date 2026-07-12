@@ -1,6 +1,14 @@
 import hashlib
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    UploadFile,
+    BackgroundTasks,
+)
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -9,6 +17,8 @@ from app.models.auth import User
 from app.repositories.upload_repository import UploadRepository
 from app.services.upload_service import UploadService
 
+from app.services.scheduler_service import check_and_email_pending_reviews
+
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 ALLOWED_UPLOAD_ROLES = {"admin", "teamlead"}
@@ -16,6 +26,7 @@ ALLOWED_UPLOAD_ROLES = {"admin", "teamlead"}
 
 @router.post("/process")
 async def process_upload(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     x_user_email: str = Header(default="demo.teamlead@sit.edu.sg"),
     x_user_name: str = Header(default="Demo Team Lead"),
@@ -30,7 +41,7 @@ async def process_upload(
 
     service = UploadService(repository=UploadRepository(), db=db)
 
-    return service.process_upload(
+    result = service.process_upload(
         filename=file.filename or "upload",
         content=payload,
         uploader_email=x_user_email,
@@ -39,9 +50,15 @@ async def process_upload(
         current_user=current_user,
     )
 
+    if result.get("counts", {}).get("needs_review", 0) > 0:
+        background_tasks.add_task(check_and_email_pending_reviews, is_new_upload=True)
+
+    return result
+
 
 @router.post("/process-batch")
 async def process_upload_batch(
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     x_user_email: str = Header(default="demo.teamlead@sit.edu.sg"),
     x_user_name: str = Header(default="Demo Team Lead"),
@@ -83,7 +100,12 @@ async def process_upload_batch(
             )
         )
 
-    return _combine_batch_results(results, x_user_email, x_user_name, role)
+    combined_results = _combine_batch_results(results, x_user_email, x_user_name, role)
+
+    if combined_results.get("counts", {}).get("needs_review", 0) > 0:
+        background_tasks.add_task(check_and_email_pending_reviews, is_new_upload=True)
+
+    return combined_results
 
 
 def _ensure_upload_role(role: str) -> None:

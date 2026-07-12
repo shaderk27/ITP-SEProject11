@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api import config
@@ -7,7 +8,20 @@ from app.api.review import router as review_router
 from app.api.upload import router as upload_router
 from app.api.auth import router as auth_router
 
-app = FastAPI(title="Lab Budget Monitoring API")
+from app.services.scheduler_service import start_scheduler, shutdown_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Runs on startup
+    start_scheduler()
+
+    yield
+
+    shutdown_scheduler()
+
+
+app = FastAPI(title="Lab Budget Monitoring API", lifespan=lifespan)
 
 app.include_router(config.router)
 
