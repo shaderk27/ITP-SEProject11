@@ -40,3 +40,4 @@ uvicorn==0.34.0
 watchfiles==1.2.0
 websockets==16.0
 pytest-mock==3.15.1
+APScheduler==3.10.4
