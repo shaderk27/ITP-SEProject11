@@ -66,7 +66,7 @@ def send_pending_review_reminder(
             <div style="padding: 24px;">
                 <p style="font-size: 16px; color: #374151;">Hello {team_lead_name},</p>
                 <p style="font-size: 16px; color: #374151;">
-                    This is an automated reminder that you currently have <strong>{pending_count} item(s)</strong> 
+                    This is an automated reminder that you currently have <strong>{pending_count} item(s)</strong>
                     in your review queue waiting for classification corrections.
                 </p>
                 <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
@@ -109,7 +109,7 @@ def send_new_upload_alert(to_email: str, team_lead_name: str, pending_count: int
             <div style="padding: 24px;">
                 <p style="font-size: 16px; color: #374151;">Hello {team_lead_name},</p>
                 <p style="font-size: 16px; color: #374151;">
-                    An Admin has just processed a new batch of Purchase Requests. 
+                    An Admin has just processed a new batch of Purchase Requests.
                     You currently have <strong>{pending_count} item(s)</strong> in your queue waiting for classification corrections.
                 </p>
                 <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">

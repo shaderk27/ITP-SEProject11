@@ -42,7 +42,11 @@ def check_and_email_pending_reviews(is_new_upload: bool = False):
             if pending_count > 0:
                 team_leads = (
                     db.query(User)
-                    .filter(User.lab_group_id == lab_group_id, User.role_id == 2)
+                    .filter(
+                        User.lab_group_id == lab_group_id,
+                        User.role_id == 2,
+                        User.is_active.is_(True),
+                    )
                     .all()
                 )
 
