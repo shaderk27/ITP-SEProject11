@@ -861,6 +861,7 @@ export function SystemConfigPage() {
                   <input
                     type="text"
                     required
+                    placeholder="e.g. E2-02-14"
                     className="w-full mt-1 p-2 border rounded-md uppercase"
                     value={newLabForm.lab_code || ""}
                     onChange={(e) => {
@@ -877,6 +878,7 @@ export function SystemConfigPage() {
                   <input
                     type="text"
                     required
+                    placeholder="e.g. Embedded Systems Lab"
                     className="w-full mt-1 p-2 border rounded-md"
                     value={newLabForm.lab_name || ""}
                     onChange={(e) => {
