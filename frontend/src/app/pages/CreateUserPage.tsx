@@ -34,7 +34,7 @@ interface FieldErrors {
 }
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
-const ALLOWED_EMAIL_DOMAINS = ["sit.edu.sg", "example.com", "test.com","outlook.com"];
+const ALLOWED_EMAIL_DOMAINS = ["sit.edu.sg", "example.com", "test.com","outlook.com","singaporetech.edu.sg"];
 const ROLES: Role[] = [
   { role_id: 1, role_name: "admin" },
   { role_id: 2, role_name: "teamlead" },

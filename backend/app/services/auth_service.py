@@ -27,7 +27,7 @@ ALLOW_PLACEHOLDER_PASSWORDS = (
 ALLOWED_EMAIL_DOMAINS = {
     domain.strip().lower()
     for domain in os.getenv(
-        "ALLOWED_EMAIL_DOMAINS", "sit.edu.sg,example.com,test.com"
+        "ALLOWED_EMAIL_DOMAINS", "sit.edu.sg,example.com,test.com,singaporetech.edu.sg"
     ).split(",")
     if domain.strip()
 }
