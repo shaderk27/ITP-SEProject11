@@ -57,7 +57,7 @@ def test_check_and_notify_lab_thresholds_50_percent(
     assert fake_lab.notified_80 is False
     assert mock_db.commit.called is True
     mock_send_email.assert_called_once()
-    
+
     args, kwargs = mock_send_email.call_args
     assert "50%" in args[1]
 
@@ -114,7 +114,7 @@ def test_check_and_notify_lab_thresholds_80_percent(
     assert fake_lab.notified_95 is False
     assert mock_db.commit.called is True
     mock_send_email.assert_called_once()
-    
+
     args, kwargs = mock_send_email.call_args
     assert "80%" in args[1]
 
@@ -171,7 +171,7 @@ def test_check_and_notify_lab_thresholds_95_percent(
     assert fake_lab.notified_100 is False
     assert mock_db.commit.called is True
     mock_send_email.assert_called_once()
-    
+
     args, kwargs = mock_send_email.call_args
     assert "95%" in args[1]
 
@@ -193,7 +193,7 @@ def test_check_and_notify_lab_thresholds_100_percent(
         notified_50=True,
         notified_80=True,
         notified_95=True,
-        notified_100=False, 
+        notified_100=False,
         alert_period_id=1,
     )
 
@@ -228,6 +228,6 @@ def test_check_and_notify_lab_thresholds_100_percent(
     assert fake_lab.notified_100 is True
     assert mock_db.commit.called is True
     mock_send_email.assert_called_once()
-    
+
     args, kwargs = mock_send_email.call_args
     assert "EXCEEDED" in args[1]
