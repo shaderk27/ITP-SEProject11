@@ -51,6 +51,7 @@ class Lab(Base):
     notified_50 = Column(Boolean, default=False)
     notified_80 = Column(Boolean, default=False)
     notified_95 = Column(Boolean, default=False)
+    notified_100 = Column(Boolean, default=False)
     alert_period_id = Column(
         BigInteger, ForeignKey("budget_periods.period_id"), nullable=True
     )
