@@ -21,6 +21,7 @@ def test_check_and_notify_lab_thresholds_80_percent(
         notified_50=True,
         notified_80=False,
         notified_95=False,
+        notified_100=False,
         alert_period_id=1,  # Matching our mock period
     )
 
