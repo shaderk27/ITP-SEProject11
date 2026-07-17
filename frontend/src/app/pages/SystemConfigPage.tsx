@@ -734,7 +734,7 @@ export function SystemConfigPage() {
             }} className="space-y-4 p-6">
               <div><label className="text-sm font-medium">Group Name</label><input type="text" required className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.name} onChange={(e) => setNewGroupForm({...newGroupForm, name: e.target.value})} /></div>
               <div><label className="text-sm font-medium">WBS Prefix</label><input type="text" className="w-full mt-1 p-2 border rounded-md" value={newGroupForm.wbs_code} onChange={(e) => setNewGroupForm({...newGroupForm, wbs_code: e.target.value})} /></div>
-              <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newGroupForm.description} onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})} /></div>
+              {/* <div><label className="text-sm font-medium">Description</label><textarea className="w-full mt-1 p-2 border rounded-md" rows={3} value={newGroupForm.description} onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})} /></div> */}
 
               {/* THE NEW ORPHANED LABS CHECKLIST */}
               {orphanedLabs.length > 0 && (
