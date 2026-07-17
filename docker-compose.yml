@@ -1,0 +1,43 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: app-backend
+    restart: unless-stopped
+    environment:
+      # Point this at your Lightsail managed database, or the local `db`
+      # service below if you uncomment it.
+      - DATABASE_URL=${DATABASE_URL}
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: app-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+  # Uncomment this if you want a local Postgres container instead of a
+  # managed database (handy for testing on the Lightsail instance before
+  # you set up Lightsail's managed database).
+  # db:
+  #   image: postgres:16-alpine
+  #   container_name: app-db
+  #   restart: unless-stopped
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #     - POSTGRES_DB=app
+  #   volumes:
+  #     - db-data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+# volumes:
+#   db-data:

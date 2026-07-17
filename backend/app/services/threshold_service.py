@@ -67,9 +67,12 @@ def check_and_notify_lab_thresholds(lab_id: int):
             lab.notified_50 = False
             lab.notified_80 = False
             lab.notified_95 = False
+            lab.notified_100 = False
             lab.alert_period_id = current_period.period_id
 
         # Secondary Reset: if an admin manually increases the budget later
+        if utilization_pct < 100 and getattr(lab, "notified_100", False):
+            lab.notified_100 = False
         if utilization_pct < 95 and lab.notified_95:
             lab.notified_95 = False
         if utilization_pct < 80 and lab.notified_80:
@@ -79,7 +82,13 @@ def check_and_notify_lab_thresholds(lab_id: int):
         # ----------------------
 
         threshold_hit = None
-        if utilization_pct >= 95 and not lab.notified_95:
+        if utilization_pct >= 100 and not getattr(lab, "notified_100", False):
+            threshold_hit = 100
+            lab.notified_100 = True
+            lab.notified_95 = True
+            lab.notified_80 = True
+            lab.notified_50 = True
+        elif utilization_pct >= 95 and not lab.notified_95:
             threshold_hit = 95
             lab.notified_95 = True
             lab.notified_80 = True
@@ -103,7 +112,6 @@ def check_and_notify_lab_thresholds(lab_id: int):
             db.query(User).filter(User.lab_id == lab.lab_id, User.role_id == 3).first()
         )
 
-        # --- RUFF FIX: Break statements onto new lines ---
         if lab_ic and lab_ic.email:
             recipients.append(lab_ic.email)
 
@@ -118,29 +126,35 @@ def check_and_notify_lab_thresholds(lab_id: int):
 
         if not recipients:
             return
-        # -------------------------------------------------
 
         spent_str = f"${float(total_spent):,.2f}"
         budget_str = f"${float(total_budget):,.2f}"
 
+        # --- EMAIL CONTENT & COLOR PROGRESSION ---
         if threshold_hit == 50:
             subject, color = (
                 f"Notice: {lab.lab_name} has reached 50% Budget Utilization",
-                "#2563eb",
+                "#2563eb",  # Blue
             )
             message = "You have utilized half of your allocated lab budget. Please review upcoming planned expenses."
         elif threshold_hit == 80:
             subject, color = (
                 f"WARNING: {lab.lab_name} has reached 80% Budget Utilization",
-                "#d97706",
+                "#eab308",  # Yellow
             )
             message = "Your lab is approaching its budget limit. Please prioritize essential purchases only."
-        else:
+        elif threshold_hit == 95:
             subject, color = (
                 f"CRITICAL: {lab.lab_name} has reached 95% Budget Utilization",
-                "#dc2626",
+                "#ea580c",  # Orange
             )
-            message = "Immediate attention required. Your lab budget is nearly exhausted. Further PRs may be rejected unless additional funding is secured."
+            message = "Immediate attention required. Your lab budget is nearly exhausted. Please review spending carefully."
+        else:  # Exceeded
+            subject, color = (
+                f"EXCEEDED: {lab.lab_name} has EXCEEDED its Budget",
+                "#dc2626",  # Red
+            )
+            message = "Action required. Your lab budget has been completely exhausted and exceeded. Please review and adjust your spending immediately."
 
         html_body = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
@@ -159,9 +173,6 @@ def check_and_notify_lab_thresholds(lab_id: int):
                     <p style="margin: 0;"><strong>Current Utilization:</strong> {utilization_pct:.1f}%</p>
                 </div>
                 <p style="font-size: 16px; color: {color}; font-weight: bold;">{message}</p>
-                <p style="font-size: 14px; color: #6b7280; margin-top: 30px;">
-                    Please log in to the SIT Lab Budget System to review your purchase lines.
-                </p>
             </div>
         </div>
         """

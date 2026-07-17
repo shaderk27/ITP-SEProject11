@@ -33,8 +33,8 @@ interface FieldErrors {
   [key: string]: string;
 }
 
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
-const ALLOWED_EMAIL_DOMAINS = ["sit.edu.sg", "example.com", "test.com"];
+const API = import.meta.env.VITE_API_URL ?? "/api";
+const ALLOWED_EMAIL_DOMAINS = ["sit.edu.sg", "example.com", "test.com","outlook.com","singaporetech.edu.sg"];
 const ROLES: Role[] = [
   { role_id: 1, role_name: "admin" },
   { role_id: 2, role_name: "teamlead" },
@@ -61,22 +61,22 @@ export function CreateUserPage() {
   });
 
   useEffect(() => {
-    fetch(`${API}/api/auth/roles`, { credentials: "include" })
+    fetch(`${API}/auth/roles`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : ROLES))
       .then(setRoles)
       .catch(() => setRoles(ROLES));
 
-    fetch(`${API}/api/config/labgroups`, { credentials: "include" })
+    fetch(`${API}/config/labgroups`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then(setLabGroups)
       .catch(() => setLabGroups([]));
 
-    fetch(`${API}/api/config/labs`, { credentials: "include" })
+    fetch(`${API}/config/labs`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then(setLabs)
       .catch(() => setLabs([]));
 
-    fetch(`${API}/api/auth/assignments`, { credentials: "include" })
+    fetch(`${API}/auth/assignments`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : []))
       .then(setAssignments)
       .catch(() => setAssignments([]));
@@ -143,7 +143,7 @@ export function CreateUserPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/auth/users`, {
+      const res = await fetch(`${API}/auth/users`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

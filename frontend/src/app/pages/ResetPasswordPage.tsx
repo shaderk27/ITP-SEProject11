@@ -11,7 +11,7 @@ interface FieldErrors {
   [key: string]: string;
 }
 
-const API = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+const API = import.meta.env.VITE_API_URL ?? "/api";
 
 export function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -74,7 +74,7 @@ export function ResetPasswordPage() {
 
     setIsSubmitting(true);
     try {
-      const res = await fetch(`${API}/api/auth/reset-password`, {
+      const res = await fetch(`${API}/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
