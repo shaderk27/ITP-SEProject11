@@ -82,6 +82,19 @@ function utilColor(pct: number): string {
 // Max entities shown at once in a comparison chart.
 const MAX_COMPARE = 20;
 
+// Value-label font size that scales with how crowded the chart is: fewer bars
+// → larger, more readable text; many bars → smaller so labels don't collide.
+// `categories` = number of x-axis slots; `perCategory` = bars drawn in each
+// slot (grouped/YoY charts pack 2+ bars per slot, so their labels need to be
+// smaller). Since the chart cards are full-width, bar count is a good proxy
+// for the horizontal space each label gets. Clamped to a legible 6–12px.
+function labelFontSize(categories: number, perCategory = 1, floor = 6): number {
+  const bars = Math.max(1, categories * perCategory);
+  // ~5 bars → 12px, tapering down toward `floor` by ~40 bars.
+  const size = Math.round(13 - (bars - 5) * (8 / 35));
+  return Math.max(floor, Math.min(12, size));
+}
+
 // Searchable selector: pick up to `max` entities to display in a comparison chart.
 // Starts empty — the user checks what they want to see.
 function EntityFilter({
@@ -973,7 +986,7 @@ export function DashboardPage() {
                         dataKey="util"
                         position="top"
                         formatter={(v: number) => `${Number(v).toFixed(1)}%`}
-                        fontSize={9}
+                        fontSize={labelFontSize(utilVisible.length)}
                         fontWeight={600}
                         fill="#111827"
                       />
@@ -1038,7 +1051,7 @@ export function DashboardPage() {
                         dataKey="budget"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={6}
+                        fontSize={labelFontSize(avbVisible.length, 2, 5)}
                         fill="#374151"
                       />
                     </Bar>
@@ -1047,7 +1060,7 @@ export function DashboardPage() {
                         dataKey="actual"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={6}
+                        fontSize={labelFontSize(avbVisible.length, 2, 5)}
                         fill="#374151"
                       />
                     </Bar>
@@ -1226,7 +1239,7 @@ export function DashboardPage() {
                             dataKey="__total"
                             position="top"
                             formatter={(v: number) => compactCurrency(Number(v))}
-                            fontSize={9}
+                            fontSize={labelFontSize(stackVisible.length)}
                             fontWeight={600}
                             fill="#374151"
                           />
@@ -1325,7 +1338,10 @@ export function DashboardPage() {
                           formatter={(v: number) =>
                             v ? compactCurrency(Number(v)) : ""
                           }
-                          fontSize={5}
+                          fontSize={labelFontSize(
+                            yoyVisible.length,
+                            Math.max(1, yoySelectedYears.length),
+                          )}
                           fill="#374151"
                         />
                       </Bar>
