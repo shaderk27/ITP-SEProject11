@@ -1149,9 +1149,11 @@ export function DashboardPage() {
                     const isFirst = idx === 0;
                     const isLast = idx === monthlyData.length - 1;
                     // Endpoints go above and anchor to the edge so they don't
-                    // clip; middle valleys go below the line.
+                    // clip; middle valleys go below the line — except $0 points,
+                    // which sit on the axis, so "below" would collide with the
+                    // month labels; force those above.
                     const below =
-                      !isFirst && !isLast && val <= prev && val <= next;
+                      val !== 0 && !isFirst && !isLast && val <= prev && val <= next;
                     return (
                       <text
                         x={Number(props.x ?? 0)}
