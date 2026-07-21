@@ -347,8 +347,8 @@ export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   // Lab IC is scoped to a single lab: the "By Lab Group" view and the
-  // entity-select ("Select N/5") filter are meaningless for them, so both
-  // are hidden and only the single lab's chart shows.
+  // entity-select filter are meaningless for them, so both are hidden and
+  // only the single lab's chart shows.
   const isLabIc = user?.role === "labic";
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
@@ -943,8 +943,9 @@ export function DashboardPage() {
             )}
             {utilVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Use the Select button above to choose up to {MAX_COMPARE} to
-                display.
+                {isLabIc
+                  ? "No data to display for your lab yet."
+                  : `Use the Select button above to choose up to ${MAX_COMPARE} to display.`}
               </div>
             ) : (
               <AdaptiveBarChart height={300} bars={utilVisible.length}>
@@ -1023,8 +1024,9 @@ export function DashboardPage() {
             )}
             {avbVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Use the Select button above to choose up to {MAX_COMPARE} to
-                display.
+                {isLabIc
+                  ? "No data to display for your lab yet."
+                  : `Use the Select button above to choose up to ${MAX_COMPARE} to display.`}
               </div>
             ) : (
               <AdaptiveBarChart height={300} bars={avbVisible.length}>
@@ -1083,7 +1085,9 @@ export function DashboardPage() {
             />
             {categoryVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Select a category to display.
+                {isLabIc
+                  ? "No data to display for your lab yet."
+                  : "Select a category to display."}
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={300}>
@@ -1206,8 +1210,9 @@ export function DashboardPage() {
             )}
             {stackVisible.length === 0 ? (
               <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
-                Use the Select button above to choose up to {MAX_COMPARE} to
-                display.
+                {isLabIc
+                  ? "No data to display for your lab yet."
+                  : `Use the Select button above to choose up to ${MAX_COMPARE} to display.`}
               </div>
             ) : (
               <AdaptiveBarChart height={320} bars={stackVisible.length}>
@@ -1303,7 +1308,9 @@ export function DashboardPage() {
             </div>
             {yoyVisible.length === 0 || yoySelectedYears.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Pick fiscal years and entities to compare.
+                {isLabIc
+                  ? "No data to display for your lab yet."
+                  : "Pick fiscal years and entities to compare."}
               </div>
             ) : (
               <AdaptiveBarChart height={300} bars={yoyVisible.length}>
