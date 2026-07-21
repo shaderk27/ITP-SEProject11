@@ -152,11 +152,11 @@ export function RecordsPage() {
               ...periods.map((p) => ({ value: String(p.id), label: p.name })),
             ],
           },
-          // Lab IC is scoped to a single lab, so the Lab Group filter is
-          // meaningless for them — hide it.
-          ...(user?.role === "labic"
-            ? []
-            : [
+          // Only Admin sees every lab group; Team Lead is scoped to one group
+          // and Lab IC to one lab, so the Lab Group filter is meaningless for
+          // them — hide it for both.
+          ...(user?.role === "admin"
+            ? [
                 {
                   label: "Lab Group",
                   value: labGroupFilter,
@@ -165,7 +165,8 @@ export function RecordsPage() {
                     ...labGroupOptions,
                   ],
                 },
-              ]),
+              ]
+            : []),
           {
             label: "Date Range",
             value: dateRange,
