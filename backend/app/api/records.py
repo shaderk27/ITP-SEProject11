@@ -7,6 +7,7 @@ and a stepping stone for W11-03 reporting work.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -21,9 +22,10 @@ from app.utils.date_range import date_range_bounds
 
 router = APIRouter(prefix="/api/records", tags=["Records"])
 
-# Lab IC hidden from this page in the sidebar; backend matches by returning 403.
-# To re-enable Lab IC access later: add "labic" to this set.
-ALLOWED_RECORDS_ROLES = {"admin", "teamlead"}
+# Lab IC may view PR Records, but scoped to their single assigned lab only
+# (see the query filter below): only PRs that have a line in their lab, and
+# only those lines are returned.
+ALLOWED_RECORDS_ROLES = {"admin", "teamlead", "labic"}
 
 
 # ─── Response shapes ─────────────────────────────────────────────────────
@@ -78,7 +80,9 @@ def list_committed_prs(
     Role scoping:
       - Admin     → every committed PR.
       - Team Lead → only PRs whose lab_group_id matches their lab_group_id.
-      - Lab IC    → 403 (page hidden in sidebar; backend mirror).
+      - Lab IC    → only PRs that have a line in their assigned lab, and only
+        those lines are returned (other labs' lines in the same PR are hidden,
+        and the PR total is recomputed from the visible lines).
 
     Date filtering (W11-03) is on ``request_date`` (the xlsx "PR Sub Date"):
       - ``start_date`` / ``end_date`` — an explicit custom range. If either is
@@ -102,6 +106,15 @@ def list_committed_prs(
         if not current_user.lab_group_id:
             return []
         query = query.filter(PurchaseRequest.lab_group_id == current_user.lab_group_id)
+    elif role_name == "labic":
+        if not current_user.lab_id:
+            return []
+        # Only PRs that carry at least one line in the Lab IC's own lab.
+        query = query.filter(
+            PurchaseRequest.lines.any(
+                PurchaseRequestLine.lab_id == current_user.lab_id
+            )
+        )
 
     # Custom range wins; otherwise fall back to the preset. date_range_bounds
     # handles "fy" (both ends) as well as the relative windows (lower bound).
@@ -126,12 +139,17 @@ def list_committed_prs(
     group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
 
     pr_ids = [pr.pr_id for pr in prs]
-    all_lines = (
-        db.query(PurchaseRequestLine)
-        .filter(PurchaseRequestLine.pr_id.in_(pr_ids))
-        .order_by(PurchaseRequestLine.pr_id, PurchaseRequestLine.line_no)
-        .all()
+    lines_query = db.query(PurchaseRequestLine).filter(
+        PurchaseRequestLine.pr_id.in_(pr_ids)
     )
+    # Lab IC only sees their own lab's lines within each PR.
+    if role_name == "labic":
+        lines_query = lines_query.filter(
+            PurchaseRequestLine.lab_id == current_user.lab_id
+        )
+    all_lines = lines_query.order_by(
+        PurchaseRequestLine.pr_id, PurchaseRequestLine.line_no
+    ).all()
     lines_by_pr: dict[int, list[PurchaseRequestLine]] = {}
     for line in all_lines:
         lines_by_pr.setdefault(line.pr_id, []).append(line)
@@ -143,9 +161,9 @@ def list_committed_prs(
             requestor_name=pr.requestor_name or "",
             purpose=pr.purpose or "",
             wbs_code=pr.wbs_code or "",
-            grand_total_sgd=str(pr.grand_total_sgd)
-            if pr.grand_total_sgd is not None
-            else "0",
+            grand_total_sgd=_pr_grand_total(
+                pr, lines_by_pr.get(pr.pr_id, []), role_name
+            ),
             lab_group_name=group_names.get(pr.lab_group_id, "General"),
             latest_batch_id=pr.latest_batch_id,
             updated_at=pr.updated_at,
@@ -180,3 +198,19 @@ def list_committed_prs(
 # ─── Helpers ─────────────────────────────────────────────────────────────
 def _role_name(user: User) -> str:
     return (user.role.role_name if user.role else "").lower().strip()
+
+
+def _pr_grand_total(pr, visible_lines, role_name: str) -> str:
+    """PR total to display.
+
+    For Lab IC we only surface their own lab's lines, so the stored whole-PR
+    grand total (which may include other labs' lines within the same group)
+    would over-report. Recompute from the visible lines instead so the total
+    matches what the Lab IC can actually see.
+    """
+    if role_name == "labic":
+        total = sum(
+            (line.amount_gst or Decimal("0")) for line in visible_lines
+        )
+        return str(total)
+    return str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else "0"
