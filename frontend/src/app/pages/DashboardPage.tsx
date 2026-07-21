@@ -1622,22 +1622,12 @@ export function DashboardPage() {
           </Button>
         </div>
 
-        {/* Chart slots row 1 — click a title to choose the chart */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {renderSlot(0)}
-          {renderSlot(1)}
-        </div>
-
-        {/* Chart slots row 2 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {renderSlot(2)}
-          {renderSlot(3)}
-        </div>
-
-        {/* Chart slot 5 */}
+        {/* Chart slots — each full-width, one per row. Click a title to choose the chart */}
+        {renderSlot(0)}
+        {renderSlot(1)}
+        {renderSlot(2)}
+        {renderSlot(3)}
         {renderSlot(4)}
-
-        {/* Chart slot 6 */}
         {renderSlot(5)}
       </div>
     </div>
