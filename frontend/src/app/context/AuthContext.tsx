@@ -60,7 +60,13 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "alerts:view",
     "budget:view",
   ],
-  labic: ["dashboard:view", "records:view", "reports:view", "budget:view"],
+  labic: [
+    "dashboard:view", 
+    "records:view", 
+    "reports:view", 
+    "budget:view",
+    "alerts:view"
+  ],
 };
 
 interface AuthContextType {

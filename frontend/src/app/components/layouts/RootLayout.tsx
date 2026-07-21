@@ -54,8 +54,6 @@ const navigation: NavItem[] = [
     icon: FileText,
     roles: ["admin", "teamlead", "labic"],
   },
-  // Detached tabs below (Reports / Audit Log / AI Chatbot) come back by
-  // flipping their flag in config/features.ts — nav item AND route together.
   ...(FEATURES.reports
     ? [
         {
@@ -66,7 +64,7 @@ const navigation: NavItem[] = [
         },
       ]
     : []),
-  { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead"] },
+  { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead", "labic"] },
   ...(FEATURES.auditLog
     ? [
         {
@@ -99,7 +97,7 @@ const navigation: NavItem[] = [
 export function RootLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, updateUser } = useAuth(); // Make sure updateUser is exported from AuthContext!
+  const { user, logout, updateUser } = useAuth(); 
 
   // --- Profile Modal States ---
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -325,8 +323,6 @@ export function RootLayout() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            {/* Header notifications — detached stub (hardcoded red dot, no
-                dropdown yet). Flip FEATURES.headerNotifications to re-attach. */}
             {FEATURES.headerNotifications && (
               <button className="relative p-2 hover:bg-muted rounded-lg transition-colors">
                 <Bell className="h-5 w-5 text-muted-foreground" />

@@ -39,7 +39,7 @@ interface AlertData {
 }
 
 export function AlertsPage() {
-  const { user, hasPermission, canAccessLabGroup } = useAuth();
+  const { user, hasPermission } = useAuth();
 
   const [labs, setLabs] = useState<LabData[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -48,7 +48,10 @@ export function AlertsPage() {
   // Filter States
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("all");
-  const [selectedGroup, setSelectedGroup] = useState("all");
+  
+  // Dynamic Role-Based Filter States
+  const [selectedGroup, setSelectedGroup] = useState("all"); // For Admins
+  const [selectedLabId, setSelectedLabId] = useState("all"); // For Team Leads
 
   // Modal State
   const [selectedLabDetails, setSelectedLabDetails] = useState<AlertData | null>(null);
@@ -104,11 +107,20 @@ export function AlertsPage() {
           spentByCategory: lab.spent_by_category // Keep original category spending
         };
       })
-      .filter((a) => a.type !== "none" && canAccessLabGroup(a.labGroupId))
+      .filter((a) => {
+        if (a.type === "none") return false;
+        
+        // Ensure precise frontend isolation
+        if (user?.role === "admin") return true;
+        if (user?.role === "teamlead") return user.labGroupId === a.labGroupId;
+        if (user?.role === "labic") return user.labId === parseInt(a.id.replace("LAB-", ""));
+        
+        return false;
+      })
       .sort((a, b) => b.utilization - a.utilization); // Sort highest danger first
-  }, [labs, canAccessLabGroup]);
+  }, [labs, user]);
 
-  // Extract unique lab groups for the working dropdown
+  // Extract unique lab groups for the Admin dropdown
   const uniqueGroups = useMemo(() => {
     const groups = new Map();
     allAlerts.forEach((a) => groups.set(a.labGroupId, a.labGroupName));
@@ -118,19 +130,36 @@ export function AlertsPage() {
     }));
   }, [allAlerts]);
 
-  // 3. Apply the working filters
+  // Extract unique individual labs for the Team Lead dropdown
+  const uniqueLabs = useMemo(() => {
+    const labsMap = new Map();
+    allAlerts.forEach((a) => labsMap.set(a.id, `${a.labCode} — ${a.labName}`));
+    return Array.from(labsMap.entries()).map(([id, name]) => ({
+      id,
+      name,
+    }));
+  }, [allAlerts]);
+
+  // 3. Apply the working filters dynamically based on role
   const filteredAlerts = useMemo(() => {
     return allAlerts.filter((a) => {
       const matchesSearch = `${a.labCode} ${a.labName}`
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
       const matchesType = selectedType === "all" || a.type === selectedType;
-      const matchesGroup =
-        selectedGroup === "all" || a.labGroupId.toString() === selectedGroup;
+      
+      let matchesRoleFilter = true;
+      
+      if (user?.role === "admin") {
+        matchesRoleFilter = selectedGroup === "all" || a.labGroupId.toString() === selectedGroup;
+      } else if (user?.role === "teamlead") {
+        matchesRoleFilter = selectedLabId === "all" || a.id === selectedLabId;
+      }
+      // Lab IC has no dropdown, so matchesRoleFilter remains true
 
-      return matchesSearch && matchesType && matchesGroup;
+      return matchesSearch && matchesType && matchesRoleFilter;
     });
-  }, [allAlerts, searchTerm, selectedType, selectedGroup]);
+  }, [allAlerts, searchTerm, selectedType, selectedGroup, selectedLabId, user?.role]);
 
 
   // =========================================================================
@@ -150,43 +179,62 @@ export function AlertsPage() {
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa] relative">
 
-      {/* FILTER BAR */}
-      <div className="bg-white p-4 border-b border-border flex flex-col sm:flex-row gap-4 items-center justify-between shadow-sm">
-        <div className="relative w-full sm:w-96">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search alerts by Lab Code or Name..."
-            className="w-full pl-9 pr-4 py-2 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <div className="flex w-full sm:w-auto gap-4">
-          <select
-            className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
-          >
-            <option value="all">All Thresholds</option>
-            <option value="exceeded">Exceeded (&gt;100%)</option>
-            <option value="critical">Critical (95%)</option>
-            <option value="alert">Alert (80%)</option>
-            <option value="warning">Warning (50%)</option>
-          </select>
+      {/* FILTER BAR - Hidden completely for Lab ICs */}
+      {user?.role !== "labic" && (
+        <div className="bg-white p-4 border-b border-border flex flex-col sm:flex-row gap-4 items-center justify-between shadow-sm">
+          <div className="relative w-full sm:w-96">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search alerts by Lab Code or Name..."
+              className="w-full pl-9 pr-4 py-2 border border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          <div className="flex w-full sm:w-auto gap-4">
+            <select
+              className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+            >
+              <option value="all">All Thresholds</option>
+              <option value="exceeded">Exceeded (&gt;100%)</option>
+              <option value="critical">Critical (95%)</option>
+              <option value="alert">Alert (80%)</option>
+              <option value="warning">Warning (50%)</option>
+            </select>
 
-          <select
-            className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
-            value={selectedGroup}
-            onChange={(e) => setSelectedGroup(e.target.value)}
-          >
-            <option value="all">All Lab Groups</option>
-            {uniqueGroups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
-          </select>
+            {/* DYNAMIC ROLE DROPDOWN: Admins see Lab Groups */}
+            {user?.role === "admin" && (
+              <select
+                className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
+                value={selectedGroup}
+                onChange={(e) => setSelectedGroup(e.target.value)}
+              >
+                <option value="all">All Lab Groups</option>
+                {uniqueGroups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+              </select>
+            )}
+
+            {/* DYNAMIC ROLE DROPDOWN: Team Leads see Specific Labs */}
+            {user?.role === "teamlead" && (
+              <select
+                className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
+                value={selectedLabId}
+                onChange={(e) => setSelectedLabId(e.target.value)}
+              >
+                <option value="all">All Labs</option>
+                {uniqueLabs.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="p-6 space-y-6">
         <div>
@@ -206,7 +254,7 @@ export function AlertsPage() {
                   {user?.role === "teamlead" ? "Team Lead View" : "Lab IC View"}
                 </p>
                 <p className="text-xs text-[#1e3a8a] mt-1">
-                  Showing alerts for your assigned lab group only.
+                  Showing alerts for your assigned {user?.role === "teamlead" ? "lab group" : "lab"} only.
                 </p>
               </div>
             </div>
@@ -284,7 +332,7 @@ export function AlertsPage() {
 
           {filteredAlerts.length === 0 ? (
             <div className="p-12 text-center text-muted-foreground text-sm">
-              All labs are currently under the 50% utilization threshold!
+              All assigned labs are currently under the 50% utilization threshold!
             </div>
           ) : (
             <div className="divide-y divide-border">
