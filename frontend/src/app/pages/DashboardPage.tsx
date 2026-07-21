@@ -80,7 +80,7 @@ function utilColor(pct: number): string {
 }
 
 // Max entities shown at once in a comparison chart.
-const MAX_COMPARE = 5;
+const MAX_COMPARE = 20;
 
 // Searchable selector: pick up to `max` entities to display in a comparison chart.
 // Starts empty — the user checks what they want to see.
@@ -936,7 +936,7 @@ export function DashboardPage() {
             ) : (
               <AdaptiveBarChart height={300} bars={utilVisible.length}>
                 {(maxChars) => (
-                  <BarChart data={utilVisible} barCategoryGap="25%">
+                  <BarChart data={utilVisible} barCategoryGap="25%" margin={{ top: 18 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
@@ -949,21 +949,21 @@ export function DashboardPage() {
                     <Tooltip formatter={(v: number) => `${v}%`} />
                     <ReferenceLine
                       y={50}
-                      stroke="#f59e0b"
+                      stroke="#fcd34d"
                       strokeDasharray="4 4"
-                      label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                      label={{ value: "50%", position: "right", fill: "#fbbf24", fontSize: 11 }}
                     />
                     <ReferenceLine
                       y={80}
-                      stroke="#f97316"
+                      stroke="#fdba74"
                       strokeDasharray="4 4"
-                      label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                      label={{ value: "80%", position: "right", fill: "#fb923c", fontSize: 11 }}
                     />
                     <ReferenceLine
                       y={95}
-                      stroke="#ef4444"
+                      stroke="#fca5a5"
                       strokeDasharray="4 4"
-                      label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                      label={{ value: "95%", position: "right", fill: "#f87171", fontSize: 11 }}
                     />
                     <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
                       {utilVisible.map((d, i) => (
@@ -971,11 +971,11 @@ export function DashboardPage() {
                       ))}
                       <LabelList
                         dataKey="util"
-                        position="insideTop"
+                        position="top"
                         formatter={(v: number) => `${Number(v).toFixed(1)}%`}
-                        fontSize={11}
+                        fontSize={9}
                         fontWeight={600}
-                        fill="#ffffff"
+                        fill="#111827"
                       />
                     </Bar>
                   </BarChart>
@@ -1038,7 +1038,7 @@ export function DashboardPage() {
                         dataKey="budget"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={10}
+                        fontSize={6}
                         fill="#374151"
                       />
                     </Bar>
@@ -1047,7 +1047,7 @@ export function DashboardPage() {
                         dataKey="actual"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={10}
+                        fontSize={6}
                         fill="#374151"
                       />
                     </Bar>
@@ -1221,23 +1221,12 @@ export function DashboardPage() {
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         name={cat}
                       >
-                        <LabelList
-                          dataKey={cat}
-                          position="center"
-                          formatter={(v: number) =>
-                            v ? `$${Number(v).toLocaleString()}` : ""
-                          }
-                          fontSize={10}
-                          fill="#ffffff"
-                        />
                         {i === stackedCategory.categories.length - 1 && (
                           <LabelList
                             dataKey="__total"
                             position="top"
-                            formatter={(v: number) =>
-                              `$${Number(v).toLocaleString()}`
-                            }
-                            fontSize={11}
+                            formatter={(v: number) => compactCurrency(Number(v))}
+                            fontSize={9}
                             fontWeight={600}
                             fill="#374151"
                           />
@@ -1334,9 +1323,9 @@ export function DashboardPage() {
                           dataKey={yn}
                           position="top"
                           formatter={(v: number) =>
-                            v ? `$${Number(v).toLocaleString()}` : ""
+                            v ? compactCurrency(Number(v)) : ""
                           }
-                          fontSize={9}
+                          fontSize={5}
                           fill="#374151"
                         />
                       </Bar>
