@@ -373,16 +373,18 @@ def get_orphaned_labs(db: Session = Depends(get_db)):
 
 @router.get("/labs", response_model=List[LabOut])
 def get_labs(
-    period_id: int | None = None, 
+    period_id: int | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
-    
+
     # START ROLE-BASED FILTERING
     query = db.query(Lab)
-    role_name = (current_user.role.role_name if current_user.role else "").lower().strip()
-    
+    role_name = (
+        (current_user.role.role_name if current_user.role else "").lower().strip()
+    )
+
     if role_name == "teamlead":
         if not current_user.lab_group_id:
             return []
@@ -393,10 +395,10 @@ def get_labs(
         query = query.filter(Lab.lab_id == current_user.lab_id)
     elif role_name != "admin":
         return []
-        
+
     labs = query.all()
     # END ROLE-BASED FILTERING
-    
+
     result = []
     active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
 
