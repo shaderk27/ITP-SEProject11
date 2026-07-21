@@ -104,9 +104,9 @@ export function SystemConfigPage() {
     try {
       const [groupsRes, labsRes, catsRes, orphanedRes, labicRes, teamleadRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/config/labgroups${q}`, { credentials: "include" }),
-        fetch(`${API_BASE_URL}/api/config/labs${q}`),
-        fetch(`${API_BASE_URL}/api/config/categories`),
-        fetch(`${API_BASE_URL}/api/config/labs/orphaned`),
+        fetch(`${API_BASE_URL}/api/config/labs${q}`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/api/config/categories`, { credentials: "include" }),
+        fetch(`${API_BASE_URL}/api/config/labs/orphaned`, { credentials: "include" }),
         fetch(`${API_BASE_URL}/api/auth/users?role=labic`, {
           credentials: "include",
         }),
@@ -195,7 +195,10 @@ export function SystemConfigPage() {
   const handleSave = async (endpoint: string, method: string, payload: any, onSuccess: () => void) => {
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        method: method,
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
       });
       if (res.ok) { onSuccess(); fetchConfigData(); }
     } catch (error) { console.error(error); }
@@ -205,7 +208,10 @@ export function SystemConfigPage() {
   const handleDelete = async (endpoint: string, name: string) => {
     if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
     try {
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE" });
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+        method: "DELETE",
+        credentials: "include"
+      });
 
       if (res.ok) {
         fetchConfigData();
@@ -224,7 +230,10 @@ export function SystemConfigPage() {
   const handleUnassignLab = async (labId: number, labName: string) => {
     if (!window.confirm(`Remove "${labName}" from this Lab Group?`)) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/config/labs/${labId}/unassign`, { method: "PUT" });
+      const res = await fetch(`${API_BASE_URL}/api/config/labs/${labId}/unassign`, {
+        method: "PUT",
+        credentials: "include"
+      });
       if (res.ok) fetchConfigData();
     } catch (error) { console.error(error); }
   };
