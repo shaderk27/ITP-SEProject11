@@ -111,9 +111,7 @@ def list_committed_prs(
             return []
         # Only PRs that carry at least one line in the Lab IC's own lab.
         query = query.filter(
-            PurchaseRequest.lines.any(
-                PurchaseRequestLine.lab_id == current_user.lab_id
-            )
+            PurchaseRequest.lines.any(PurchaseRequestLine.lab_id == current_user.lab_id)
         )
 
     # Custom range wins; otherwise fall back to the preset. date_range_bounds
@@ -209,8 +207,6 @@ def _pr_grand_total(pr, visible_lines, role_name: str) -> str:
     matches what the Lab IC can actually see.
     """
     if role_name == "labic":
-        total = sum(
-            (line.amount_gst or Decimal("0")) for line in visible_lines
-        )
+        total = sum((line.amount_gst or Decimal("0")) for line in visible_lines)
         return str(total)
     return str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else "0"
