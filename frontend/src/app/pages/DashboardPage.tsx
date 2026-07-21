@@ -1120,7 +1120,10 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer
+                width="100%"
+                height={Math.max(300, categoryVisible.length * 22)}
+              >
                 <BarChart
                   data={categoryVisible}
                   layout="vertical"
@@ -1133,15 +1136,27 @@ export function DashboardPage() {
                     dataKey="category"
                     type="category"
                     stroke="#6b7280"
-                    width={120}
+                    width={110}
+                    interval={0}
+                    tick={{ fontSize: 10 }}
                   />
-                  <Tooltip />
+                  <Tooltip
+                    formatter={(v: number) =>
+                      `$${Number(v).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`
+                    }
+                    contentStyle={{ fontSize: 11 }}
+                    itemStyle={{ fontSize: 11 }}
+                    labelStyle={{ fontSize: 11 }}
+                  />
                   <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
                     <LabelList
                       dataKey="amount"
                       position="right"
                       formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                      fontSize={11}
+                      fontSize={9}
                       fill="#374151"
                     />
                   </Bar>
