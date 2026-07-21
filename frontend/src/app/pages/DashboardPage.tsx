@@ -95,6 +95,16 @@ function labelFontSize(categories: number, perCategory = 1, floor = 6): number {
   return Math.max(floor, Math.min(12, size));
 }
 
+// True when every value across `keys` is zero for all rows (also true for an
+// empty list). An all-zero result carries no information, so charts treat it
+// the same as "no data" instead of drawing a frame full of zero-height bars.
+function allZero(
+  rows: Array<Record<string, unknown>>,
+  keys: string[],
+): boolean {
+  return rows.every((r) => keys.every((k) => Number(r[k] ?? 0) === 0));
+}
+
 // Searchable selector: pick up to `max` entities to display in a comparison chart.
 // Starts empty — the user checks what they want to see.
 function EntityFilter({
@@ -954,6 +964,8 @@ export function DashboardPage() {
                 max={MAX_COMPARE}
               />
             )}
+            {/* Utilisation is exempt from the all-zero rule: 0% is meaningful
+                (a budget exists, nothing spent yet), so still draw the bars. */}
             {utilVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 {emptyChartMessage(
@@ -1036,10 +1048,11 @@ export function DashboardPage() {
                 max={MAX_COMPARE}
               />
             )}
-            {avbVisible.length === 0 ? (
+            {avbVisible.length === 0 ||
+            allZero(avbVisible, ["budget", "actual"]) ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 {emptyChartMessage(
-                  avbAll.length > 0,
+                  avbAll.length > 0 && avbVisible.length === 0,
                   `Use the Select button above to choose up to ${MAX_COMPARE} to display.`,
                 )}
               </div>
@@ -1098,10 +1111,11 @@ export function DashboardPage() {
               max={MAX_COMPARE}
               label="Categories"
             />
-            {categoryVisible.length === 0 ? (
+            {categoryVisible.length === 0 ||
+            allZero(categoryVisible, ["amount"]) ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 {emptyChartMessage(
-                  categoryData.length > 0,
+                  categoryData.length > 0 && categoryVisible.length === 0,
                   "Select a category to display.",
                 )}
               </div>
@@ -1224,10 +1238,10 @@ export function DashboardPage() {
                 max={MAX_COMPARE}
               />
             )}
-            {stackVisible.length === 0 ? (
+            {stackVisible.length === 0 || allZero(stackVisible, ["__total"]) ? (
               <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
                 {emptyChartMessage(
-                  stackAll.length > 0,
+                  stackAll.length > 0 && stackVisible.length === 0,
                   `Use the Select button above to choose up to ${MAX_COMPARE} to display.`,
                 )}
               </div>
@@ -1323,7 +1337,9 @@ export function DashboardPage() {
                 />
               )}
             </div>
-            {yoyVisible.length === 0 || yoySelectedYears.length === 0 ? (
+            {yoyVisible.length === 0 ||
+            yoySelectedYears.length === 0 ||
+            allZero(yoyVisible, yoySelectedYears) ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 {yoySelectedYears.length === 0
                   ? // No fiscal years chosen yet → prompt to pick (Lab IC has no
@@ -1331,7 +1347,8 @@ export function DashboardPage() {
                     isLabIc
                     ? "Pick fiscal years to compare."
                     : "Pick fiscal years and entities to compare."
-                  : // Years are chosen but nothing lands in scope → no data.
+                  : // Years are chosen but nothing lands in scope (or all zero)
+                    // → no data.
                     emptyChartMessage(false, "")}
               </div>
             ) : (
