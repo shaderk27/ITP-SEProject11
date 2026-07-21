@@ -106,8 +106,8 @@ export function CreateUserPage() {
     if (!email) errors.email = "Email is required.";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       errors.email = "Enter a valid email address.";
-    else if (!ALLOWED_EMAIL_DOMAINS.includes(emailDomain))
-      errors.email = `Email must end with ${ALLOWED_EMAIL_DOMAINS.join(", ")}.`;
+    //else if (!ALLOWED_EMAIL_DOMAINS.includes(emailDomain))
+      //errors.email = `Email must end with ${ALLOWED_EMAIL_DOMAINS.join(", ")}.`;
     if (!form.password) errors.password = "Password is required.";
     else if (form.password.length < 8)
       errors.password = "Password must be at least 8 characters.";
