@@ -333,6 +333,10 @@ function AdaptiveBarChart({
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // Lab IC is scoped to a single lab: the "By Lab Group" view and the
+  // entity-select ("Select N/5") filter are meaningless for them, so both
+  // are hidden and only the single lab's chart shows.
+  const isLabIc = user?.role === "labic";
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
   const [spending, setSpending] = useState<SpendingSummary | null>(null);
@@ -901,25 +905,29 @@ export function DashboardPage() {
       case "utilisation":
         return (
           <>
-            <div className="flex justify-end mb-3">
-              <select
-                value={utilViewBy}
-                onChange={(e) =>
-                  setUtilViewBy(e.target.value as "group" | "lab")
-                }
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityFilter
-              names={utilAll.map((d) => d.name)}
-              selected={utilShown}
-              onToggle={toggleShown(setUtilShown)}
-              onClear={() => setUtilShown(new Set())}
-              max={MAX_COMPARE}
-            />
+            {!isLabIc && (
+              <div className="flex justify-end mb-3">
+                <select
+                  value={utilViewBy}
+                  onChange={(e) =>
+                    setUtilViewBy(e.target.value as "group" | "lab")
+                  }
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              </div>
+            )}
+            {!isLabIc && (
+              <EntityFilter
+                names={utilAll.map((d) => d.name)}
+                selected={utilShown}
+                onToggle={toggleShown(setUtilShown)}
+                onClear={() => setUtilShown(new Set())}
+                max={MAX_COMPARE}
+              />
+            )}
             {utilVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 Use the Select button above to choose up to {MAX_COMPARE} to
@@ -979,23 +987,27 @@ export function DashboardPage() {
       case "actualVsBudget":
         return (
           <>
-            <div className="flex justify-end mb-3">
-              <select
-                value={avbViewBy}
-                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityFilter
-              names={avbAll.map((d) => d.name)}
-              selected={avbShown}
-              onToggle={toggleShown(setAvbShown)}
-              onClear={() => setAvbShown(new Set())}
-              max={MAX_COMPARE}
-            />
+            {!isLabIc && (
+              <div className="flex justify-end mb-3">
+                <select
+                  value={avbViewBy}
+                  onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              </div>
+            )}
+            {!isLabIc && (
+              <EntityFilter
+                names={avbAll.map((d) => d.name)}
+                selected={avbShown}
+                onToggle={toggleShown(setAvbShown)}
+                onClear={() => setAvbShown(new Set())}
+                max={MAX_COMPARE}
+              />
+            )}
             {avbVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
                 Use the Select button above to choose up to {MAX_COMPARE} to
@@ -1154,25 +1166,29 @@ export function DashboardPage() {
       case "categoryMix":
         return (
           <>
-            <div className="flex justify-end mb-3">
-              <select
-                value={stackViewBy}
-                onChange={(e) =>
-                  setStackViewBy(e.target.value as "group" | "lab")
-                }
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityFilter
-              names={stackAll.map((d) => String(d.name))}
-              selected={stackShown}
-              onToggle={toggleShown(setStackShown)}
-              onClear={() => setStackShown(new Set())}
-              max={MAX_COMPARE}
-            />
+            {!isLabIc && (
+              <div className="flex justify-end mb-3">
+                <select
+                  value={stackViewBy}
+                  onChange={(e) =>
+                    setStackViewBy(e.target.value as "group" | "lab")
+                  }
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              </div>
+            )}
+            {!isLabIc && (
+              <EntityFilter
+                names={stackAll.map((d) => String(d.name))}
+                selected={stackShown}
+                onToggle={toggleShown(setStackShown)}
+                onClear={() => setStackShown(new Set())}
+                max={MAX_COMPARE}
+              />
+            )}
             {stackVisible.length === 0 ? (
               <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
                 Use the Select button above to choose up to {MAX_COMPARE} to
@@ -1250,14 +1266,16 @@ export function DashboardPage() {
                   </option>
                 ))}
               </select>
-              <select
-                value={yoyViewBy}
-                onChange={(e) => setYoyViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
+              {!isLabIc && (
+                <select
+                  value={yoyViewBy}
+                  onChange={(e) => setYoyViewBy(e.target.value as "group" | "lab")}
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              )}
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
               <EntityFilter
@@ -1268,14 +1286,16 @@ export function DashboardPage() {
                 max={MAX_COMPARE}
                 label="Years"
               />
-              <EntityFilter
-                names={yoyData.map((r) => String(r.name))}
-                selected={yoyEntityShown}
-                onToggle={toggleShown(setYoyEntityShown)}
-                onClear={() => setYoyEntityShown(new Set())}
-                max={MAX_COMPARE}
-                label={yoyViewBy === "lab" ? "Labs" : "Groups"}
-              />
+              {!isLabIc && (
+                <EntityFilter
+                  names={yoyData.map((r) => String(r.name))}
+                  selected={yoyEntityShown}
+                  onToggle={toggleShown(setYoyEntityShown)}
+                  onClear={() => setYoyEntityShown(new Set())}
+                  max={MAX_COMPARE}
+                  label={yoyViewBy === "lab" ? "Labs" : "Groups"}
+                />
+              )}
             </div>
             {yoyVisible.length === 0 || yoySelectedYears.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
