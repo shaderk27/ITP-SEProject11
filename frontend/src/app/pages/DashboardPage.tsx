@@ -80,7 +80,30 @@ function utilColor(pct: number): string {
 }
 
 // Max entities shown at once in a comparison chart.
-const MAX_COMPARE = 5;
+const MAX_COMPARE = 20;
+
+// Value-label font size that scales with how crowded the chart is: fewer bars
+// → larger, more readable text; many bars → smaller so labels don't collide.
+// `categories` = number of x-axis slots; `perCategory` = bars drawn in each
+// slot (grouped/YoY charts pack 2+ bars per slot, so their labels need to be
+// smaller). Since the chart cards are full-width, bar count is a good proxy
+// for the horizontal space each label gets. Clamped to a legible 6–12px.
+function labelFontSize(categories: number, perCategory = 1, floor = 6): number {
+  const bars = Math.max(1, categories * perCategory);
+  // ~5 bars → 12px, tapering down toward `floor` by ~40 bars.
+  const size = Math.round(13 - (bars - 5) * (8 / 35));
+  return Math.max(floor, Math.min(12, size));
+}
+
+// True when every value across `keys` is zero for all rows (also true for an
+// empty list). An all-zero result carries no information, so charts treat it
+// the same as "no data" instead of drawing a frame full of zero-height bars.
+function allZero(
+  rows: Array<Record<string, unknown>>,
+  keys: string[],
+): boolean {
+  return rows.every((r) => keys.every((k) => Number(r[k] ?? 0) === 0));
+}
 
 // Searchable selector: pick up to `max` entities to display in a comparison chart.
 // Starts empty — the user checks what they want to see.
@@ -333,6 +356,10 @@ function AdaptiveBarChart({
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // Lab IC is scoped to a single lab: the "By Lab Group" view and the
+  // entity-select filter are meaningless for them, so both are hidden and
+  // only the single lab's chart shows.
+  const isLabIc = user?.role === "labic";
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
   const [spending, setSpending] = useState<SpendingSummary | null>(null);
@@ -894,6 +921,19 @@ export function DashboardPage() {
   }
   const yoyVisible = yoyData.filter((r) => yoyEntityShown.has(String(r.name)));
 
+  // Message for an empty chart, kept consistent across roles:
+  //   - no underlying data at all → a plain "nothing to show" line
+  //     (Lab IC gets a "your lab" flavour since they're scoped to one lab);
+  //   - data exists but nothing is picked (only reachable when there are more
+  //     than MAX_COMPARE entities, so the select starts empty) → the action
+  //     hint telling the user to pick some via the Select button.
+  function emptyChartMessage(hasData: boolean, selectHint: string): string {
+    if (hasData) return selectHint;
+    return isLabIc
+      ? "No data to display for your lab yet."
+      : "No data to display yet.";
+  }
+
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
   function renderChartBody(chartId: string): ReactNode {
@@ -901,34 +941,42 @@ export function DashboardPage() {
       case "utilisation":
         return (
           <>
-            <div className="flex justify-end mb-3">
-              <select
-                value={utilViewBy}
-                onChange={(e) =>
-                  setUtilViewBy(e.target.value as "group" | "lab")
-                }
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityFilter
-              names={utilAll.map((d) => d.name)}
-              selected={utilShown}
-              onToggle={toggleShown(setUtilShown)}
-              onClear={() => setUtilShown(new Set())}
-              max={MAX_COMPARE}
-            />
+            {!isLabIc && (
+              <div className="flex justify-end mb-3">
+                <select
+                  value={utilViewBy}
+                  onChange={(e) =>
+                    setUtilViewBy(e.target.value as "group" | "lab")
+                  }
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              </div>
+            )}
+            {!isLabIc && (
+              <EntityFilter
+                names={utilAll.map((d) => d.name)}
+                selected={utilShown}
+                onToggle={toggleShown(setUtilShown)}
+                onClear={() => setUtilShown(new Set())}
+                max={MAX_COMPARE}
+              />
+            )}
+            {/* Utilisation is exempt from the all-zero rule: 0% is meaningful
+                (a budget exists, nothing spent yet), so still draw the bars. */}
             {utilVisible.length === 0 ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Use the Select button above to choose up to {MAX_COMPARE} to
-                display.
+                {emptyChartMessage(
+                  utilAll.length > 0,
+                  `Use the Select button above to choose up to ${MAX_COMPARE} to display.`,
+                )}
               </div>
             ) : (
               <AdaptiveBarChart height={300} bars={utilVisible.length}>
                 {(maxChars) => (
-                  <BarChart data={utilVisible} barCategoryGap="25%">
+                  <BarChart data={utilVisible} barCategoryGap="25%" margin={{ top: 18 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
@@ -941,21 +989,21 @@ export function DashboardPage() {
                     <Tooltip formatter={(v: number) => `${v}%`} />
                     <ReferenceLine
                       y={50}
-                      stroke="#f59e0b"
+                      stroke="#fcd34d"
                       strokeDasharray="4 4"
-                      label={{ value: "50%", position: "right", fill: "#d97706", fontSize: 11 }}
+                      label={{ value: "50%", position: "right", fill: "#fbbf24", fontSize: 11 }}
                     />
                     <ReferenceLine
                       y={80}
-                      stroke="#f97316"
+                      stroke="#fdba74"
                       strokeDasharray="4 4"
-                      label={{ value: "80%", position: "right", fill: "#ea580c", fontSize: 11 }}
+                      label={{ value: "80%", position: "right", fill: "#fb923c", fontSize: 11 }}
                     />
                     <ReferenceLine
                       y={95}
-                      stroke="#ef4444"
+                      stroke="#fca5a5"
                       strokeDasharray="4 4"
-                      label={{ value: "95%", position: "right", fill: "#dc2626", fontSize: 11 }}
+                      label={{ value: "95%", position: "right", fill: "#f87171", fontSize: 11 }}
                     />
                     <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
                       {utilVisible.map((d, i) => (
@@ -963,11 +1011,11 @@ export function DashboardPage() {
                       ))}
                       <LabelList
                         dataKey="util"
-                        position="insideTop"
+                        position="top"
                         formatter={(v: number) => `${Number(v).toFixed(1)}%`}
-                        fontSize={11}
+                        fontSize={labelFontSize(utilVisible.length)}
                         fontWeight={600}
-                        fill="#ffffff"
+                        fill="#111827"
                       />
                     </Bar>
                   </BarChart>
@@ -979,27 +1027,34 @@ export function DashboardPage() {
       case "actualVsBudget":
         return (
           <>
-            <div className="flex justify-end mb-3">
-              <select
-                value={avbViewBy}
-                onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityFilter
-              names={avbAll.map((d) => d.name)}
-              selected={avbShown}
-              onToggle={toggleShown(setAvbShown)}
-              onClear={() => setAvbShown(new Set())}
-              max={MAX_COMPARE}
-            />
-            {avbVisible.length === 0 ? (
+            {!isLabIc && (
+              <div className="flex justify-end mb-3">
+                <select
+                  value={avbViewBy}
+                  onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              </div>
+            )}
+            {!isLabIc && (
+              <EntityFilter
+                names={avbAll.map((d) => d.name)}
+                selected={avbShown}
+                onToggle={toggleShown(setAvbShown)}
+                onClear={() => setAvbShown(new Set())}
+                max={MAX_COMPARE}
+              />
+            )}
+            {avbVisible.length === 0 ||
+            allZero(avbVisible, ["budget", "actual"]) ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Use the Select button above to choose up to {MAX_COMPARE} to
-                display.
+                {emptyChartMessage(
+                  avbAll.length > 0 && avbVisible.length === 0,
+                  `Use the Select button above to choose up to ${MAX_COMPARE} to display.`,
+                )}
               </div>
             ) : (
               <AdaptiveBarChart height={300} bars={avbVisible.length}>
@@ -1026,7 +1081,7 @@ export function DashboardPage() {
                         dataKey="budget"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={10}
+                        fontSize={labelFontSize(avbVisible.length, 2, 5)}
                         fill="#374151"
                       />
                     </Bar>
@@ -1035,7 +1090,7 @@ export function DashboardPage() {
                         dataKey="actual"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={10}
+                        fontSize={labelFontSize(avbVisible.length, 2, 5)}
                         fill="#374151"
                       />
                     </Bar>
@@ -1056,12 +1111,19 @@ export function DashboardPage() {
               max={MAX_COMPARE}
               label="Categories"
             />
-            {categoryVisible.length === 0 ? (
+            {categoryVisible.length === 0 ||
+            allZero(categoryVisible, ["amount"]) ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Select a category to display.
+                {emptyChartMessage(
+                  categoryData.length > 0 && categoryVisible.length === 0,
+                  "Select a category to display.",
+                )}
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer
+                width="100%"
+                height={Math.max(300, categoryVisible.length * 22)}
+              >
                 <BarChart
                   data={categoryVisible}
                   layout="vertical"
@@ -1074,15 +1136,27 @@ export function DashboardPage() {
                     dataKey="category"
                     type="category"
                     stroke="#6b7280"
-                    width={120}
+                    width={110}
+                    interval={0}
+                    tick={{ fontSize: 10 }}
                   />
-                  <Tooltip />
+                  <Tooltip
+                    formatter={(v: number) =>
+                      `$${Number(v).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}`
+                    }
+                    contentStyle={{ fontSize: 11 }}
+                    itemStyle={{ fontSize: 11 }}
+                    labelStyle={{ fontSize: 11 }}
+                  />
                   <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
                     <LabelList
                       dataKey="amount"
                       position="right"
                       formatter={(v: number) => `$${Number(v).toLocaleString()}`}
-                      fontSize={11}
+                      fontSize={9}
                       fill="#374151"
                     />
                   </Bar>
@@ -1124,9 +1198,11 @@ export function DashboardPage() {
                     const isFirst = idx === 0;
                     const isLast = idx === monthlyData.length - 1;
                     // Endpoints go above and anchor to the edge so they don't
-                    // clip; middle valleys go below the line.
+                    // clip; middle valleys go below the line — except $0 points,
+                    // which sit on the axis, so "below" would collide with the
+                    // month labels; force those above.
                     const below =
-                      !isFirst && !isLast && val <= prev && val <= next;
+                      val !== 0 && !isFirst && !isLast && val <= prev && val <= next;
                     return (
                       <text
                         x={Number(props.x ?? 0)}
@@ -1154,29 +1230,35 @@ export function DashboardPage() {
       case "categoryMix":
         return (
           <>
-            <div className="flex justify-end mb-3">
-              <select
-                value={stackViewBy}
-                onChange={(e) =>
-                  setStackViewBy(e.target.value as "group" | "lab")
-                }
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
-            </div>
-            <EntityFilter
-              names={stackAll.map((d) => String(d.name))}
-              selected={stackShown}
-              onToggle={toggleShown(setStackShown)}
-              onClear={() => setStackShown(new Set())}
-              max={MAX_COMPARE}
-            />
-            {stackVisible.length === 0 ? (
+            {!isLabIc && (
+              <div className="flex justify-end mb-3">
+                <select
+                  value={stackViewBy}
+                  onChange={(e) =>
+                    setStackViewBy(e.target.value as "group" | "lab")
+                  }
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white shrink-0"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              </div>
+            )}
+            {!isLabIc && (
+              <EntityFilter
+                names={stackAll.map((d) => String(d.name))}
+                selected={stackShown}
+                onToggle={toggleShown(setStackShown)}
+                onClear={() => setStackShown(new Set())}
+                max={MAX_COMPARE}
+              />
+            )}
+            {stackVisible.length === 0 || allZero(stackVisible, ["__total"]) ? (
               <div className="h-[320px] flex items-center justify-center text-sm text-muted-foreground">
-                Use the Select button above to choose up to {MAX_COMPARE} to
-                display.
+                {emptyChartMessage(
+                  stackAll.length > 0 && stackVisible.length === 0,
+                  `Use the Select button above to choose up to ${MAX_COMPARE} to display.`,
+                )}
               </div>
             ) : (
               <AdaptiveBarChart height={320} bars={stackVisible.length}>
@@ -1205,23 +1287,12 @@ export function DashboardPage() {
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         name={cat}
                       >
-                        <LabelList
-                          dataKey={cat}
-                          position="center"
-                          formatter={(v: number) =>
-                            v ? `$${Number(v).toLocaleString()}` : ""
-                          }
-                          fontSize={10}
-                          fill="#ffffff"
-                        />
                         {i === stackedCategory.categories.length - 1 && (
                           <LabelList
                             dataKey="__total"
                             position="top"
-                            formatter={(v: number) =>
-                              `$${Number(v).toLocaleString()}`
-                            }
-                            fontSize={11}
+                            formatter={(v: number) => compactCurrency(Number(v))}
+                            fontSize={labelFontSize(stackVisible.length)}
                             fontWeight={600}
                             fill="#374151"
                           />
@@ -1250,14 +1321,16 @@ export function DashboardPage() {
                   </option>
                 ))}
               </select>
-              <select
-                value={yoyViewBy}
-                onChange={(e) => setYoyViewBy(e.target.value as "group" | "lab")}
-                className="text-sm border border-border rounded-md px-2 py-1 bg-white"
-              >
-                <option value="group">By Lab Group</option>
-                <option value="lab">By Lab</option>
-              </select>
+              {!isLabIc && (
+                <select
+                  value={yoyViewBy}
+                  onChange={(e) => setYoyViewBy(e.target.value as "group" | "lab")}
+                  className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+                >
+                  <option value="group">By Lab Group</option>
+                  <option value="lab">By Lab</option>
+                </select>
+              )}
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
               <EntityFilter
@@ -1268,18 +1341,30 @@ export function DashboardPage() {
                 max={MAX_COMPARE}
                 label="Years"
               />
-              <EntityFilter
-                names={yoyData.map((r) => String(r.name))}
-                selected={yoyEntityShown}
-                onToggle={toggleShown(setYoyEntityShown)}
-                onClear={() => setYoyEntityShown(new Set())}
-                max={MAX_COMPARE}
-                label={yoyViewBy === "lab" ? "Labs" : "Groups"}
-              />
+              {!isLabIc && (
+                <EntityFilter
+                  names={yoyData.map((r) => String(r.name))}
+                  selected={yoyEntityShown}
+                  onToggle={toggleShown(setYoyEntityShown)}
+                  onClear={() => setYoyEntityShown(new Set())}
+                  max={MAX_COMPARE}
+                  label={yoyViewBy === "lab" ? "Labs" : "Groups"}
+                />
+              )}
             </div>
-            {yoyVisible.length === 0 || yoySelectedYears.length === 0 ? (
+            {yoyVisible.length === 0 ||
+            yoySelectedYears.length === 0 ||
+            allZero(yoyVisible, yoySelectedYears) ? (
               <div className="h-[300px] flex items-center justify-center text-sm text-muted-foreground">
-                Pick fiscal years and entities to compare.
+                {yoySelectedYears.length === 0
+                  ? // No fiscal years chosen yet → prompt to pick (Lab IC has no
+                    // entity picker, so drop "and entities" for them).
+                    isLabIc
+                    ? "Pick fiscal years to compare."
+                    : "Pick fiscal years and entities to compare."
+                  : // Years are chosen but nothing lands in scope (or all zero)
+                    // → no data.
+                    emptyChartMessage(false, "")}
               </div>
             ) : (
               <AdaptiveBarChart height={300} bars={yoyVisible.length}>
@@ -1314,9 +1399,12 @@ export function DashboardPage() {
                           dataKey={yn}
                           position="top"
                           formatter={(v: number) =>
-                            v ? `$${Number(v).toLocaleString()}` : ""
+                            v ? compactCurrency(Number(v)) : ""
                           }
-                          fontSize={9}
+                          fontSize={labelFontSize(
+                            yoyVisible.length,
+                            Math.max(1, yoySelectedYears.length),
+                          )}
                           fill="#374151"
                         />
                       </Bar>
@@ -1412,11 +1500,17 @@ export function DashboardPage() {
               { value: "90d", label: "Last 90 days" },
             ],
           },
-          {
-            label: "Lab Group",
-            value: selectedGroupId,
-            options: labGroupOptions,
-          },
+          // Lab IC is scoped to a single lab and has no group choice, so the
+          // Lab Group filter is meaningless (renders empty) — hide it for them.
+          ...(isLabIc
+            ? []
+            : [
+                {
+                  label: "Lab Group",
+                  value: selectedGroupId,
+                  options: labGroupOptions,
+                },
+              ]),
           {
             label: "Lab",
             value: selectedLabId,
@@ -1622,22 +1716,12 @@ export function DashboardPage() {
           </Button>
         </div>
 
-        {/* Chart slots row 1 — click a title to choose the chart */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {renderSlot(0)}
-          {renderSlot(1)}
-        </div>
-
-        {/* Chart slots row 2 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {renderSlot(2)}
-          {renderSlot(3)}
-        </div>
-
-        {/* Chart slot 5 */}
+        {/* Chart slots — each full-width, one per row. Click a title to choose the chart */}
+        {renderSlot(0)}
+        {renderSlot(1)}
+        {renderSlot(2)}
+        {renderSlot(3)}
         {renderSlot(4)}
-
-        {/* Chart slot 6 */}
         {renderSlot(5)}
       </div>
     </div>
