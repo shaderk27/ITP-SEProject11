@@ -152,11 +152,20 @@ export function RecordsPage() {
               ...periods.map((p) => ({ value: String(p.id), label: p.name })),
             ],
           },
-          {
-            label: "Lab Group",
-            value: labGroupFilter,
-            options: [{ value: "all", label: "All Lab Groups" }, ...labGroupOptions],
-          },
+          // Lab IC is scoped to a single lab, so the Lab Group filter is
+          // meaningless for them — hide it.
+          ...(user?.role === "labic"
+            ? []
+            : [
+                {
+                  label: "Lab Group",
+                  value: labGroupFilter,
+                  options: [
+                    { value: "all", label: "All Lab Groups" },
+                    ...labGroupOptions,
+                  ],
+                },
+              ]),
           {
             label: "Date Range",
             value: dateRange,
