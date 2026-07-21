@@ -97,7 +97,7 @@ const navigation: NavItem[] = [
 export function RootLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, updateUser } = useAuth(); 
+  const { user, logout, updateUser } = useAuth();
 
   // --- Profile Modal States ---
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);

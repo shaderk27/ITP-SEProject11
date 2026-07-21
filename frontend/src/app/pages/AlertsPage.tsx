@@ -48,7 +48,7 @@ export function AlertsPage() {
   // Filter States
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("all");
-  
+
   // Dynamic Role-Based Filter States
   const [selectedGroup, setSelectedGroup] = useState("all"); // For Admins
   const [selectedLabId, setSelectedLabId] = useState("all"); // For Team Leads
@@ -109,12 +109,12 @@ export function AlertsPage() {
       })
       .filter((a) => {
         if (a.type === "none") return false;
-        
+
         // Ensure precise frontend isolation
         if (user?.role === "admin") return true;
         if (user?.role === "teamlead") return user.labGroupId === a.labGroupId;
         if (user?.role === "labic") return user.labId === parseInt(a.id.replace("LAB-", ""));
-        
+
         return false;
       })
       .sort((a, b) => b.utilization - a.utilization); // Sort highest danger first
@@ -147,9 +147,9 @@ export function AlertsPage() {
         .toLowerCase()
         .includes(searchTerm.toLowerCase());
       const matchesType = selectedType === "all" || a.type === selectedType;
-      
+
       let matchesRoleFilter = true;
-      
+
       if (user?.role === "admin") {
         matchesRoleFilter = selectedGroup === "all" || a.labGroupId.toString() === selectedGroup;
       } else if (user?.role === "teamlead") {

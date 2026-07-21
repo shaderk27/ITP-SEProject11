@@ -195,8 +195,8 @@ export function SystemConfigPage() {
   const handleSave = async (endpoint: string, method: string, payload: any, onSuccess: () => void) => {
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: method, 
-        headers: { "Content-Type": "application/json" }, 
+        method: method,
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify(payload),
       });
@@ -208,7 +208,7 @@ export function SystemConfigPage() {
   const handleDelete = async (endpoint: string, name: string) => {
     if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
     try {
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, { 
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "DELETE",
         credentials: "include"
       });
@@ -230,7 +230,7 @@ export function SystemConfigPage() {
   const handleUnassignLab = async (labId: number, labName: string) => {
     if (!window.confirm(`Remove "${labName}" from this Lab Group?`)) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/api/config/labs/${labId}/unassign`, { 
+      const res = await fetch(`${API_BASE_URL}/api/config/labs/${labId}/unassign`, {
         method: "PUT",
         credentials: "include"
       });
