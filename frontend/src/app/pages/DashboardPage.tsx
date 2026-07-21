@@ -1437,11 +1437,17 @@ export function DashboardPage() {
               { value: "90d", label: "Last 90 days" },
             ],
           },
-          {
-            label: "Lab Group",
-            value: selectedGroupId,
-            options: labGroupOptions,
-          },
+          // Lab IC is scoped to a single lab and has no group choice, so the
+          // Lab Group filter is meaningless (renders empty) — hide it for them.
+          ...(isLabIc
+            ? []
+            : [
+                {
+                  label: "Lab Group",
+                  value: selectedGroupId,
+                  options: labGroupOptions,
+                },
+              ]),
           {
             label: "Lab",
             value: selectedLabId,
