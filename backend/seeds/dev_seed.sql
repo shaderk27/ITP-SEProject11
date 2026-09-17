@@ -29,6 +29,20 @@ ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
 ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
 ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
 
+-- Randy (W13-04): Added notifications to lab_groups as well.
+ALTER TABLE lab_groups ADD COLUMN notified_50 BOOLEAN DEFAULT FALSE;
+ALTER TABLE lab_groups ADD COLUMN notified_80 BOOLEAN DEFAULT FALSE;
+ALTER TABLE lab_groups ADD COLUMN notified_95 BOOLEAN DEFAULT FALSE;
+ALTER TABLE lab_groups ADD COLUMN notified_100 BOOLEAN DEFAULT FALSE;
+ALTER TABLE lab_groups ADD COLUMN alert_period_id BIGINT;
+
+-- Create the "Envelope Budgets" for existing Lab Groups based on their current labs to ensure continuity of past data.
+INSERT INTO budgets (period_id, lab_group_id, lab_id, category_id, budget_amount, created_at, updated_at)
+SELECT period_id, lab_group_id, NULL, NULL, SUM(budget_amount), NOW(), NOW()
+FROM budgets
+WHERE lab_group_id IS NOT NULL AND lab_id IS NOT NULL
+GROUP BY period_id, lab_group_id;
+
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
   ('admin'),
