@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 # --- SQLALCHEMY DATABASE MODELS ---
 
+
 class LabGroup(Base):
     __tablename__ = "lab_groups"
 
@@ -31,9 +32,12 @@ class LabGroup(Base):
     notified_80 = Column(Boolean, default=False)
     notified_95 = Column(Boolean, default=False)
     notified_100 = Column(Boolean, default=False)
-    alert_period_id = Column(BigInteger, ForeignKey("budget_periods.period_id"), nullable=True)
+    alert_period_id = Column(
+        BigInteger, ForeignKey("budget_periods.period_id"), nullable=True
+    )
 
     labs = relationship("Lab", back_populates="group")
+
 
 class Lab(Base):
     __tablename__ = "labs"
@@ -58,7 +62,9 @@ class Lab(Base):
     notified_80 = Column(Boolean, default=False)
     notified_95 = Column(Boolean, default=False)
     notified_100 = Column(Boolean, default=False)
-    alert_period_id = Column(BigInteger, ForeignKey("budget_periods.period_id"), nullable=True)
+    alert_period_id = Column(
+        BigInteger, ForeignKey("budget_periods.period_id"), nullable=True
+    )
 
 
 class LabAlias(Base):
@@ -110,8 +116,12 @@ class Budget(Base):
     budget_id = Column(BigInteger, primary_key=True)
     period_id = Column(BigInteger)
     lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id"))
-    lab_id = Column(BigInteger, ForeignKey("labs.lab_id"), nullable=True) # Explicitly nullable for envelopes
-    category_id = Column(BigInteger, ForeignKey("spending_categories.category_id"), nullable=True) # Explicitly nullable for envelopes
+    lab_id = Column(
+        BigInteger, ForeignKey("labs.lab_id"), nullable=True
+    )  # Explicitly nullable for envelopes
+    category_id = Column(
+        BigInteger, ForeignKey("spending_categories.category_id"), nullable=True
+    )  # Explicitly nullable for envelopes
     budget_amount = Column(Numeric(14, 2))
     created_by = Column(BigInteger)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -120,16 +130,18 @@ class Budget(Base):
 
 # --- PYDANTIC API SCHEMAS ---
 
+
 class LabGroupOut(BaseModel):
     id: int
     name: str
     wbs_code: str | None = None
     description: str | None = None
-    budget: float               # The Total Envelope
-    allocated_to_labs: float    # How much is given to labs
-    unallocated: float          # Remaining available
+    budget: float  # The Total Envelope
+    allocated_to_labs: float  # How much is given to labs
+    unallocated: float  # Remaining available
     spent: float = 0.0
     threshold: int
+
 
 class LabOut(BaseModel):
     id: int
@@ -145,21 +157,25 @@ class LabOut(BaseModel):
     budgets: dict[str, float] = {}
     spent_by_category: dict[str, float] = {}
 
+
 class CategoryOut(BaseModel):
     id: int
     name: str
     description: str | None = None
 
+
 class LabGroupCreate(BaseModel):
     name: str
     wbs_code: str
     description: str | None = None
-    budget: float = 0.0 # Support adding the envelope budget on creation
+    budget: float = 0.0  # Support adding the envelope budget on creation
     assigned_lab_ids: list[int] | None = []
+
 
 class CategoryCreate(BaseModel):
     name: str
     description: str | None = None
+
 
 class LabCreate(BaseModel):
     lab_code: str

@@ -71,7 +71,7 @@ def test_get_labs_with_ledger_math(mock_period):
 @patch("app.api.config.get_or_create_current_period")
 def test_create_lab_exceeds_group_envelope_throws_400(mock_period):
     """
-    Tests that a Lab cannot be created if its requested category budgets 
+    Tests that a Lab cannot be created if its requested category budgets
     exceed the remaining unallocated envelope of its parent Lab Group.
     """
     mock_period.return_value = 1
@@ -81,16 +81,19 @@ def test_create_lab_exceeds_group_envelope_throws_400(mock_period):
     # Mock the mathematical scalar returns:
     # 1st call: The Total Envelope = $10,000
     # 2nd call: The Currently Allocated = $8,000
-    mock_db.query.return_value.filter.return_value.scalar.side_effect = [10000.0, 8000.0]
+    mock_db.query.return_value.filter.return_value.scalar.side_effect = [
+        10000.0,
+        8000.0,
+    ]
 
     payload = {
         "lab_code": "TEST-NEW",
         "lab_name": "Overbudget Lab",
         "lab_group_id": 1,
         "budgets": {
-            "1": 1500.0, 
-            "2": 1000.0  # Total requested = $2,500. Remaining unallocated is only $2,000.
-        }
+            "1": 1500.0,
+            "2": 1000.0,  # Total requested = $2,500. Remaining unallocated is only $2,000.
+        },
     }
 
     response = client.post("/api/config/labs", json=payload)
@@ -112,7 +115,10 @@ def test_create_lab_within_group_envelope_succeeds(mock_period):
 
     # 1st call: The Total Envelope = $10,000
     # 2nd call: The Currently Allocated = $8,000
-    mock_db.query.return_value.filter.return_value.scalar.side_effect = [10000.0, 8000.0]
+    mock_db.query.return_value.filter.return_value.scalar.side_effect = [
+        10000.0,
+        8000.0,
+    ]
 
     # Mock the lab object that is added
     mock_lab = MagicMock()
@@ -130,8 +136,8 @@ def test_create_lab_within_group_envelope_succeeds(mock_period):
         "lab_name": "Underbudget Lab",
         "lab_group_id": 1,
         "budgets": {
-            "1": 1500.0 # Total requested = $1,500. Fits inside the $2,000 remaining.
-        }
+            "1": 1500.0  # Total requested = $1,500. Fits inside the $2,000 remaining.
+        },
     }
 
     response = client.post("/api/config/labs", json=payload)

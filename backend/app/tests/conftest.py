@@ -80,20 +80,23 @@ def seed_refs(db: Session) -> dict:
     period = db.query(BudgetPeriod).first()
 
     # --- TOP-DOWN ENVELOPE SAFETY GUARD ---
-    # Automatically injects a massive envelope budget for this group if it doesn't 
-    # exist, ensuring that legacy integration tests building labs dynamically 
+    # Automatically injects a massive envelope budget for this group if it doesn't
+    # exist, ensuring that legacy integration tests building labs dynamically
     # don't crash from the new 400 Bad Request mathematical threshold guards.
     if period and group:
-        existing_env = db.query(Budget).filter(
-            Budget.lab_group_id == group.lab_group_id, 
-            Budget.lab_id.is_(None)
-        ).first()
+        existing_env = (
+            db.query(Budget)
+            .filter(Budget.lab_group_id == group.lab_group_id, Budget.lab_id.is_(None))
+            .first()
+        )
         if not existing_env:
-            db.add(Budget(
-                period_id=period.period_id, 
-                lab_group_id=group.lab_group_id, 
-                budget_amount=Decimal("9999999.00")
-            ))
+            db.add(
+                Budget(
+                    period_id=period.period_id,
+                    lab_group_id=group.lab_group_id,
+                    budget_amount=Decimal("9999999.00"),
+                )
+            )
             db.flush()
     # ----------------------------------------
 

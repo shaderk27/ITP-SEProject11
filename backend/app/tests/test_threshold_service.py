@@ -1,6 +1,9 @@
 from unittest.mock import MagicMock, patch
 from datetime import date
-from app.services.threshold_service import check_and_notify_lab_thresholds, check_and_notify_lab_group_thresholds
+from app.services.threshold_service import (
+    check_and_notify_lab_thresholds,
+    check_and_notify_lab_group_thresholds,
+)
 from app.models.config import Lab, LabGroup, BudgetPeriod
 from app.models.auth import User
 
@@ -106,7 +109,10 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
             # 1st call retrieves Team Lead (.first())
             query_mock.filter.return_value.first.return_value = fake_lead
             # 2nd call retrieves Lab ICs using a Join (.all())
-            query_mock.join.return_value.filter.return_value.all.return_value = [fake_ic_1, fake_ic_2]
+            query_mock.join.return_value.filter.return_value.all.return_value = [
+                fake_ic_1,
+                fake_ic_2,
+            ]
         else:
             # Budget and Spend queries
             query_mock.filter.return_value.scalar = scalar_mock
@@ -120,16 +126,16 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
     assert fake_group.notified_95 is True
     assert fake_group.notified_100 is False
     assert mock_db.commit.called is True
-    
+
     mock_send_email.assert_called_once()
     args, kwargs = mock_send_email.call_args
-    
+
     # Assert email sent to the 3 combined users without duplicates
     recipients = args[0]
     assert len(recipients) == 3
     assert "dept_lead@test.com" in recipients
     assert "ic_lab1@test.com" in recipients
-    
+
     # Assert proper context in the email
     assert "95%" in args[1]
     assert "CRITICAL" in args[1]

@@ -9,6 +9,7 @@ from app.services.email_service import send_threshold_alert
 
 logger = logging.getLogger(__name__)
 
+
 def check_and_notify_lab_thresholds(lab_id: int):
     with SessionLocal() as db:
         lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
@@ -177,6 +178,7 @@ def check_and_notify_lab_thresholds(lab_id: int):
         """
         send_threshold_alert(recipients, subject, html_body)
 
+
 def check_and_notify_lab_group_thresholds(lab_group_id: int):
     with SessionLocal() as db:
         group = db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
@@ -198,9 +200,9 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
         total_budget = (
             db.query(func.sum(Budget.budget_amount))
             .filter(
-                Budget.lab_group_id == lab_group_id, 
-                Budget.lab_id.is_(None), # Explicitly grab the envelope
-                Budget.period_id == current_period.period_id
+                Budget.lab_group_id == lab_group_id,
+                Budget.lab_id.is_(None),  # Explicitly grab the envelope
+                Budget.period_id == current_period.period_id,
             )
             .scalar()
             or 0
@@ -278,21 +280,30 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
 
         # Gather recipients and send email
         recipients = []
-        
+
         # 1. Alert the Team Lead of the Lab Group
-        team_lead = db.query(User).filter(User.lab_group_id == group.lab_group_id, User.role_id == 2).first()
+        team_lead = (
+            db.query(User)
+            .filter(User.lab_group_id == group.lab_group_id, User.role_id == 2)
+            .first()
+        )
         if team_lead and team_lead.email:
             recipients.append(team_lead.email)
 
         # 2. Alert ALL Lab ICs beneath this group
-        lab_ics = db.query(User).join(Lab, User.lab_id == Lab.lab_id).filter(Lab.lab_group_id == group.lab_group_id, User.role_id == 3).all()
+        lab_ics = (
+            db.query(User)
+            .join(Lab, User.lab_id == Lab.lab_id)
+            .filter(Lab.lab_group_id == group.lab_group_id, User.role_id == 3)
+            .all()
+        )
         for ic in lab_ics:
             if ic.email:
                 recipients.append(ic.email)
 
         # Ensure unique emails
         recipients = list(set(recipients))
-        
+
         if not recipients:
             return
 
@@ -333,7 +344,7 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
             <div style="padding: 24px;">
                 <p style="font-size: 16px; color: #374151;">Hello,</p>
                 <p style="font-size: 16px; color: #374151;">
-                    This is an automated notification that the <strong>{group.wbs_code or 'Department'} - {group.lab_group_name}</strong> Lab Group has crossed the
+                    This is an automated notification that the <strong>{group.wbs_code or "Department"} - {group.lab_group_name}</strong> Lab Group has crossed the
                     <strong style="color: {color};">{threshold_hit}%</strong> overall budget utilization threshold.
                 </p>
                 <div style="background-color: #f3f4f6; padding: 16px; border-radius: 6px; margin: 20px 0;">
