@@ -48,7 +48,6 @@ export function AlertsPage() {
     fetchData();
   }, [API_BASE_URL]);
 
-  // 1. Calculate Lab Group Severity Helper
   const getSeverity = (util: number) => {
     if (util >= 100) return { type: "exceeded", threshold: 100, label: "Exceeded", colors: "bg-[#fef2f2] border-[#fecaca] text-[#dc2626]" };
     if (util >= 95) return { type: "critical", threshold: 95, label: "95% Critical", colors: "bg-[#fff1f2] border-[#fecdd3] text-[#e11d48]" };
@@ -57,25 +56,29 @@ export function AlertsPage() {
     return { type: "none", threshold: 0, label: "Healthy", colors: "bg-gray-50 border-gray-200 text-gray-500" };
   };
 
-  // 2. Build the Nested Hierarchy (Group -> Labs)
   const groupedAlerts = useMemo(() => {
     const result: GroupAlert[] = [];
 
-    // Filter which groups to process based on role
     const groupsToProcess = labGroups.filter(g => {
         if (user?.role === "admin") return true;
-        return g.id === user?.labGroupId; // Both Team Lead and Lab IC are scoped to a single group
+        if (user?.role === "teamlead") return g.id === user?.labGroupId; 
+        if (user?.role === "labic") {
+            const myLab = labs.find(l => l.id === user?.labId);
+            return g.id === myLab?.group_id;
+        }
+        return false;
     });
 
     groupsToProcess.forEach(group => {
-        const groupUtil = group.budget > 0 ? (group.spent / group.budget) * 100 : 0;
+        const isLabIC = user?.role === "labic";
+        
+        // Lab ICs do not calculate group utilization to keep the parent card neutral
+        const groupUtil = (!isLabIC && group.budget > 0) ? (group.spent / group.budget) * 100 : 0;
         const groupSeverity = getSeverity(groupUtil);
         
-        // Find labs for this group
         let groupLabs = labs.filter(l => l.group_id === group.id && l.budget > 0);
         
-        // Lab ICs only see their specific lab
-        if (user?.role === "labic") {
+        if (isLabIC) {
             groupLabs = groupLabs.filter(l => l.id === user?.labId);
         }
 
@@ -84,7 +87,6 @@ export function AlertsPage() {
             const util = (lab.spent / lab.budget) * 100;
             const severity = getSeverity(util);
             
-            // Only add labs that have crossed a threshold OR if the group itself has crossed a threshold
             if (severity.type !== "none" || groupSeverity.type !== "none") {
                 labAlerts.push({
                     id: `LAB-${lab.id}`,
@@ -101,7 +103,6 @@ export function AlertsPage() {
             }
         });
 
-        // Only include the Group Card if the Group crossed a threshold, OR if any of its child labs did.
         if (groupSeverity.type !== "none" || labAlerts.length > 0) {
             labAlerts.sort((a, b) => b.utilization - a.utilization);
             
@@ -109,8 +110,8 @@ export function AlertsPage() {
                 groupId: group.id,
                 groupName: group.name,
                 wbsCode: group.wbs_code,
-                totalBudget: group.budget,
-                totalSpent: group.spent,
+                totalBudget: isLabIC ? 0 : group.budget, // Zeroed out for ICs
+                totalSpent: isLabIC ? 0 : group.spent,   // Zeroed out for ICs
                 groupUtilization: Number(groupUtil.toFixed(1)),
                 groupType: groupSeverity.type,
                 labs: labAlerts
@@ -122,7 +123,6 @@ export function AlertsPage() {
   }, [labGroups, labs, user]);
 
 
-  // 3. Apply standard search/dropdown filters
   const filteredGroups = useMemo(() => {
     return groupedAlerts.filter(g => {
         if (selectedGroup !== "all" && g.groupId.toString() !== selectedGroup) return false;
@@ -149,7 +149,6 @@ export function AlertsPage() {
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa] relative">
 
-      {/* FILTER BAR - Hidden for Lab ICs */}
       {user?.role !== "labic" && (
         <div className="bg-white p-4 border-b border-border flex flex-col sm:flex-row gap-4 items-center justify-between shadow-sm">
           <div className="relative w-full sm:w-96">
@@ -181,7 +180,6 @@ export function AlertsPage() {
             <p className="text-sm text-muted-foreground mt-1">Hierarchical budget threshold warnings.</p>
         </div>
 
-        {/* TOP-DOWN ALERTS LIST */}
         <div className="space-y-6">
             {filteredGroups.length === 0 ? (
                 <div className="p-12 text-center text-gray-500 bg-white border border-gray-200 rounded-lg shadow-sm">
@@ -193,7 +191,6 @@ export function AlertsPage() {
                     
                     return (
                         <Card key={group.groupId} className="bg-white border-gray-200 shadow-sm overflow-hidden">
-                            {/* MASTER GROUP HEADER */}
                             <div className={`p-5 border-b-4 ${groupSev.type === 'none' ? 'border-b-gray-200 bg-gray-50' : groupSev.colors.split(' ')[1].replace('border-', 'border-b-')} ${groupSev.type === 'none' ? '' : groupSev.colors.split(' ')[0]}`}>
                                 <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-3">
@@ -203,32 +200,46 @@ export function AlertsPage() {
                                         <div>
                                             <h3 className="text-lg font-black text-gray-900 tracking-tight flex items-center gap-2">
                                                 {group.groupName}
-                                                <span className={`px-2 py-0.5 text-xs rounded-full border bg-white ${groupSev.colors}`}>
-                                                    {groupSev.type === 'none' ? 'Group Envelope Healthy' : `Group Envelope ${groupSev.label}`}
-                                                </span>
+                                                
+                                                {/* Lab ICs see a neutral 'Parent Group' tag instead of group health */}
+                                                {user?.role !== "labic" ? (
+                                                    <span className={`px-2 py-0.5 text-xs rounded-full border bg-white ${groupSev.colors}`}>
+                                                        {groupSev.type === 'none' ? 'Group Budget Healthy' : `Group Budget ${groupSev.label}`}
+                                                    </span>
+                                                ) : (
+                                                    <span className="px-2 py-0.5 text-xs rounded-full border bg-gray-100 text-gray-600 border-gray-200">
+                                                        Parent Group
+                                                    </span>
+                                                )}
                                             </h3>
                                             <p className="text-sm font-medium text-gray-600 font-mono mt-0.5">{group.wbsCode}</p>
                                         </div>
                                     </div>
-                                    <div className="text-right bg-white/60 p-2.5 rounded-lg border border-black/5">
-                                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-0.5">Envelope Utilisation</p>
-                                        <p className={`text-xl font-black ${groupSev.colors.split(' ')[2]}`}>{group.groupUtilization}%</p>
-                                    </div>
+                                    
+                                    {/* HIDDEN FROM LAB ICS */}
+                                    {user?.role !== "labic" && (
+                                        <div className="text-right bg-white/60 p-2.5 rounded-lg border border-black/5">
+                                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-0.5">Group Utilisation</p>
+                                            <p className={`text-xl font-black ${groupSev.colors.split(' ')[2]}`}>{group.groupUtilization}%</p>
+                                        </div>
+                                    )}
                                 </div>
 
-                                <div className="mt-4 grid grid-cols-2 gap-4">
-                                    <div className="bg-white/50 rounded p-2">
-                                        <p className="text-xs text-gray-500 font-medium">Total Envelope</p>
-                                        <p className="text-sm font-bold text-gray-900">${group.totalBudget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                {/* HIDDEN FROM LAB ICS */}
+                                {user?.role !== "labic" && (
+                                    <div className="mt-4 grid grid-cols-2 gap-4">
+                                        <div className="bg-white/50 rounded p-2">
+                                            <p className="text-xs text-gray-500 font-medium">Total Budget</p>
+                                            <p className="text-sm font-bold text-gray-900">${group.totalBudget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                        </div>
+                                        <div className="bg-white/50 rounded p-2">
+                                            <p className="text-xs text-gray-500 font-medium">Group Spent</p>
+                                            <p className="text-sm font-bold text-gray-900">${group.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                                        </div>
                                     </div>
-                                    <div className="bg-white/50 rounded p-2">
-                                        <p className="text-xs text-gray-500 font-medium">Group Spent</p>
-                                        <p className="text-sm font-bold text-gray-900">${group.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
-                                    </div>
-                                </div>
+                                )}
                             </div>
 
-                            {/* NESTED INDIVIDUAL LABS */}
                             <div className="p-4 space-y-3 bg-gray-50/50">
                                 {group.labs.length === 0 ? (
                                     <p className="text-sm text-gray-400 italic text-center p-4">All individual labs within this group are healthy.</p>
@@ -264,7 +275,6 @@ export function AlertsPage() {
         </div>
       </div>
 
-      {/* --- THE SPENDING BREAKDOWN MODAL --- */}
       {selectedLabDetails && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <Card className="w-full max-w-2xl bg-white shadow-xl overflow-hidden">

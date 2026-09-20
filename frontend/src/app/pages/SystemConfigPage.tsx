@@ -172,20 +172,12 @@ export function SystemConfigPage() {
   };
 
   const handleDelete = async (endpoint: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to delete "${name}"?`)) return;
+    if (!window.confirm(`Are you sure you want to permanently delete "${name}"? This action cannot be undone.`)) return;
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE", credentials: "include" });
       if (res.ok) fetchConfigData();
       else alert(await readErrorDetail(res, `Failed to delete ${name}.`));
     } catch (error) { alert("A network error occurred while trying to delete."); }
-  };
-
-  const handleUnassignLab = async (labId: number, labName: string) => {
-    if (!window.confirm(`Remove "${labName}" from this Lab Group?`)) return;
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/config/labs/${labId}/unassign`, { method: "PUT", credentials: "include" });
-      if (res.ok) fetchConfigData();
-    } catch (error) { console.error(error); }
   };
 
   const openEditGroup = (group: any) => {
@@ -484,7 +476,7 @@ export function SystemConfigPage() {
                                           <th className="text-left p-3 pl-4">Lab Code</th>
                                           <th className="text-left p-3">Lab Name</th>
                                           <th className="text-left p-3">Lab IC</th>
-                                          <th className="text-right p-3">Allocated from Group</th>
+                                          <th className="text-right p-3">Allocated Budget</th>
                                           <th className="text-center p-3">Actions</th>
                                         </tr>
                                       </thead>
@@ -516,8 +508,12 @@ export function SystemConfigPage() {
                                                 ${lab.budget?.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                               </td>
                                               <td className="p-3 text-center flex justify-center gap-2">
-                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => openEditLab(lab)}><Edit className="h-3 w-3 text-gray-600" /></Button>
-                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => handleUnassignLab(lab.id, lab.name)}><X className="h-3 w-3 text-red-600" /></Button>
+                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Edit Allocation" onClick={() => openEditLab(lab)}>
+                                                    <Edit className="h-3 w-3 text-gray-600" />
+                                                </Button>
+                                                <Button size="sm" variant="outline" className="h-7 w-7 p-0" title="Permanently Delete Lab" onClick={() => handleDelete(`/api/config/labs/${lab.id}`, lab.name)}>
+                                                    <Trash2 className="h-3 w-3 text-red-600" />
+                                                </Button>
                                               </td>
                                             </tr>
                                           )
