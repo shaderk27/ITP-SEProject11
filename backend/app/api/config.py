@@ -247,6 +247,7 @@ def create_lab_group(
 def update_lab_group(
     group_id: int, 
     group: LabGroupCreate, 
+    background_tasks: BackgroundTasks, # <-- 1. ADD THIS PARAMETER
     period_id: int | None = None,
     db: Session = Depends(get_db)
 ):
@@ -301,6 +302,10 @@ def update_lab_group(
             b.lab_group_id = group_id
 
     db.commit()
+
+    # --- 2. ADD THIS: FIRE ALERTS AFTER BUDGET CHANGE ---
+    background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
+    # ----------------------------------------------------
 
     allocated = float(db.query(func.sum(Budget.budget_amount)).filter(
         Budget.lab_group_id == group_id,
