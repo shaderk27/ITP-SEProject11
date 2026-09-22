@@ -6,25 +6,50 @@ Lives separate from /api/records so the dashboard never has to
 download line-by-line data just to render one number.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from app.api.config import get_lab_groups
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
 from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
+from app.services.dashboard_report_service import (
+    DashboardKpis,
+    DashboardMeta,
+    build_dashboard_workbook,
+)
 from app.utils.date_range import date_range_bounds
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
 ALLOWED_DASHBOARD_ROLES = {"admin", "teamlead", "labic"}
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+DASHBOARD_ROLE_LABELS = {
+    "admin": "Admin",
+    "teamlead": "Team Lead",
+    "labic": "Lab IC",
+}
+
+# Mirror of the dashboard FilterBar "Date Range" option labels.
+DASHBOARD_RANGE_LABELS = {
+    "all": "Whole year",
+    "7d": "Last 7 days",
+    "30d": "Last 30 days",
+    "90d": "Last 90 days",
+    "ytd": "Year to date",
+}
 
 
 # ─── Response shapes ─────────────────────────────────────────────────────
@@ -552,3 +577,195 @@ def _pct(numerator: Decimal, denominator: Decimal) -> float:
     if denominator <= 0:
         return 0.0
     return round(float((numerator / denominator) * 100), 1)
+
+
+# ─── Excel export (W11-03) ───────────────────────────────────────────────
+@router.get("/export")
+def export_dashboard(
+    date_range: str = "all",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    period_id: int | None = None,
+    # Dashboard dropdowns. "all" (or omitted) means unfiltered.
+    lab_group_id: int | None = None,
+    lab_id: int | None = None,
+    # Cover-block context only; never affects which rows are returned.
+    custom_start: str = "",
+    custom_end: str = "",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """
+    Download the dashboard as a styled .xlsx workbook.
+
+    Deliberately calls the very same functions the dashboard's own endpoints
+    use — get_spending_summary / get_breakdown / get_monthly_spend — rather
+    than re-querying. The role scoping and date handling therefore cannot
+    drift from what the page shows, and a Team Lead's workbook can never
+    contain another group's numbers.
+    """
+    role_name = _role_name(current_user)
+    if role_name not in ALLOWED_DASHBOARD_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Admin or Team Lead can export the dashboard.",
+        )
+
+    spending = get_spending_summary(date_range, start_date, end_date, db, current_user)
+    breakdown = get_breakdown(
+        date_range, start_date, end_date, period_id, db, current_user
+    )
+    monthly = get_monthly_spend(
+        start_date, end_date, lab_group_id, lab_id, db, current_user
+    )
+    lab_groups = get_lab_groups(period_id, db, current_user)
+
+    groups = _filter_breakdown(breakdown.lab_groups, lab_group_id, lab_id)
+    kpis = _dashboard_kpis(spending, lab_groups, groups, lab_group_id, lab_id)
+
+    meta = DashboardMeta(
+        generated_at=datetime.now(),
+        generated_by_name=current_user.full_name or current_user.email,
+        generated_by_email=current_user.email,
+        role_label=DASHBOARD_ROLE_LABELS.get(role_name, role_name.title()),
+        scope_label=_dashboard_scope_label(db, current_user, role_name),
+        fy_label=_dashboard_fy_label(db, period_id),
+        date_range_label=_dashboard_range_label(date_range, custom_start, custom_end),
+        lab_group_label=_entity_label(
+            lab_group_id,
+            {g.lab_group_id: g.lab_group_name for g in groups},
+            "All Lab Groups",
+        ),
+        lab_label=_entity_label(
+            lab_id,
+            {lab.lab_id: lab.lab_name for g in groups for lab in g.labs},
+            "All labs",
+        ),
+    )
+
+    stream = build_dashboard_workbook(meta, kpis, groups, groups, monthly.points)
+    filename = f"Dashboard_{role_name}_{meta.generated_at.strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        stream,
+        media_type=XLSX_MEDIA_TYPE,
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename={filename}; filename*=UTF-8''{quote(filename)}"
+            ),
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        },
+    )
+
+
+def _filter_breakdown(
+    groups: list[BreakdownLabGroup], lab_group_id: int | None, lab_id: int | None
+) -> list[BreakdownLabGroup]:
+    """
+    Apply the dashboard's Lab Group / Lab dropdowns to the breakdown tree.
+
+    Mirrors DashboardPage.tsx: picking a lab narrows to that lab alone (and
+    the group that owns it), picking a group narrows to that group.
+    """
+    if lab_id is not None:
+        narrowed: list[BreakdownLabGroup] = []
+        for group in groups:
+            labs = [lab for lab in group.labs if lab.lab_id == lab_id]
+            if labs:
+                narrowed.append(group.model_copy(update={"labs": labs}))
+        return narrowed
+    if lab_group_id is not None:
+        return [g for g in groups if g.lab_group_id == lab_group_id]
+    return groups
+
+
+def _dashboard_kpis(
+    spending: SpendingSummary,
+    lab_groups: list[Any],
+    groups: list[BreakdownLabGroup],
+    lab_group_id: int | None,
+    lab_id: int | None,
+) -> DashboardKpis:
+    """
+    Recreate the six KPI cards exactly as DashboardPage.tsx derives them.
+
+    Total Budget comes from the System Config numbers (not the breakdown),
+    while Actual and Pending come from the spending aggregate — except when a
+    single lab is selected, where all three are read off that lab's row.
+    """
+    if lab_id is not None:
+        lab = next(
+            (lab for g in groups for lab in g.labs if lab.lab_id == lab_id), None
+        )
+        budget = _to_decimal(lab.budget_sgd) if lab else Decimal("0")
+        actual = _to_decimal(lab.actual_spend_sgd) if lab else Decimal("0")
+        pending = _to_decimal(lab.pending_sgd) if lab else Decimal("0")
+    else:
+        # get_lab_groups() hands back plain dicts (FastAPI only coerces them
+        # to LabGroupOut at the response boundary), so index them as dicts —
+        # a defaulted getattr here silently reads every budget as zero.
+        if lab_group_id is None:
+            budget = sum((_to_decimal(g["budget"]) for g in lab_groups), Decimal("0"))
+            actual = _to_decimal(spending.total_actual_spend_sgd)
+            pending = _to_decimal(spending.total_pending_sgd)
+        else:
+            match = next(
+                (g for g in lab_groups if g["id"] == lab_group_id),
+                None,
+            )
+            budget = _to_decimal(match["budget"]) if match else Decimal("0")
+            key = str(lab_group_id)
+            actual = _to_decimal(spending.by_lab_group.get(key, "0"))
+            pending = _to_decimal(spending.pending_by_lab_group.get(key, "0"))
+
+    available = budget - actual - pending
+    return DashboardKpis(
+        total_budget=float(budget),
+        actual_spend=float(actual),
+        pending=float(pending),
+        available_balance=float(available),
+        utilisation_pct=_pct(actual, budget),
+        projected_utilisation_pct=_pct(actual + pending, budget),
+    )
+
+
+def _dashboard_scope_label(db: Session, user: User, role_name: str) -> str:
+    if role_name == "teamlead":
+        group = (
+            db.query(LabGroup)
+            .filter(LabGroup.lab_group_id == user.lab_group_id)
+            .first()
+        )
+        name = group.lab_group_name if group else "Unassigned"
+        return f"Lab Group: {name} (Team Lead scope)"
+    if role_name == "labic":
+        lab = db.query(Lab).filter(Lab.lab_id == user.lab_id).first()
+        name = lab.lab_name if lab else "Unassigned"
+        return f"Lab: {name} (Lab IC scope)"
+    return "All Lab Groups (Admin — full access)"
+
+
+def _dashboard_fy_label(db: Session, period_id: int | None) -> str:
+    if not period_id:
+        return "All time"
+    period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == period_id).first()
+    if not period:
+        return "All time"
+    if period.start_date and period.end_date:
+        return (
+            f"{period.period_name} "
+            f"({period.start_date.strftime('%d %b %Y')} – "
+            f"{period.end_date.strftime('%d %b %Y')})"
+        )
+    return str(period.period_name)
+
+
+def _dashboard_range_label(date_range: str, custom_start: str, custom_end: str) -> str:
+    if custom_start or custom_end:
+        return f"Custom: {custom_start or 'beginning'} to {custom_end or 'today'}"
+    return DASHBOARD_RANGE_LABELS.get(date_range, "Whole year")
+
+
+def _entity_label(entity_id: int | None, names: dict[int, str], fallback: str) -> str:
+    if entity_id is None:
+        return fallback
+    return names.get(entity_id, str(entity_id))

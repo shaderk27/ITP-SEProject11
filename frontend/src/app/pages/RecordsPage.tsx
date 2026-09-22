@@ -8,7 +8,7 @@ import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 import { ExportConfirmDialog } from "../components/shared/ExportConfirmDialog";
 import { toast } from "sonner";
-import { listCommittedPRs } from "../services/recordsService";
+import { exportCommittedPRs, listCommittedPRs } from "../services/recordsService";
 import { listPeriods, type Period } from "../services/dashboardService";
 import { format, subDays } from "date-fns";
 import type { CommittedPR } from "../types/records";
@@ -32,32 +32,40 @@ export function RecordsPage() {
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
 
+  // Effective request window: the selected fiscal year's Apr–Mar span,
+  // narrowed by the custom range (if set) or the preset. Shared by the list
+  // fetch and the export so the downloaded file covers the same window.
+  const effectiveRange = (): { effStart: string; effEnd: string } => {
+    // Base window = the selected fiscal year's Apr–Mar span.
+    const period = periods.find((p) => p.id === selectedFYPeriodId);
+    const fyStart = period?.start_date ?? "";
+    const fyEnd = period?.end_date ?? "";
+    // Optional sub-window: custom range wins, else a preset.
+    let rawStart = "";
+    let rawEnd = "";
+    if (startDate || endDate) {
+      rawStart = startDate;
+      rawEnd = endDate;
+    } else if (dateRange === "30d" || dateRange === "90d") {
+      const days = dateRange === "30d" ? 30 : 90;
+      rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
+      rawEnd = format(new Date(), "yyyy-MM-dd");
+    } else if (dateRange === "ytd") {
+      rawStart = `${new Date().getFullYear()}-01-01`;
+      rawEnd = format(new Date(), "yyyy-MM-dd");
+    }
+    // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
+    return {
+      effStart: !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart,
+      effEnd: !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd,
+    };
+  };
+
   const fetchRecords = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Base window = the selected fiscal year's Apr–Mar span.
-      const period = periods.find((p) => p.id === selectedFYPeriodId);
-      const fyStart = period?.start_date ?? "";
-      const fyEnd = period?.end_date ?? "";
-      // Optional sub-window: custom range wins, else a preset.
-      let rawStart = "";
-      let rawEnd = "";
-      if (startDate || endDate) {
-        rawStart = startDate;
-        rawEnd = endDate;
-      } else if (dateRange === "30d" || dateRange === "90d") {
-        const days = dateRange === "30d" ? 30 : 90;
-        rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
-        rawEnd = format(new Date(), "yyyy-MM-dd");
-      } else if (dateRange === "ytd") {
-        rawStart = `${new Date().getFullYear()}-01-01`;
-        rawEnd = format(new Date(), "yyyy-MM-dd");
-      }
-      // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
-      const effStart = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
-      const effEnd = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
-
+      const { effStart, effEnd } = effectiveRange();
       const data = await listCommittedPRs("all", effStart, effEnd);
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
@@ -87,12 +95,36 @@ export function RecordsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email, selectedFYPeriodId, dateRange, startDate, endDate, periods]);
 
-  const handleExport = () => {
-    // Real CSV/Excel export is future work; for now confirm the click.
-    toast.success("Export prepared", {
-      description: `${records.length} PR record${records.length === 1 ? "" : "s"} ready (export wiring is a future step).`,
-    });
-    setShowExportDialog(false);
+  // Download exactly what the page is showing. The date window and the
+  // search / Lab Group filters all go to the server, which re-applies this
+  // user's role scoping before building the workbook. Throws on failure so
+  // the dialog can stay open for a retry.
+  const handleExport = async () => {
+    const { effStart, effEnd } = effectiveRange();
+    try {
+      const filename = await exportCommittedPRs({
+        startDate: effStart,
+        endDate: effEnd,
+        dateRange,
+        search: searchQuery,
+        // Only Admin has the Lab Group dropdown; the others are already
+        // scoped server-side, so never send a stale value for them.
+        labGroup: user?.role === "admin" ? labGroupFilter : "all",
+        periodId: selectedFYPeriodId,
+        customStart: startDate,
+        customEnd: endDate,
+      });
+      toast.success("Export complete", {
+        description: `${filename} — ${filteredRecords.length} PR record${filteredRecords.length === 1 ? "" : "s"} saved to your downloads folder.`,
+      });
+      setShowExportDialog(false);
+    } catch (err) {
+      toast.error("Export failed", {
+        description:
+          err instanceof Error ? err.message : "Could not generate the report.",
+      });
+      throw err;
+    }
   };
 
   // Lab Group options pulled from current data so the filter chip reflects reality.
@@ -360,7 +392,7 @@ export function RecordsPage() {
         open={showExportDialog}
         onOpenChange={setShowExportDialog}
         onConfirm={handleExport}
-        recordCount={records.length}
+        recordCount={filteredRecords.length}
       />
     </div>
   );
