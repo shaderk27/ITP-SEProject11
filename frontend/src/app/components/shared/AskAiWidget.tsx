@@ -24,7 +24,15 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { Send, Sparkles, X } from "lucide-react";
+import {
+  ChevronLeft,
+  History,
+  Send,
+  Sparkles,
+  SquarePen,
+  Trash2,
+  X,
+} from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
 
@@ -36,6 +44,11 @@ const EDGE_MARGIN = 16;
 /** Pointer travel (px) past which a press counts as a drag, not a click. */
 const DRAG_THRESHOLD = 4;
 const STORAGE_KEY = "askAi.launcherPosition";
+const CHATS_STORAGE_KEY = "askAi.conversations";
+/** Conversations kept in history; older ones fall off the end. */
+const MAX_CONVERSATIONS = 30;
+/** Characters of the opening question used to title a conversation. */
+const TITLE_LENGTH = 40;
 
 interface Point {
   x: number;
@@ -46,6 +59,65 @@ interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   text: string;
+}
+
+/** One saved thread. Persisted per browser; nothing leaves the device. */
+interface Conversation {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: ChatMessage[];
+}
+
+function newConversation(): Conversation {
+  return {
+    id: `c${Date.now()}${Math.random().toString(36).slice(2, 7)}`,
+    title: "New chat",
+    updatedAt: Date.now(),
+    messages: [],
+  };
+}
+
+/** Title a thread from its opening question, the way most chat UIs do. */
+function titleFrom(question: string): string {
+  const clean = question.trim().replace(/\s+/g, " ");
+  if (clean.length <= TITLE_LENGTH) return clean;
+  return `${clean.slice(0, TITLE_LENGTH).trimEnd()}…`;
+}
+
+function loadConversations(): Conversation[] {
+  try {
+    const raw = window.localStorage.getItem(CHATS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Tolerate anything malformed rather than blowing up the whole widget.
+    return parsed.filter(
+      (c): c is Conversation =>
+        c &&
+        typeof c.id === "string" &&
+        typeof c.title === "string" &&
+        Array.isArray(c.messages),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** "just now" / "5m ago" / "3h ago" / "12 Apr" — compact enough for a row. */
+function relativeTime(timestamp: number): string {
+  const seconds = Math.round((Date.now() - timestamp) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    day: "2-digit",
+    month: "short",
+  });
 }
 
 /** Top-right corner, the default resting place for a first-time visitor. */
@@ -208,8 +280,15 @@ export function AskAiWidget() {
   const [panelOffset, setPanelOffset] = useState<Point | null>(null);
   const [dragging, setDragging] = useState(false);
   const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [thinking, setThinking] = useState(false);
+
+  // Saved threads, newest-updated first. Restored during initial render so
+  // the history is already there the first time the panel opens.
+  const [conversations, setConversations] = useState<Conversation[]>(() =>
+    loadConversations(),
+  );
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [view, setView] = useState<"chat" | "history">("chat");
 
   // Offset between the pointer and the launcher's top-left, so the widget
   // doesn't jump to centre itself under the cursor on grab.
@@ -246,17 +325,32 @@ export function AskAiWidget() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  const active = conversations.find((c) => c.id === activeId) ?? null;
+  const messages = active?.messages ?? [];
+
   // Pin the transcript to the newest message.
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, thinking]);
+  }, [messages.length, thinking, view]);
 
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
+
+  // Only threads that actually contain something are worth keeping.
+  useEffect(() => {
+    try {
+      const keep = conversations
+        .filter((c) => c.messages.length > 0)
+        .slice(0, MAX_CONVERSATIONS);
+      window.localStorage.setItem(CHATS_STORAGE_KEY, JSON.stringify(keep));
+    } catch {
+      // Blocked storage — history simply won't survive a reload.
+    }
+  }, [conversations]);
 
   const persist = useCallback((point: Point) => {
     try {
@@ -332,31 +426,97 @@ export function AskAiWidget() {
     setOpen(true);
   };
 
+  /** Append to a thread and float it to the top of the history list. */
+  const appendMessage = (id: string, message: ChatMessage, title?: string) => {
+    setConversations((prev) => {
+      const next = prev.map((c) =>
+        c.id === id
+          ? {
+              ...c,
+              title: title ?? c.title,
+              updatedAt: Date.now(),
+              messages: [...c.messages, message],
+            }
+          : c,
+      );
+      return [...next].sort((a, b) => b.updatedAt - a.updatedAt);
+    });
+  };
+
   const submit = async (question: string) => {
     const trimmed = question.trim();
     if (!trimmed || thinking) return;
     setDraft("");
-    setMessages((prev) => [
-      ...prev,
-      { id: messageIdRef.current++, role: "user", text: trimmed },
-    ]);
+
+    // First message of the session opens a thread; the opening question
+    // becomes its title, so history rows are recognisable.
+    let id = activeId;
+    let title: string | undefined;
+    if (!id || !conversations.some((c) => c.id === id)) {
+      const created = newConversation();
+      id = created.id;
+      setConversations((prev) => [created, ...prev]);
+      setActiveId(created.id);
+    }
+    const current = conversations.find((c) => c.id === id);
+    if (!current || current.messages.length === 0) {
+      title = titleFrom(trimmed);
+    }
+
+    appendMessage(
+      id,
+      {
+        id: messageIdRef.current++,
+        role: "user",
+        text: trimmed,
+      },
+      title,
+    );
     setThinking(true);
     try {
       const reply = await sendToAssistant(trimmed);
-      setMessages((prev) => [
-        ...prev,
-        { id: messageIdRef.current++, role: "assistant", text: reply },
-      ]);
+      appendMessage(id, {
+        id: messageIdRef.current++,
+        role: "assistant",
+        text: reply,
+      });
     } finally {
       setThinking(false);
     }
+  };
+
+  /** Start a fresh thread — unless the current one is already untouched. */
+  const startNewChat = () => {
+    setView("chat");
+    setDraft("");
+    if (active && active.messages.length === 0) {
+      inputRef.current?.focus();
+      return;
+    }
+    // Drop any empty threads so History never fills with blanks.
+    setConversations((prev) => prev.filter((c) => c.messages.length > 0));
+    setActiveId(null);
+    inputRef.current?.focus();
+  };
+
+  const openConversation = (id: string) => {
+    setActiveId(id);
+    setView("chat");
+  };
+
+  const deleteConversation = (id: string) => {
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (activeId === id) setActiveId(null);
   };
 
   // While open, follow the frozen offset (clamped so a drag toward an edge
   // can never push the panel off-screen). Before that, fall back to a fresh
   // placement search.
   const panel = panelOffset
-    ? clampPanelBox({ x: position.x + panelOffset.x, y: position.y + panelOffset.y })
+    ? clampPanelBox({
+        x: position.x + panelOffset.x,
+        y: position.y + panelOffset.y,
+      })
     : panelPosition(position);
   const suggestions = suggestionsFor(user?.role);
 
@@ -414,13 +574,63 @@ export function AskAiWidget() {
           {/* Header. Deliberately NOT a drag handle: the panel's placement is
               derived from the launcher, so dragging it here would make the
               panel flip sides under the cursor. Move the pill instead. */}
-          <div className="flex select-none items-center gap-2 border-b border-border bg-[#1e3a8a] px-3 py-3 text-white">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold leading-tight">Ask AI</p>
+          <div className="flex select-none items-center gap-1 border-b border-border bg-[#1e3a8a] px-2 py-2.5 text-white">
+            {view === "history" ? (
+              <button
+                type="button"
+                aria-label="Back to chat"
+                onClick={() => setView("chat")}
+                className="rounded-md p-1.5 transition-colors hover:bg-white/15"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+            ) : (
+              <span className="pl-1.5">
+                <Sparkles className="h-4 w-4" />
+              </span>
+            )}
+
+            <div className="min-w-0 flex-1 px-1">
+              <p className="truncate text-sm font-semibold leading-tight">
+                {view === "history" ? "Previous chats" : "Ask AI"}
+              </p>
               <p className="truncate text-xs text-white/70">
-                Budget questions, answered from your data
+                {view === "history"
+                  ? `${conversations.length} saved`
+                  : active?.messages.length
+                    ? active.title
+                    : "Budget questions, answered from your data"}
               </p>
             </div>
+
+            {view === "chat" && (
+              <>
+                <button
+                  type="button"
+                  aria-label="New chat"
+                  title="New chat"
+                  onClick={startNewChat}
+                  className="rounded-md p-1.5 transition-colors hover:bg-white/15"
+                >
+                  <SquarePen className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Previous chats"
+                  title="Previous chats"
+                  onClick={() => setView("history")}
+                  className="relative rounded-md p-1.5 transition-colors hover:bg-white/15"
+                >
+                  <History className="h-4 w-4" />
+                  {conversations.length > 0 && (
+                    <span className="absolute right-0.5 top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-white px-1 text-[9px] font-semibold text-[#1e3a8a]">
+                      {conversations.length}
+                    </span>
+                  )}
+                </button>
+              </>
+            )}
+
             <button
               type="button"
               aria-label="Close"
@@ -428,128 +638,190 @@ export function AskAiWidget() {
                 setOpen(false);
                 setPanelOffset(null);
               }}
-              className="rounded-md p-1 transition-colors hover:bg-white/15"
+              className="rounded-md p-1.5 transition-colors hover:bg-white/15"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          {/* Not-wired-up notice */}
-          <div className="border-b border-[#bfdbfe] bg-[#f0f9ff] px-3 py-2">
-            <p className="text-xs text-[#1e40af]">
-              Preview — the assistant isn't connected to a model yet.
-            </p>
-          </div>
-
-          {/* Transcript */}
-          <div
-            ref={scrollRef}
-            className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
-          >
-            {messages.length === 0 && !thinking && (
-              <div className="space-y-3">
-                <div className="flex flex-col items-center gap-2 py-4 text-center">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#eef2ff]">
-                    <Sparkles className="h-5 w-5 text-[#1e3a8a]" />
+          {/* History list — replaces the transcript while browsing. */}
+          {view === "history" && (
+            <div className="flex-1 overflow-y-auto p-2">
+              {conversations.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#f1f5f9]">
+                    <History className="h-5 w-5 text-muted-foreground" />
                   </div>
                   <p className="text-sm font-medium text-foreground">
-                    How can I help?
+                    No previous chats
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Ask about budgets, spending or purchase requests.
+                    Conversations you start are saved here, on this browser.
                   </p>
                 </div>
-                <div className="space-y-1.5">
-                  <p className="px-1 text-xs font-medium text-muted-foreground">
-                    Try one of these
-                  </p>
-                  {suggestions.map((prompt) => (
-                    <button
-                      key={prompt}
-                      type="button"
-                      onClick={() => submit(prompt)}
+              ) : (
+                <ul className="space-y-1">
+                  {conversations.map((conversation) => (
+                    <li key={conversation.id}>
+                      <div
+                        className={cn(
+                          "group flex items-center gap-2 rounded-lg border px-2.5 py-2 transition-colors",
+                          conversation.id === activeId
+                            ? "border-[#1e3a8a] bg-[#f0f9ff]"
+                            : "border-transparent hover:border-border hover:bg-[#f8fafc]",
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => openConversation(conversation.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <p className="truncate text-xs font-medium text-foreground">
+                            {conversation.title}
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">
+                            {conversation.messages.length} message
+                            {conversation.messages.length === 1
+                              ? ""
+                              : "s"} · {relativeTime(conversation.updatedAt)}
+                          </p>
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete "${conversation.title}"`}
+                          onClick={() => deleteConversation(conversation.id)}
+                          className="shrink-0 rounded-md p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-[#fef2f2] hover:text-[#dc2626] focus-visible:opacity-100 group-hover:opacity-100"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {view === "chat" && (
+            <>
+              {/* Not-wired-up notice */}
+              <div className="border-b border-[#bfdbfe] bg-[#f0f9ff] px-3 py-2">
+                <p className="text-xs text-[#1e40af]">
+                  Preview — the assistant isn't connected to a model yet.
+                </p>
+              </div>
+
+              {/* Transcript */}
+              <div
+                ref={scrollRef}
+                className="flex-1 space-y-3 overflow-y-auto px-3 py-3"
+              >
+                {messages.length === 0 && !thinking && (
+                  <div className="space-y-3">
+                    <div className="flex flex-col items-center gap-2 py-4 text-center">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#eef2ff]">
+                        <Sparkles className="h-5 w-5 text-[#1e3a8a]" />
+                      </div>
+                      <p className="text-sm font-medium text-foreground">
+                        How can I help?
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Ask about budgets, spending or purchase requests.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="px-1 text-xs font-medium text-muted-foreground">
+                        Try one of these
+                      </p>
+                      {suggestions.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          onClick={() => submit(prompt)}
+                          className={cn(
+                            "w-full rounded-lg border border-border bg-white px-3 py-2 text-left",
+                            "text-xs text-foreground transition-colors hover:border-[#1e3a8a] hover:bg-[#f8fafc]",
+                          )}
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {messages.map((message) => (
+                  <div
+                    key={message.id}
+                    className={cn(
+                      "flex",
+                      message.role === "user" ? "justify-end" : "justify-start",
+                    )}
+                  >
+                    <div
                       className={cn(
-                        "w-full rounded-lg border border-border bg-white px-3 py-2 text-left",
-                        "text-xs text-foreground transition-colors hover:border-[#1e3a8a] hover:bg-[#f8fafc]",
+                        "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-xs leading-relaxed",
+                        message.role === "user"
+                          ? "rounded-br-sm bg-[#1e3a8a] text-white"
+                          : "rounded-bl-sm bg-[#f1f5f9] text-foreground",
                       )}
                     >
-                      {prompt}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+                      {message.text}
+                    </div>
+                  </div>
+                ))}
 
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  "flex",
-                  message.role === "user" ? "justify-end" : "justify-start",
+                {thinking && (
+                  <div className="flex justify-start">
+                    <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm bg-[#f1f5f9] px-3 py-2.5">
+                      {[0, 150, 300].map((delay) => (
+                        <span
+                          key={delay}
+                          style={{ animationDelay: `${delay}ms` }}
+                          className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#94a3b8]"
+                        />
+                      ))}
+                    </div>
+                  </div>
                 )}
+              </div>
+
+              {/* Composer */}
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submit(draft);
+                }}
+                className="flex items-center gap-2 border-t border-border bg-white px-3 py-2.5"
               >
-                <div
+                <input
+                  ref={inputRef}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  placeholder="Ask about your budgets..."
+                  disabled={thinking}
                   className={cn(
-                    "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-xs leading-relaxed",
-                    message.role === "user"
-                      ? "rounded-br-sm bg-[#1e3a8a] text-white"
-                      : "rounded-bl-sm bg-[#f1f5f9] text-foreground",
+                    "min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs outline-none transition-all",
+                    "placeholder:text-muted-foreground",
+                    "focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/20",
+                    "disabled:cursor-not-allowed disabled:bg-muted",
+                  )}
+                />
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  disabled={!draft.trim() || thinking}
+                  className={cn(
+                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white transition-colors",
+                    "bg-[#1e3a8a] hover:bg-[#1e40af]",
+                    "disabled:cursor-not-allowed disabled:opacity-40",
                   )}
                 >
-                  {message.text}
-                </div>
-              </div>
-            ))}
-
-            {thinking && (
-              <div className="flex justify-start">
-                <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm bg-[#f1f5f9] px-3 py-2.5">
-                  {[0, 150, 300].map((delay) => (
-                    <span
-                      key={delay}
-                      style={{ animationDelay: `${delay}ms` }}
-                      className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#94a3b8]"
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Composer */}
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              submit(draft);
-            }}
-            className="flex items-center gap-2 border-t border-border bg-white px-3 py-2.5"
-          >
-            <input
-              ref={inputRef}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Ask about your budgets..."
-              disabled={thinking}
-              className={cn(
-                "min-w-0 flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs outline-none transition-all",
-                "placeholder:text-muted-foreground",
-                "focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/20",
-                "disabled:cursor-not-allowed disabled:bg-muted",
-              )}
-            />
-            <button
-              type="submit"
-              aria-label="Send"
-              disabled={!draft.trim() || thinking}
-              className={cn(
-                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white transition-colors",
-                "bg-[#1e3a8a] hover:bg-[#1e40af]",
-                "disabled:cursor-not-allowed disabled:opacity-40",
-              )}
-            >
-              <Send className="h-4 w-4" />
-            </button>
-          </form>
+                  <Send className="h-4 w-4" />
+                </button>
+              </form>
+            </>
+          )}
         </div>
       )}
     </>
