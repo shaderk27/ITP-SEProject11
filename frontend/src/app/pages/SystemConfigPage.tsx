@@ -37,8 +37,8 @@ const generateVenueTags = (rawCode?: string | null, rawName?: string | null) => 
       }
     }
     return Array.from(tags).join(", ");
-  } catch (err) {
-    return ""; 
+  } catch {
+    return "";
   }
 };
 
@@ -66,7 +66,7 @@ export function SystemConfigPage() {
 
   const [isLabModalOpen, setIsLabModalOpen] = useState(false);
   const [newLabForm, setNewLabForm] = useState({ lab_code: "", lab_name: "", lab_group_id: "", ic_name: "", ic_email: "", venue: "", budgets: {} as Record<string, number> });
-  
+
   // Track which group's unallocated balance to validate against
   const [activeGroupValidation, setActiveGroupValidation] = useState<{ id: number, unallocated: number, name: string } | null>(null);
 
@@ -178,7 +178,7 @@ export function SystemConfigPage() {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE", credentials: "include" });
       if (res.ok) fetchConfigData();
       else alert(await readErrorDetail(res, `Failed to delete ${name}.`));
-    } catch (error) { alert("A network error occurred while trying to delete."); }
+    } catch { alert("A network error occurred while trying to delete."); }
   };
 
   const openEditGroup = (group: any) => {
@@ -205,7 +205,7 @@ export function SystemConfigPage() {
     const parentGroup = labGroups.find(g => g.id === lab.group_id);
     const labCurrentTotal = Object.values(lab.budgets as Record<string, number>).reduce((a, b) => a + b, 0);
     setActiveGroupValidation(parentGroup ? { id: parentGroup.id, unallocated: parentGroup.unallocated + labCurrentTotal, name: parentGroup.name } : null);
-    
+
     setNewLabForm({
       lab_code: lab.code || "",
       lab_name: lab.name || "",
@@ -598,7 +598,7 @@ export function SystemConfigPage() {
               const method = editingGroupId ? "PUT" : "POST";
               handleSave(endpoint, method, { ...newGroupForm, assigned_lab_ids: selectedLabIds }, resetGroupModal);
             }} className="space-y-4 p-6">
-              
+
               <div className="grid grid-cols-2 gap-4">
                   <div>
                       <label className="text-sm font-medium">Group Name</label>
@@ -609,7 +609,7 @@ export function SystemConfigPage() {
                       <input type="text" required className="w-full mt-1 p-2 border rounded-md" placeholder="e.g. WBS-ICT" value={newGroupForm.wbs_code} onChange={(e) => setNewGroupForm({...newGroupForm, wbs_code: e.target.value})} />
                   </div>
               </div>
-              
+
               <div className="mt-4 p-4 border rounded-md bg-blue-50/50 border-blue-100">
                   <label className="text-sm font-bold text-[#1e3a8a] flex items-center mb-2">
                     <DollarSign className="h-4 w-4 mr-1" /> Total Lab Group Budget
@@ -657,16 +657,16 @@ export function SystemConfigPage() {
               </div>
               <Button variant="ghost" size="sm" onClick={resetLabModal}><X className="h-5 w-5" /></Button>
             </div>
-            
+
             <form onSubmit={(e) => {
               e.preventDefault();
-              if (isBudgetExceeded) return; 
+              if (isBudgetExceeded) return;
               const base = editingLabId ? `/api/config/labs/${editingLabId}` : "/api/config/labs";
               const endpoint = `${base}?period_id=${selectedPeriodId}`;
               const method = editingLabId ? "PUT" : "POST";
               handleSave(endpoint, method, { ...newLabForm, lab_group_id: Number(newLabForm.lab_group_id) }, resetLabModal);
             }} className="p-6">
-              
+
               <div className="grid grid-cols-2 gap-5">
                 <div>
                   <label className="text-sm font-medium text-gray-700">Lab Code</label>
@@ -688,7 +688,7 @@ export function SystemConfigPage() {
                 <div className="col-span-2 mt-2 pt-5 border-t border-gray-200">
                   <div className="flex justify-between items-end mb-4">
                     <h4 className="font-bold text-gray-900 text-lg">Distribute Budgets</h4>
-                    
+
                     <div className={`text-right p-3 rounded-lg border ${isBudgetExceeded ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
                         <p className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Unallocated Group Budget</p>
                         <p className={`text-lg font-black ${isBudgetExceeded ? 'text-red-600' : 'text-green-700'}`}>
@@ -696,7 +696,7 @@ export function SystemConfigPage() {
                         </p>
                     </div>
                   </div>
-                  
+
                   {isBudgetExceeded && (
                     <div className="mb-4 p-3 bg-red-100 text-red-700 text-sm font-semibold rounded-md flex items-center">
                         <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
