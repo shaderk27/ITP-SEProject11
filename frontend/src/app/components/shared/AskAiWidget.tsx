@@ -11,10 +11,10 @@
  * holding a fixed offset so nothing jumps mid-drag, then settles into a
  * proper placement when the pill is dropped.
  *
- * UI ONLY: no model is wired up yet. `sendToAssistant` below is the single
- * seam to replace when the real backend lands (see backend/app/api/chatbot.py,
- * which already exposes /api/chatbot/query-context). Everything else here is
- * presentation and can stay as-is.
+ * The widget calls the authenticated chatbot context endpoint and formats the
+ * returned role-scoped budget data into deterministic answers. LLM/RAG answer
+ * generation can later replace the answer-generation layer without changing
+ * the popup shell.
  */
 
 import {
@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
+import { askBudgetAssistant } from "../../services/chatbotService";
 
 const LAUNCHER_WIDTH = 116;
 const LAUNCHER_HEIGHT = 44;
@@ -220,7 +221,7 @@ function suggestionsFor(role: string | undefined): string[] {
     return [
       "What is my team's total spending?",
       "Which of my labs needs attention?",
-      "How many PRs are waiting on my review?",
+      "Show recent approved purchases for my team",
     ];
   }
   if (role === "labic") {
@@ -237,19 +238,8 @@ function suggestionsFor(role: string | undefined): string[] {
   ];
 }
 
-/**
- * Stand-in for the real assistant call.
- *
- * TODO(ITP2): replace with a POST to /api/chatbot/query-context and render the
- * model's answer. Kept async so the calling code already handles latency.
- */
 async function sendToAssistant(question: string): Promise<string> {
-  await new Promise((resolve) => setTimeout(resolve, 700));
-  return (
-    `The assistant isn't connected yet — this is the interface only.\n\n` +
-    `Once it's wired up, "${question}" will be answered from your own budget ` +
-    `data, scoped to what your role can see.`
-  );
+  return askBudgetAssistant(question);
 }
 
 export function AskAiWidget() {
@@ -480,6 +470,15 @@ export function AskAiWidget() {
         role: "assistant",
         text: reply,
       });
+    } catch (error) {
+      appendMessage(id, {
+        id: messageIdRef.current++,
+        role: "assistant",
+        text:
+          error instanceof Error
+            ? `I could not retrieve chatbot context: ${error.message}`
+            : "I could not retrieve chatbot context. Please try again.",
+      });
     } finally {
       setThinking(false);
     }
@@ -704,10 +703,10 @@ export function AskAiWidget() {
 
           {view === "chat" && (
             <>
-              {/* Not-wired-up notice */}
+              {/* Backend-grounded status */}
               <div className="border-b border-[#bfdbfe] bg-[#f0f9ff] px-3 py-2">
                 <p className="text-xs text-[#1e40af]">
-                  Preview — the assistant isn't connected to a model yet.
+                  Connected to role-scoped budget context. LLM/RAG generation is not enabled yet.
                 </p>
               </div>
 
