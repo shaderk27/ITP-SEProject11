@@ -68,6 +68,75 @@ interface ChatbotContextResponse {
   notes: string[];
 }
 
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AssistantReply {
+  text: string;
+  /** "ai" = LLM answer from /ask; "rules" = template fallback from /query-context. */
+  source: "ai" | "rules";
+  /** Short provenance line shown under the answer. */
+  note: string;
+}
+
+interface ChatbotAskResponse {
+  answer: string;
+  scope: ChatbotScope;
+  model: string;
+  period_label: string;
+  record_counts: Record<string, number>;
+  focus: string[];
+  notes: string[];
+}
+
+/**
+ * Ask AI entry point. Tries the LLM endpoint first; if the AI is unavailable
+ * (no key configured, provider down, 5xx) falls back to the rule-based
+ * answers so the widget keeps working. Auth and validation errors surface.
+ */
+export async function askAssistant(
+  question: string,
+  history: ChatTurn[],
+): Promise<AssistantReply> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}/api/chatbot/ask`, {
+      ...FETCH_OPTS,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, history }),
+    });
+  } catch {
+    return askRulesFallback(question);
+  }
+
+  if (response.status >= 500) {
+    return askRulesFallback(question);
+  }
+  if (!response.ok) {
+    const detail = await readErrorDetail(response);
+    throw new Error(detail || `Ask AI failed (${response.status}).`);
+  }
+
+  const data = (await response.json()) as ChatbotAskResponse;
+  const lines = data.record_counts.budget_lines ?? 0;
+  return {
+    text: data.answer,
+    source: "ai",
+    note: `AI answer · ${data.period_label} · from ${lines} budget line${lines === 1 ? "" : "s"} in your scope`,
+  };
+}
+
+async function askRulesFallback(question: string): Promise<AssistantReply> {
+  return {
+    text: await askBudgetAssistant(question),
+    source: "rules",
+    note: "AI unavailable · basic rule-based answer",
+  };
+}
+
 export async function askBudgetAssistant(question: string): Promise<string> {
   const queryType = classifyQuestion(question);
   const response = await fetch(`${API_BASE_URL}/api/chatbot/query-context`, {

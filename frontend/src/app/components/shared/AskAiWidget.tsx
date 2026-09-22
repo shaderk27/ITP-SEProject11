@@ -11,10 +11,10 @@
  * holding a fixed offset so nothing jumps mid-drag, then settles into a
  * proper placement when the pill is dropped.
  *
- * The widget calls the authenticated chatbot context endpoint and formats the
- * returned role-scoped budget data into deterministic answers. LLM/RAG answer
- * generation can later replace the answer-generation layer without changing
- * the popup shell.
+ * Questions go to POST /api/chatbot/ask, which answers with an LLM from
+ * role-scoped budget data. If the AI is unavailable the service falls back to
+ * the rule-based answers built on /api/chatbot/query-context, so the popup
+ * keeps working without an API key. See services/chatbotService.ts.
  */
 
 import {
@@ -35,7 +35,7 @@ import {
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
-import { askBudgetAssistant } from "../../services/chatbotService";
+import { askAssistant, type ChatTurn } from "../../services/chatbotService";
 
 const LAUNCHER_WIDTH = 116;
 const LAUNCHER_HEIGHT = 44;
@@ -60,6 +60,8 @@ interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   text: string;
+  /** Provenance line under an assistant answer (AI vs fallback, period, counts). */
+  note?: string;
 }
 
 /** One saved thread. Persisted per browser; nothing leaves the device. */
@@ -238,8 +240,13 @@ function suggestionsFor(role: string | undefined): string[] {
   ];
 }
 
-async function sendToAssistant(question: string): Promise<string> {
-  return askBudgetAssistant(question);
+/** Earlier turns sent with each question so follow-ups ("and FCB?") work. */
+const HISTORY_TURNS = 6;
+
+function historyFrom(messages: ChatMessage[]): ChatTurn[] {
+  return messages
+    .slice(-HISTORY_TURNS)
+    .map((m) => ({ role: m.role, content: m.text }));
 }
 
 export function AskAiWidget() {
@@ -452,6 +459,7 @@ export function AskAiWidget() {
     if (!current || current.messages.length === 0) {
       title = titleFrom(trimmed);
     }
+    const history = historyFrom(current?.messages ?? []);
 
     appendMessage(
       id,
@@ -464,11 +472,12 @@ export function AskAiWidget() {
     );
     setThinking(true);
     try {
-      const reply = await sendToAssistant(trimmed);
+      const reply = await askAssistant(trimmed, history);
       appendMessage(id, {
         id: messageIdRef.current++,
         role: "assistant",
-        text: reply,
+        text: reply.text,
+        note: reply.note,
       });
     } catch (error) {
       appendMessage(id, {
@@ -476,8 +485,8 @@ export function AskAiWidget() {
         role: "assistant",
         text:
           error instanceof Error
-            ? `I could not retrieve chatbot context: ${error.message}`
-            : "I could not retrieve chatbot context. Please try again.",
+            ? `Sorry, I couldn't answer that: ${error.message}`
+            : "Sorry, I couldn't answer that. Please try again.",
       });
     } finally {
       setThinking(false);
@@ -703,10 +712,11 @@ export function AskAiWidget() {
 
           {view === "chat" && (
             <>
-              {/* Backend-grounded status */}
+              {/* Grounding notice */}
               <div className="border-b border-[#bfdbfe] bg-[#f0f9ff] px-3 py-2">
                 <p className="text-xs text-[#1e40af]">
-                  Connected to role-scoped budget context. LLM/RAG generation is not enabled yet.
+                  AI answers use only the budget data your role can see. Check
+                  key figures on the dashboard before acting on them.
                 </p>
               </div>
 
@@ -757,15 +767,22 @@ export function AskAiWidget() {
                       message.role === "user" ? "justify-end" : "justify-start",
                     )}
                   >
-                    <div
-                      className={cn(
-                        "max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-xs leading-relaxed",
-                        message.role === "user"
-                          ? "rounded-br-sm bg-[#1e3a8a] text-white"
-                          : "rounded-bl-sm bg-[#f1f5f9] text-foreground",
+                    <div className="flex max-w-[85%] flex-col gap-1">
+                      <div
+                        className={cn(
+                          "whitespace-pre-wrap rounded-2xl px-3 py-2 text-xs leading-relaxed",
+                          message.role === "user"
+                            ? "rounded-br-sm bg-[#1e3a8a] text-white"
+                            : "rounded-bl-sm bg-[#f1f5f9] text-foreground",
+                        )}
+                      >
+                        {message.text}
+                      </div>
+                      {message.note && (
+                        <p className="px-1 text-[10px] text-muted-foreground">
+                          {message.note}
+                        </p>
                       )}
-                    >
-                      {message.text}
                     </div>
                   </div>
                 ))}
