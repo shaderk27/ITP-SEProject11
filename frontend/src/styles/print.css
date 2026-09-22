@@ -1,0 +1,192 @@
+/*
+ * Print / "Save as PDF" rules.
+ *
+ * The app shell is a fixed-height flex layout with a scrolling <main>, which
+ * by default prints only the sliver that happens to be on screen. These rules
+ * unwrap that shell so the full page flows across sheets, drop the chrome
+ * (sidebar, header, filter bar, interactive controls) that means nothing on
+ * paper, and keep cards and charts from being sliced in half at a page break.
+ *
+ * Charts are Recharts, i.e. inline SVG, so they print as vectors — no
+ * rasterising step and no dependency on a canvas-capture library.
+ *
+ * Note: the date/URL/page-number strip Chrome adds at the top and bottom is
+ * the browser's own, not ours. It is switched off with "Headers and footers"
+ * under More settings in the print dialog; CSS cannot remove it.
+ */
+
+/* Print-only blocks are hidden on screen. */
+.print-only {
+  display: none;
+}
+
+@media print {
+  /*
+   * Landscape. The dashboard's charts are laid out for a ~1000px-wide column;
+   * A4 portrait only offers ~700px of printable width, which squeezed
+   * twenty-bar charts into an unreadable strip. Landscape gives ~1050px, so
+   * charts print at close to their on-screen proportions.
+   */
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  /* --- Unwrap the fixed-height, scrolling app shell --- */
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  #root,
+  #root > div {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  main {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex: none !important;
+  }
+
+  /* The page's own scroll container (h-full overflow-auto). */
+  main > div {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  /* --- Drop the chrome --- */
+  aside,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Interactive controls carry no meaning on paper. */
+  select,
+  input,
+  [role="combobox"] {
+    display: none !important;
+  }
+
+  /* Keep button text (chart slot titles are buttons) but strip the affordance. */
+  button {
+    border: 0 !important;
+    background: transparent !important;
+    padding: 0 !important;
+    color: #0f172a !important;
+  }
+  button svg {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  /* --- Recharts ---
+   * Two things go wrong when a Recharts chart is printed.
+   *
+   * 1. ResponsiveContainer freezes the SVG at whatever pixel width it measured
+   *    on screen. Because the surface carries a viewBox, giving it width:100%
+   *    and height:auto lets it scale to the printed column instead, which also
+   *    scales its axis labels up in proportion.
+   * 2. The legend is plain HTML, not part of the SVG, so it does NOT scale
+   *    with the chart. Left alone it inherits the 16px root font and ends up
+   *    dwarfing the chart it labels, and overflowing the page edge. Pin it to
+   *    a print-appropriate size and let it wrap.
+   */
+  .recharts-responsive-container,
+  .recharts-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .recharts-wrapper > svg.recharts-surface {
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  .recharts-legend-wrapper {
+    /* Recharts pins this with an inline width in px; let it use the full
+       column so the items wrap instead of being clipped. */
+    width: 100% !important;
+    left: 0 !important;
+    overflow: visible !important;
+    white-space: normal !important;
+  }
+
+  .recharts-legend-wrapper,
+  .recharts-legend-wrapper * {
+    font-size: 7.5pt !important;
+    line-height: 1.3 !important;
+  }
+
+  .recharts-default-legend {
+    text-align: center !important;
+  }
+
+  .recharts-legend-item {
+    display: inline-flex !important;
+    align-items: center !important;
+    margin-right: 10px !important;
+  }
+
+  /* --- Pagination --- */
+  .print-keep {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .print-break-before {
+    break-before: page;
+    page-break-before: always;
+  }
+
+  /* Cards: flatten shadows, keep a hairline so they read as blocks. */
+  [data-slot="card"] {
+    box-shadow: none !important;
+    border: 1px solid #e5e7eb !important;
+  }
+
+  /*
+   * Keep a chart card whole, but let the Budget Breakdown card flow: its
+   * table is taller than a single sheet, so break-inside:avoid on it is
+   * unsatisfiable and the browser silently splits it anyway — which is what
+   * stranded a bare legend on its own trailing page.
+   */
+  [data-slot="card"]:not(:has(table)) {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  [data-slot="card"]:has(table) {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
+  /* Force backgrounds/colours to print (Chrome strips them otherwise). */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Tables spanning pages should repeat their header. */
+  thead {
+    display: table-header-group;
+  }
+  tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

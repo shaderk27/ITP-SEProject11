@@ -379,6 +379,8 @@ export function AskAiWidget() {
         }}
         className={cn(
           "fixed z-[41] flex items-center justify-center gap-2 rounded-full",
+          // Screen-only chrome; never wanted on a printed page.
+          "no-print",
           "bg-[#1e3a8a] text-white shadow-lg ring-1 ring-black/5",
           "transition-colors hover:bg-[#1e40af]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1e3a8a] focus-visible:ring-offset-2",
@@ -404,7 +406,7 @@ export function AskAiWidget() {
             transition: dragging ? "none" : "left 150ms ease, top 150ms ease",
           }}
           className={cn(
-            "fixed z-40 flex flex-col overflow-hidden rounded-xl",
+            "fixed z-40 flex flex-col overflow-hidden rounded-xl no-print",
             "border border-border bg-white shadow-2xl",
             "animate-in fade-in zoom-in-95 duration-150",
           )}
