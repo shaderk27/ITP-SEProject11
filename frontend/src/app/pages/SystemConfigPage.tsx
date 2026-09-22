@@ -124,6 +124,7 @@ export function SystemConfigPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (selectedPeriodId != null) fetchConfigData(selectedPeriodId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPeriodId]);
