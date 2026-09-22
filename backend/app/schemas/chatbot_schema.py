@@ -98,3 +98,26 @@ class ChatbotContextResponse(BaseModel):
     budget_context: list[ChatbotBudgetContext]
     purchase_lines: list[ChatbotPurchaseLineContext]
     notes: list[str]
+
+
+class ChatbotHistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., max_length=4000)
+
+
+class ChatbotAskRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1000)
+    history: list[ChatbotHistoryTurn] = Field(
+        default_factory=list,
+        description="Earlier turns of this chat, oldest first, for follow-up questions.",
+    )
+
+
+class ChatbotAskResponse(BaseModel):
+    answer: str
+    scope: ChatbotScope
+    model: str
+    period_label: str
+    record_counts: dict[str, int]
+    focus: list[str]
+    notes: list[str]
