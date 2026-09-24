@@ -68,7 +68,7 @@ def answer_question(
     fy_start, fy_end = fiscal_year_bounds()
     period_label = (
         f"FY{fy_start.year}/{str(fy_end.year)[-2:]} "
-        f"({fy_start:%-d %b %Y} to {fy_end:%-d %b %Y})"
+        f"({_format_day_month_year(fy_start)} to {_format_day_month_year(fy_end)})"
     )
 
     # Every query type returns the same rows, so the type is only a label here.
@@ -112,6 +112,10 @@ def answer_question(
         focus=facts.get("focus", {}).get("matched", []),
         notes=context.notes,
     )
+
+
+def _format_day_month_year(value) -> str:
+    return f"{value.day} {value:%b %Y}"
 
 
 # ---------------------------------------------------------------------------
