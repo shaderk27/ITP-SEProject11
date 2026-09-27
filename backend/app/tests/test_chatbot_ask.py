@@ -86,11 +86,138 @@ def test_lab_ic_gets_no_lab_group_summary():
     assert "lab_groups" not in facts
 
 
-def test_generate_answer_without_key_raises_unavailable(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+_LLM_ENV = (
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+)
 
+
+@pytest.fixture
+def llm_env(monkeypatch):
+    """Clear every LLM setting (the real .env may have some), then set only ours."""
+    for name in _LLM_ENV:
+        monkeypatch.setenv(name, "")
+
+    def _set(**values: str) -> None:
+        for name, value in values.items():
+            monkeypatch.setenv(name, value)
+
+    return _set
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, body: dict):
+        self.status_code = status_code
+        self._body = body
+        self.text = str(body)
+
+    def json(self) -> dict:
+        return self._body
+
+
+def _ok(text: str = "ok") -> _FakeResponse:
+    return _FakeResponse(200, {"choices": [{"message": {"content": text}}]})
+
+
+@pytest.fixture
+def fake_post(monkeypatch):
+    """Record every outgoing request and answer from a queue of responses."""
+    calls: list[dict] = []
+    queue: list[_FakeResponse] = []
+
+    def _post(url, headers, json, timeout):
+        calls.append({"url": url, "headers": headers, "json": dict(json)})
+        return queue.pop(0) if queue else _ok()
+
+    monkeypatch.setattr(llm_client.httpx, "post", _post)
+    return calls, queue
+
+
+def test_generate_answer_without_key_raises_unavailable(llm_env):
     with pytest.raises(llm_client.LLMUnavailableError):
         llm_client.generate_answer([{"role": "user", "content": "hi"}])
+
+
+def test_defaults_to_openrouter(llm_env, fake_post):
+    calls, _ = fake_post
+    llm_env(LLM_API_KEY="sk-or-test")
+
+    assert llm_client.generate_answer([{"role": "user", "content": "hi"}]) == "ok"
+    assert calls[0]["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert calls[0]["headers"]["Authorization"] == "Bearer sk-or-test"
+    assert "X-OpenRouter-Title" in calls[0]["headers"]
+    assert calls[0]["json"]["model"] == llm_client.DEFAULT_MODEL
+
+
+def test_old_openrouter_env_names_still_work(llm_env, fake_post):
+    calls, _ = fake_post
+    llm_env(OPENROUTER_API_KEY="sk-or-legacy", OPENROUTER_MODEL="openai/gpt-4o-mini")
+
+    assert llm_client.llm_configured()
+    llm_client.generate_answer([{"role": "user", "content": "hi"}])
+    assert calls[0]["headers"]["Authorization"] == "Bearer sk-or-legacy"
+    assert calls[0]["json"]["model"] == "openai/gpt-4o-mini"
+
+
+def test_switching_to_openai_is_env_only(llm_env, fake_post):
+    calls, _ = fake_post
+    llm_env(
+        LLM_API_KEY="sk-proj-test",
+        LLM_BASE_URL="https://api.openai.com/v1/",
+        LLM_MODEL="gpt-4o-mini",
+    )
+
+    llm_client.generate_answer([{"role": "user", "content": "hi"}])
+    assert calls[0]["url"] == "https://api.openai.com/v1/chat/completions"
+    assert calls[0]["headers"]["Authorization"] == "Bearer sk-proj-test"
+    assert "X-OpenRouter-Title" not in calls[0]["headers"]
+    assert calls[0]["json"]["model"] == "gpt-4o-mini"
+
+
+def test_new_env_names_win_over_old_ones(llm_env, fake_post):
+    calls, _ = fake_post
+    llm_env(OPENROUTER_API_KEY="sk-or-old", LLM_API_KEY="sk-new")
+
+    llm_client.generate_answer([{"role": "user", "content": "hi"}])
+    assert calls[0]["headers"]["Authorization"] == "Bearer sk-new"
+
+
+def test_retries_without_temperature_when_model_rejects_it(llm_env, fake_post):
+    calls, queue = fake_post
+    llm_env(LLM_API_KEY="k", LLM_BASE_URL="https://api.openai.com/v1")
+    queue.extend(
+        [
+            _FakeResponse(
+                400,
+                {
+                    "error": {
+                        "message": "Unsupported value: 'temperature'",
+                        "param": "temperature",
+                    }
+                },
+            ),
+            _ok("second try"),
+        ]
+    )
+
+    assert (
+        llm_client.generate_answer([{"role": "user", "content": "hi"}]) == "second try"
+    )
+    assert "temperature" in calls[0]["json"]
+    assert "temperature" not in calls[1]["json"]
+
+
+def test_other_errors_are_not_retried(llm_env, fake_post):
+    calls, queue = fake_post
+    llm_env(LLM_API_KEY="bad")
+    queue.append(_FakeResponse(401, {"error": {"message": "Invalid API key"}}))
+
+    with pytest.raises(llm_client.LLMUnavailableError, match="401"):
+        llm_client.generate_answer([{"role": "user", "content": "hi"}])
+    assert len(calls) == 1
 
 
 def test_answer_question_sends_scoped_facts_to_llm(monkeypatch):
