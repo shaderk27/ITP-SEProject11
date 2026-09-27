@@ -20,6 +20,7 @@ from app.dependencies.auth import get_current_user
 from app.models.config import BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
 from app.models.auth import User
+from app.services.records_insights_service import build_export_insights
 from app.services.report_service import ReportMeta, build_pr_records_workbook
 from app.utils.date_range import date_range_bounds
 
@@ -163,7 +164,10 @@ def export_committed_prs(
         lab_group_label=_lab_group_label(prs, lab_group, role_name),
     )
 
-    stream = build_pr_records_workbook(prs, meta)
+    # Extra sheets (trail / change history / budget impact) — built from the
+    # same scoped PR list, so they can't show anything the page doesn't.
+    insights = build_export_insights(db, prs, role_name)
+    stream = build_pr_records_workbook(prs, meta, insights)
     filename = (
         f"PR_Records_{role_name}_{meta.generated_at.strftime('%Y%m%d_%H%M')}.xlsx"
     )

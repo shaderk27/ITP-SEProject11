@@ -161,9 +161,16 @@ def test_non_matching_search_yields_empty() -> None:
 
 
 # ─── 3. Workbook shape ───────────────────────────────────────────────────
-def test_workbook_has_both_sheets() -> None:
+def test_workbook_has_all_sheets() -> None:
     wb = _load([_pr(1)])
-    assert wb.sheetnames == ["PR Records", "Summary"]
+    assert wb.sheetnames == [
+        "PR Records",
+        "Summary",
+        "Action Items",
+        "Budget Impact",
+        "Change History",
+        "Classification Trail",
+    ]
 
 
 def test_cover_block_reports_scope_and_filters() -> None:
@@ -572,3 +579,166 @@ def test_export_honours_the_search_filter(db, export_client) -> None:
 def test_export_rejects_unknown_role(db, export_client) -> None:
     export_client.login_as("vendor")
     assert export_client.get("/api/records/export").status_code == 403
+
+
+# ─── 4. System-derived sheets (new info beyond the uploaded file) ────────
+def _sheet_values(ws) -> list[tuple]:
+    return [
+        tuple(v for v in row if v not in (None, ""))
+        for row in ws.iter_rows(values_only=True)
+    ]
+
+
+def test_action_items_flags_same_item_and_amount_on_different_prs() -> None:
+    prs = [
+        _pr(
+            1,
+            number="PR-A",
+            lines=[_line(1, item="Desktop  Workstation", amount="5000")],
+        ),
+        _pr(
+            2,
+            number="PR-B",
+            lines=[_line(2, item="desktop workstation", amount="5000")],
+        ),
+        _pr(
+            3, number="PR-C", lines=[_line(3, item="Desktop workstation", amount="99")]
+        ),
+    ]
+    rows = _sheet_values(_load(prs)["Action Items"])
+    matches = [r for r in rows if r and r[0] == "#1"]
+    assert {r[1] for r in matches} == {"PR-A", "PR-B"}
+    assert ("Possible duplicate purchases", 1) in rows
+
+
+def test_action_items_ages_pending_lines_from_pr_date() -> None:
+    # _meta() generates on 22 Sep 2026; PR date 12 Apr 2026 → 163 days.
+    prs = [_pr(1, lines=[_line(1, status="Pending Approval")])]
+    rows = _sheet_values(_load(prs)["Action Items"])
+    pending = next(r for r in rows if r and r[0] == "PR-0001")
+    assert pending[2] == 163
+    assert ("Pending lines older than 30 days", 1) in rows
+
+
+def test_action_items_totals_rejected_value() -> None:
+    prs = [
+        _pr(1, lines=[_line(1, amount="300", status="Rejected")]),
+        _pr(2, number="PR-0002", lines=[_line(2, amount="50")]),
+    ]
+    rows = _sheet_values(_load(prs)["Action Items"])
+    assert ("Rejected value (SGD)", 300) in rows
+
+
+def test_new_sheets_say_so_when_there_is_nothing_to_show() -> None:
+    wb = _load([_pr(1)])
+    text = str(_sheet_values(wb["Change History"]))
+    assert "No PR in this export has changed between uploads." in text
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        (10.0, 40.0, ""),
+        (40.0, 60.0, "Crossed 50% alert"),
+        (40.0, 96.0, "Crossed 95% alert"),
+        (90.0, 100.0, "Used up the lab budget"),
+        (90.0, 120.0, "Pushed lab over budget"),
+        (110.0, 120.0, "Lab was already over budget"),
+    ],
+)
+def test_threshold_flag_names_the_highest_alert_crossed(
+    before, after, expected
+) -> None:
+    from app.services.records_insights_service import _threshold_flag
+
+    assert _threshold_flag(before, after) == expected
+
+
+def test_budget_impact_runs_through_the_fiscal_year(db) -> None:
+    """Used Before/After accumulates Approved + Pending per lab, in PR-date order."""
+    from app.api.records import _scoped_committed_prs
+    from app.models.config import Budget, BudgetPeriod
+    from app.models.staging import PurchaseRequest, PurchaseRequestLine
+    from app.services.records_insights_service import build_export_insights
+
+    pairs, category_id = _two_groups(db)
+    group, lab = pairs[0]
+    period = db.query(BudgetPeriod).filter(BudgetPeriod.year_no == 2031).first()
+    if period is None:
+        period = BudgetPeriod(
+            period_name="FY2031-test",
+            year_no=2031,
+            start_date=date(2031, 4, 1),
+            end_date=date(2032, 3, 31),
+        )
+        db.add(period)
+        db.flush()
+    db.add(
+        Budget(
+            period_id=period.period_id,
+            lab_group_id=group.lab_group_id,
+            lab_id=lab.lab_id,
+            category_id=category_id,
+            budget_amount="1000.00",
+            # Local schema has updated_at NOT NULL; the model leaves it to onupdate.
+            updated_at=datetime.now(),
+        )
+    )
+    for number, when, amount, status in (
+        ("PR-IMP-1", date(2031, 5, 1), "400.00", "Approved"),
+        ("PR-IMP-2", date(2031, 6, 1), "300.00", "Rejected"),
+        ("PR-IMP-3", date(2031, 7, 1), "500.00", "Pending"),
+    ):
+        pr = PurchaseRequest(
+            source_pr_number=number,
+            request_date=when,
+            grand_total_sgd=amount,
+            lab_group_id=group.lab_group_id,
+            pr_status=status,
+        )
+        db.add(pr)
+        db.flush()
+        db.add(
+            PurchaseRequestLine(
+                pr_id=pr.pr_id,
+                line_no=1,
+                amount_gst=amount,
+                currency_code="SGD",
+                lab_id=lab.lab_id,
+                category_id=category_id,
+                pr_status=status,
+            )
+        )
+    db.flush()
+
+    from unittest.mock import MagicMock
+
+    from app.models.auth import User
+
+    admin = User(user_id=999, email="a@test.com", role=MagicMock(role_name="admin"))
+    prs = _scoped_committed_prs(
+        db, admin, "admin", "all", date(2031, 4, 1), date(2032, 3, 31)
+    )
+    impact = {e.pr_number: e for e in build_export_insights(db, prs, "admin").impact}
+
+    assert (impact["PR-IMP-1"].used_before, impact["PR-IMP-1"].used_after) == (0, 400)
+    assert impact["PR-IMP-2"].flag == "Not counted (Rejected)"
+    assert (impact["PR-IMP-3"].used_before, impact["PR-IMP-3"].used_after) == (400, 900)
+    assert impact["PR-IMP-3"].flag == "Crossed 80% alert"
+    assert impact["PR-IMP-3"].balance_after == 100
+
+
+def test_teamlead_extra_sheets_exclude_other_groups(db, export_client) -> None:
+    pairs, category_id = _two_groups(db)
+    (group_a, lab_a), (group_b, lab_b) = pairs
+    _make_committed_pr(db, "PR-X-MINE", group_a.lab_group_id, lab_a.lab_id, category_id)
+    _make_committed_pr(
+        db, "PR-X-THEIRS", group_b.lab_group_id, lab_b.lab_id, category_id
+    )
+
+    export_client.login_as("teamlead", lab_group_id=group_a.lab_group_id)
+    wb = load_workbook(BytesIO(export_client.get("/api/records/export").content))
+    for name in ("Action Items", "Budget Impact", "Classification Trail"):
+        text = str(_sheet_values(wb[name]))
+        assert "PR-X-THEIRS" not in text
+    assert "PR-X-MINE" in str(_sheet_values(wb["Budget Impact"]))
