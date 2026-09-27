@@ -21,6 +21,10 @@ completions API works; switching provider is an .env change, not a code one:
 
 The older OPENROUTER_API_KEY / OPENROUTER_MODEL names are still read when the
 LLM_* ones are not set, so existing .env files keep working.
+
+TODO(client-handover): OpenRouter is only the interim provider while the
+client sets up OpenAI. Every OpenRouter mention in this file (tagged
+TODO(client-handover)) will be removed before final submission to the client.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ load_environment()
 
 logger = logging.getLogger(__name__)
 
+# TODO(client-handover): OpenRouter defaults — will be removed before final
+# submission to the client (switch to https://api.openai.com/v1 + gpt-4o-mini).
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "google/gemini-2.5-flash-lite"
 TIMEOUT_SECONDS = 30.0
@@ -45,6 +51,8 @@ class LLMUnavailableError(Exception):
     """The model could not produce an answer (no key, network, provider error)."""
 
 
+# TODO(client-handover): the OPENROUTER_* fallback names read through _env()
+# will be removed before final submission to the client (read LLM_* only).
 def _env(name: str, legacy: str) -> str:
     return os.getenv(name, "").strip() or os.getenv(legacy, "").strip()
 
@@ -69,6 +77,8 @@ def generate_answer(messages: list[dict[str, str]], temperature: float = 0.2) ->
 
     base_url = llm_base_url()
     headers = {"Authorization": f"Bearer {api_key}"}
+    # TODO(client-handover): OpenRouter-only header — will be removed before
+    # final submission to the client.
     if "openrouter.ai" in base_url:
         # OpenRouter-only app attribution header; other providers don't need it.
         headers["X-OpenRouter-Title"] = "SIT Lab Budget Monitoring"
@@ -93,6 +103,8 @@ def generate_answer(messages: list[dict[str, str]], temperature: float = 0.2) ->
 
     body = response.json()
     # OpenRouter can report provider failures inside a 200 response.
+    # TODO(client-handover): OpenRouter wording — will be removed before final
+    # submission to the client. Keep the check itself; it is harmless on OpenAI.
     if "error" in body:
         logger.warning("LLM provider error payload: %s", body["error"])
         raise LLMUnavailableError("AI provider reported an error.")

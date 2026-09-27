@@ -86,6 +86,8 @@ def test_lab_ic_gets_no_lab_group_summary():
     assert "lab_groups" not in facts
 
 
+# TODO(client-handover): the OPENROUTER_* names below will be removed before
+# final submission to the client.
 _LLM_ENV = (
     "LLM_API_KEY",
     "LLM_BASE_URL",
@@ -141,6 +143,8 @@ def test_generate_answer_without_key_raises_unavailable(llm_env):
         llm_client.generate_answer([{"role": "user", "content": "hi"}])
 
 
+# TODO(client-handover): OpenRouter test — will be removed (or changed to
+# assert the OpenAI default) before final submission to the client.
 def test_defaults_to_openrouter(llm_env, fake_post):
     calls, _ = fake_post
     llm_env(LLM_API_KEY="sk-or-test")
@@ -152,6 +156,8 @@ def test_defaults_to_openrouter(llm_env, fake_post):
     assert calls[0]["json"]["model"] == llm_client.DEFAULT_MODEL
 
 
+# TODO(client-handover): OpenRouter test — will be removed before final
+# submission to the client.
 def test_old_openrouter_env_names_still_work(llm_env, fake_post):
     calls, _ = fake_post
     llm_env(OPENROUTER_API_KEY="sk-or-legacy", OPENROUTER_MODEL="openai/gpt-4o-mini")
@@ -173,10 +179,14 @@ def test_switching_to_openai_is_env_only(llm_env, fake_post):
     llm_client.generate_answer([{"role": "user", "content": "hi"}])
     assert calls[0]["url"] == "https://api.openai.com/v1/chat/completions"
     assert calls[0]["headers"]["Authorization"] == "Bearer sk-proj-test"
+    # TODO(client-handover): OpenRouter check — will be removed before final
+    # submission to the client.
     assert "X-OpenRouter-Title" not in calls[0]["headers"]
     assert calls[0]["json"]["model"] == "gpt-4o-mini"
 
 
+# TODO(client-handover): OpenRouter test — will be removed before final
+# submission to the client.
 def test_new_env_names_win_over_old_ones(llm_env, fake_post):
     calls, _ = fake_post
     llm_env(OPENROUTER_API_KEY="sk-or-old", LLM_API_KEY="sk-new")
