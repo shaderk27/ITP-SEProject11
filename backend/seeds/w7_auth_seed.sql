@@ -3,7 +3,10 @@
 -- second set of lab groups/labs with older WBS aliases.
 
 ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
+-- Lab IC is stored on labs.user_id (1-1). See migrate_lab_ic_to_labs.sql for older DBs.
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS user_id BIGINT
+  CONSTRAINT uq_labs_user UNIQUE
+  CONSTRAINT fk_labs_user REFERENCES users(user_id) ON DELETE SET NULL;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- Roles.
@@ -66,7 +69,6 @@ INSERT INTO users (
   staff_id,
   password_hash,
   lab_group_id,
-  lab_id,
   is_active
 )
 VALUES
@@ -77,7 +79,6 @@ VALUES
     'DEV-ADMIN',
     'placeholder_no_auth_yet',
     NULL,
-    NULL,
     TRUE
   ),
   (
@@ -87,7 +88,6 @@ VALUES
     'DEV-TL-FCB',
     'placeholder_no_auth_yet',
     (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'FCB'),
-    NULL,
     TRUE
   ),
   (
@@ -97,7 +97,6 @@ VALUES
     'DEV-LIC-FCB',
     'placeholder_no_auth_yet',
     NULL,
-    (SELECT lab_id FROM labs WHERE lab_code = 'W3-01-021'),
     TRUE
   ),
   (
@@ -107,7 +106,6 @@ VALUES
     'DEV-LIC-ICT',
     'placeholder_no_auth_yet',
     NULL,
-    (SELECT lab_id FROM labs WHERE lab_code = 'E2-02-02'),
     TRUE
   ),
   (
@@ -116,7 +114,6 @@ VALUES
     'labic.non@example.com',
     'DEV-LIC-NON',
     'placeholder_no_auth_yet',
-    NULL,
     NULL,
     TRUE
   ),
@@ -127,7 +124,6 @@ VALUES
     'DEV-TL-NON',
     'placeholder_no_auth_yet',
     NULL,
-    NULL,
     TRUE
   )
 ON CONFLICT (email) DO UPDATE
@@ -137,8 +133,26 @@ SET
   staff_id = EXCLUDED.staff_id,
   password_hash = EXCLUDED.password_hash,
   lab_group_id = EXCLUDED.lab_group_id,
-  lab_id = EXCLUDED.lab_id,
   is_active = EXCLUDED.is_active;
+
+-- Lab IC assignments (labs.user_id, 1-1). Clear the demo ICs first so the UNIQUE
+-- constraint can't trip on a re-run, then assign. The seed wins over any lab that
+-- already has a different IC (that user simply becomes unassigned).
+UPDATE labs
+SET user_id = NULL
+WHERE user_id IN (
+  SELECT user_id FROM users
+  WHERE email IN ('labic.fcb@example.com', 'labic.ict@example.com', 'labic.non@example.com')
+);
+
+UPDATE labs
+SET user_id = (SELECT user_id FROM users WHERE email = 'labic.fcb@example.com')
+WHERE lab_code = 'W3-01-021';
+
+UPDATE labs
+SET user_id = (SELECT user_id FROM users WHERE email = 'labic.ict@example.com')
+WHERE lab_code = 'E2-02-02';
+
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 SELECT setval(pg_get_serial_sequence('roles', 'role_id'), (SELECT MAX(role_id) FROM roles));
 SELECT setval(pg_get_serial_sequence('lab_groups', 'lab_group_id'), (SELECT MAX(lab_group_id) FROM lab_groups));

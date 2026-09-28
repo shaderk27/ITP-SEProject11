@@ -102,7 +102,12 @@ CREATE TABLE labs (
     lab_name        varchar(150)    NOT NULL,
     venue           text,
     is_general      boolean         NOT NULL DEFAULT false,
-    created_at      timestamptz     NOT NULL DEFAULT now()
+    -- Lab IC (1-1): the user in charge of this lab. NULL = unassigned.
+    -- UNIQUE => a lab has at most one Lab IC and a user is IC of at most one lab.
+    user_id         bigint,
+    created_at      timestamptz     NOT NULL DEFAULT now(),
+    CONSTRAINT fk_labs_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE SET NULL,
+    CONSTRAINT uq_labs_user UNIQUE (user_id)
 );
 
 CREATE TABLE lab_aliases (
