@@ -578,7 +578,22 @@ class AuthService:
             "email": user.email,
             "is_active": user.is_active,
         }
+    def activate_user(self, user_id: int) -> Dict[str, Any]:
+        user = self.repository.get_user_by_id(self.db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found.")
 
+        if not user.is_active:
+            user.is_active = True
+            self.db.commit()
+            self.db.refresh(user)
+
+        return {
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "is_active": user.is_active,
+        }
     def reset_password(
         self, user_id: int, current_password: Optional[str], new_password: str
     ) -> None:

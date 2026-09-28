@@ -186,7 +186,13 @@ async def deactivate_user(
     admin: dict = Depends(require_admin),
 ):
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
-
+@router.put("/users/{user_id}/activate")
+async def activate_user(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    admin: dict = Depends(require_admin),
+):
+    return service.activate_user(user_id)
 
 @router.post("/reset-password")
 async def reset_password(
