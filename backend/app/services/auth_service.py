@@ -432,9 +432,9 @@ class AuthService:
                 ),
             )
 
-        user.lab_id = lab_id
         user.lab_group_id = None  # enforce mutual exclusion constraint
-        self.db.commit()
+        # Lab IC link is stored on labs.user_id; commits together with the line above.
+        self.repository.assign_lab_to_user(self.db, user.user_id, lab_id)
         self.db.refresh(user)
 
         return {
@@ -482,7 +482,8 @@ class AuthService:
             )
 
         user.lab_group_id = lab_group_id
-        user.lab_id = None  # enforce mutual exclusion constraint
+        # enforce mutual exclusion constraint (lab link lives on labs.user_id)
+        self.repository.unassign_lab_from_user(self.db, user.user_id, commit=False)
         self.db.commit()
         self.db.refresh(user)
 
@@ -535,7 +536,7 @@ class AuthService:
             )
 
         user.lab_group_id = None
-        user.lab_id = None
+        self.repository.unassign_lab_from_user(self.db, user.user_id, commit=False)
         self.db.commit()
         self.db.refresh(user)
 

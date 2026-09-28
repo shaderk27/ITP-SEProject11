@@ -108,9 +108,8 @@ def check_and_notify_lab_thresholds(lab_id: int):
 
         # Gather recipients and send email
         recipients = []
-        lab_ic = (
-            db.query(User).filter(User.lab_id == lab.lab_id, User.role_id == 3).first()
-        )
+        # Lab IC link lives on labs.user_id (1-1), so read it off the lab itself.
+        lab_ic = lab.ic_user
 
         if lab_ic and lab_ic.email:
             recipients.append(lab_ic.email)

@@ -47,9 +47,14 @@ class AuthRepository:
             password_hash=password_hash,
             staff_id=staff_id,
             lab_group_id=lab_group_id,
-            lab_id=lab_id,
         )
         db.add(db_user)
+        db.flush()  # populates db_user.user_id
+        if lab_id is not None:
+            # Lab IC link lives on labs.user_id (1-1), not on the user row.
+            db.query(Lab).filter(Lab.lab_id == lab_id).update(
+                {"user_id": db_user.user_id}
+            )
         db.commit()
         db.refresh(db_user)
         return db_user
@@ -95,7 +100,11 @@ class AuthRepository:
         self, db: Session, role_id: int, active_only: bool = True
     ) -> List[User]:
         """Fetch all users assigned to a given role."""
-        query = db.query(User).filter(User.role_id == role_id)
+        query = (
+            db.query(User)
+            .options(joinedload(User.lab))
+            .filter(User.role_id == role_id)
+        )
         if active_only:
             query = query.filter(User.is_active.is_(True))
         return query.all()
@@ -125,10 +134,35 @@ class AuthRepository:
         """Fetch a user assigned to a role/lab pair."""
         return (
             db.query(User)
-            .filter(User.role_id == role_id, User.lab_id == lab_id)
+            .join(Lab, Lab.user_id == User.user_id)
+            .filter(User.role_id == role_id, Lab.lab_id == lab_id)
             .filter(User.is_active.is_(True))
             .first()
         )
+
+    def assign_lab_to_user(
+        self, db: Session, user_id: int, lab_id: int, commit: bool = True
+    ) -> None:
+        """Make the user the IC of the lab (1-1). Frees the user's previous lab first.
+
+        Caller must check the lab has no other IC (see get_user_by_role_and_lab);
+        otherwise the UNIQUE constraint on labs.user_id will raise IntegrityError.
+        """
+        db.query(Lab).filter(Lab.user_id == user_id).update({"user_id": None})
+        db.query(Lab).filter(Lab.lab_id == lab_id).update({"user_id": user_id})
+        if commit:
+            db.commit()
+
+    def unassign_lab_from_user(
+        self, db: Session, user_id: int, commit: bool = True
+    ) -> None:
+        """Clear the user's Lab IC assignment, if any.
+
+        Pass commit=False to make this part of a larger transaction.
+        """
+        db.query(Lab).filter(Lab.user_id == user_id).update({"user_id": None})
+        if commit:
+            db.commit()
 
     def get_assignments(self, db: Session) -> list[dict]:
         """Return current lab group/lab role assignments for admin validation UIs."""
@@ -139,11 +173,12 @@ class AuthRepository:
                 User.email,
                 User.role_id,
                 User.lab_group_id,
-                User.lab_id,
+                Lab.lab_id.label("lab_id"),
                 Role.role_name,
             )
             .join(Role, Role.role_id == User.role_id)
-            .filter((User.lab_group_id.isnot(None)) | (User.lab_id.isnot(None)))
+            .outerjoin(Lab, Lab.user_id == User.user_id)
+            .filter((User.lab_group_id.isnot(None)) | (Lab.lab_id.isnot(None)))
             .filter(User.is_active.is_(True))
             .all()
         )

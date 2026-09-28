@@ -56,9 +56,6 @@ class User(Base):
     lab_group_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("lab_groups.lab_group_id"), nullable=True
     )
-    lab_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("labs.lab_id"), nullable=True
-    )
     reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )
@@ -67,7 +64,19 @@ class User(Base):
     # Relationships
     role: Mapped["Role"] = relationship("Role", back_populates="users")
     lab_group: Mapped[Optional["LabGroup"]] = relationship("LabGroup")
-    lab: Mapped[Optional["Lab"]] = relationship("Lab")
+    # Lab IC link lives on labs.user_id (1-1); a user is IC of at most one lab.
+    lab: Mapped[Optional["Lab"]] = relationship(
+        "Lab", back_populates="ic_user", foreign_keys="Lab.user_id", uselist=False
+    )
+
+    @property
+    def lab_id(self) -> Optional[int]:
+        """Read-only. Derived from the assigned lab (labs.user_id); not a column.
+
+        Not usable in queries: filter on Lab.user_id / join through Lab instead.
+        Assign via AuthRepository.assign_lab_to_user / unassign_lab_from_user.
+        """
+        return self.lab.lab_id if self.lab is not None else None
 
     def __repr__(self) -> str:
         return f"<User(email={self.email!r}, full_name={self.full_name!r})>"
