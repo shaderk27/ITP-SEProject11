@@ -111,6 +111,15 @@ class ChatbotAskRequest(BaseModel):
         default_factory=list,
         description="Earlier turns of this chat, oldest first, for follow-up questions.",
     )
+    # Page context (W15-03): the Dashboard's Fiscal Year + effective date
+    # window, so answers match what the user is looking at. All omitted means
+    # the current fiscal year.
+    period_id: int | None = Field(
+        default=None,
+        description="Dashboard Fiscal Year filter; 0 = all fiscal years.",
+    )
+    start_date: date | None = None
+    end_date: date | None = None
 
 
 class ChatbotAskResponse(BaseModel):

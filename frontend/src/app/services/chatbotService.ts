@@ -81,6 +81,33 @@ export interface AssistantReply {
   note: string;
 }
 
+/**
+ * Page context (W15-03): the Dashboard publishes its Fiscal Year + effective
+ * date window here while it is mounted, so Ask AI answers for the same period
+ * the user is looking at. Null (any other page) means the current fiscal year.
+ */
+export interface AskAiPageContext {
+  /** Fiscal Year filter; 0 = all fiscal years. */
+  periodId: number;
+  /** yyyy-MM-dd, or "" for no bound. */
+  startDate: string;
+  endDate: string;
+}
+
+let pageContext: AskAiPageContext | null = null;
+
+export function setAskAiPageContext(context: AskAiPageContext | null): void {
+  pageContext = context;
+}
+
+function pageContextBody(): Record<string, number | string> {
+  if (!pageContext) return {};
+  const body: Record<string, number | string> = { period_id: pageContext.periodId };
+  if (pageContext.startDate) body.start_date = pageContext.startDate;
+  if (pageContext.endDate) body.end_date = pageContext.endDate;
+  return body;
+}
+
 interface ChatbotAskResponse {
   answer: string;
   scope: ChatbotScope;
@@ -106,7 +133,7 @@ export async function askAssistant(
       ...FETCH_OPTS,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, history }),
+      body: JSON.stringify({ question, history, ...pageContextBody() }),
     });
   } catch {
     return askRulesFallback(question);
@@ -146,7 +173,9 @@ export async function askBudgetAssistant(question: string): Promise<string> {
     body: JSON.stringify({
       query_type: queryType,
       question,
-      date_range: "all",
+      // Same period as /ask: the Dashboard's filters, else the current FY.
+      date_range: pageContext ? "all" : "fy",
+      ...pageContextBody(),
       limit: 12,
     }),
   });

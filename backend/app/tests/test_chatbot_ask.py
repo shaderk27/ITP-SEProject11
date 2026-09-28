@@ -252,3 +252,174 @@ def test_answer_question_sends_scoped_facts_to_llm(monkeypatch):
     system, user = captured["messages"][0], captured["messages"][-1]
     assert "Team Lead" in system["content"] and "FCB" in system["content"]
     assert user == {"role": "user", "content": "Total spend?"}
+
+
+# ─── W15-03: Dashboard page context ──────────────────────────────────────
+
+
+def test_dashboard_window_is_passed_to_retrieval(monkeypatch):
+    from datetime import date
+
+    captured = {}
+
+    def fake_context(db, user, request):
+        captured["request"] = request
+        return _context("teamlead", FCB_ROWS)
+
+    monkeypatch.setattr(chatbot_answer_service, "build_chatbot_context", fake_context)
+    monkeypatch.setattr(llm_client, "generate_answer", lambda m, temperature=0.2: "ok")
+
+    response = chatbot_answer_service.answer_question(
+        None,
+        None,
+        ChatbotAskRequest(
+            question="Total spend?",
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 9, 28),
+        ),
+    )
+
+    sent = captured["request"]
+    assert (sent.start_date, sent.end_date) == (date(2026, 7, 1), date(2026, 9, 28))
+    assert response.period_label == "1 Jul 2026 to 28 Sep 2026"
+
+
+def test_reversed_dashboard_window_is_rejected():
+    from datetime import date
+
+    with pytest.raises(ValueError, match="start_date"):
+        chatbot_answer_service.answer_question(
+            None,
+            None,
+            ChatbotAskRequest(
+                question="x", start_date=date(2026, 9, 1), end_date=date(2026, 8, 1)
+            ),
+        )
+
+
+def test_window_label_names_the_fiscal_year():
+    from datetime import date
+    from types import SimpleNamespace
+
+    from app.services.chatbot_answer_service import _window_label
+
+    fy = SimpleNamespace(
+        period_name="FY2025", start_date=date(2025, 4, 1), end_date=date(2026, 3, 31)
+    )
+    assert (
+        _window_label(fy, date(2025, 4, 1), date(2026, 3, 31))
+        == "FY2025 (1 Apr 2025 to 31 Mar 2026)"
+    )
+    assert (
+        _window_label(fy, date(2025, 7, 1), date(2025, 9, 30))
+        == "1 Jul 2025 to 30 Sep 2025, within FY2025"
+    )
+    assert _window_label(None, None, None) == "all fiscal years"
+
+
+# ─── W15-03: fiscal year named in the question ───────────────────────────
+
+
+class _FakePeriodDb:
+    """Stands in for the Session in _retrieve's single BudgetPeriod lookup."""
+
+    def __init__(self, periods):
+        self._periods = periods
+
+    def query(self, _model):
+        return self
+
+    def filter(self, *_criteria):
+        return self._periods
+
+
+def _fy(period_id: int, year: int):
+    from datetime import date
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        period_id=period_id,
+        period_name=f"FY{year}",
+        year_no=year,
+        start_date=date(year, 4, 1),
+        end_date=date(year + 1, 3, 31),
+    )
+
+
+@pytest.fixture
+def capture_ask(monkeypatch):
+    captured: dict = {"requests": []}
+
+    def fake_context(db, user, request):
+        captured["requests"].append(request)
+        return _context("teamlead", FCB_ROWS)
+
+    def fake_generate(messages, temperature=0.2):
+        captured["system"] = messages[0]["content"]
+        return "ok"
+
+    monkeypatch.setattr(chatbot_answer_service, "build_chatbot_context", fake_context)
+    monkeypatch.setattr(llm_client, "generate_answer", fake_generate)
+    return captured
+
+
+def _facts_sent(captured) -> dict:
+    import json
+
+    return json.loads(captured["system"].split("DATA\n", 1)[1])
+
+
+def test_named_years_are_detected():
+    from app.services.chatbot_answer_service import _mentioned_years
+
+    assert _mentioned_years("what is our budget for 2025") == [2025]
+    assert _mentioned_years("tell me about 2026 and 2025") == [2026, 2025]
+    assert _mentioned_years("FY25/26 spend?") == [2025]
+    assert _mentioned_years("spend in 2025/26") == [2025]
+    assert _mentioned_years("compare FY2025 with fy 2026") == [2025, 2026]
+    assert _mentioned_years("status of PR 12345?") == []
+
+
+def test_named_year_overrides_dashboard_filter(capture_ask):
+    from datetime import date
+
+    response = chatbot_answer_service.answer_question(
+        _FakePeriodDb([_fy(2, 2025)]),
+        None,
+        ChatbotAskRequest(
+            question="What is our budget for 2025?",
+            period_id=1,
+            start_date=date(2026, 4, 1),
+            end_date=date(2027, 3, 31),
+        ),
+    )
+
+    [sent] = capture_ask["requests"]
+    assert sent.period_id == 2
+    assert (sent.start_date, sent.end_date) == (date(2025, 4, 1), date(2026, 3, 31))
+    assert response.period_label == "FY2025 (1 Apr 2025 to 31 Mar 2026)"
+
+
+def test_two_named_years_are_retrieved_separately(capture_ask):
+    response = chatbot_answer_service.answer_question(
+        _FakePeriodDb([_fy(1, 2026), _fy(2, 2025)]),
+        None,
+        ChatbotAskRequest(question="Compare 2026 and 2025"),
+    )
+
+    assert [r.period_id for r in capture_ask["requests"]] == [2, 1]
+    facts = _facts_sent(capture_ask)
+    assert [f["period"] for f in facts["fiscal_years"]] == [
+        "FY2025 (1 Apr 2025 to 31 Mar 2026)",
+        "FY2026 (1 Apr 2026 to 31 Mar 2027)",
+    ]
+    assert response.record_counts["budget_lines"] == 2 * len(FCB_ROWS)
+
+
+def test_year_without_budget_period_is_flagged(capture_ask):
+    response = chatbot_answer_service.answer_question(
+        _FakePeriodDb([]), None, ChatbotAskRequest(question="Spend in 2019?")
+    )
+
+    assert _facts_sent(capture_ask)["years_not_set_up"] == [2019]
+    assert response.period_label.startswith("FY")  # fell back to current FY
