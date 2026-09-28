@@ -43,10 +43,18 @@ class Lab(Base):
     lab_name = Column(String(150), nullable=False)
     venue = Column(Text)
     is_general = Column(Boolean, default=False)
+    # Lab IC (1-1). NULL = no Lab IC assigned. UNIQUE in the DB (uq_labs_user).
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.user_id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     group = relationship("LabGroup", back_populates="labs")
     aliases = relationship("LabAlias", back_populates="lab")
+    ic_user = relationship("User", back_populates="lab", foreign_keys=[user_id])
 
     notified_50 = Column(Boolean, default=False)
     notified_80 = Column(Boolean, default=False)
