@@ -156,27 +156,6 @@ class ReviewAction(Base):
     queue_item = relationship("ReviewQueueItem", back_populates="actions")
     reviewer = relationship("User")
 
-
-class AuditLog(Base):
-    """System-wide audit trail (W11-04 plumbing)."""
-
-    __tablename__ = "audit_logs"
-
-    audit_id = Column(BigInteger, primary_key=True)
-    user_id = Column(BigInteger, ForeignKey("users.user_id"))
-    action_type = Column(String(50), nullable=False)
-    entity_name = Column(String(100), nullable=False)
-    record_id = Column(String(100), nullable=False)
-    old_value = Column(JSONB)
-    new_value = Column(JSONB)
-    ip_address = Column(INET)
-    created_at = Column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-
-    user = relationship("User")
-
-
 # ─── Final tables (post-commit) ───────────────────────────────────────────
 class PurchaseRequest(Base):
     """Finalized PR header. Populated when a batch is committed (W9-02)."""

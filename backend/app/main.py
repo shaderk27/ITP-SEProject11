@@ -7,6 +7,7 @@ from app.api.records import router as records_router
 from app.api.review import router as review_router
 from app.api.upload import router as upload_router
 from app.api.auth import router as auth_router
+from app.api.audit import router as audit_router
 
 from app.services.scheduler_service import start_scheduler, shutdown_scheduler
 
@@ -42,7 +43,7 @@ app.include_router(review_router)
 app.include_router(records_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
-
+app.include_router(audit_router)
 
 @app.get("/health")
 def health_check() -> dict[str, str]:

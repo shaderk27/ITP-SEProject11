@@ -15,9 +15,8 @@ from sqlalchemy.orm import Session
 from app.services.threshold_service import check_and_notify_lab_thresholds
 from app.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models.config import Lab, LabGroup, SpendingCategory
+from app.models.config import Lab, LabGroup, SpendingCategory, AuditLog
 from app.models.staging import (
-    AuditLog,
     PRVersion,
     PurchaseRequest,
     PurchaseRequestLine,
