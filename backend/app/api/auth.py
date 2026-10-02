@@ -200,7 +200,7 @@ async def activate_user(
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
-    return service.activate_user(user_id, current_admin_id=admin["id"])
+    return service.activate_user(user_id, current_admin_id=admin.get("id"))
 
 
 @router.post("/reset-password")

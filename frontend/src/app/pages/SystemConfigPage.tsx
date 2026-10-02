@@ -23,6 +23,7 @@ import {
   DollarSign,
   AlertTriangle,
   UserRound,
+  Star,
 } from "lucide-react";
 
 const generateVenueTags = (
@@ -396,6 +397,37 @@ export function SystemConfigPage() {
     setAssignTargetLab(null);
     setSelectedLabICUserId("");
   };
+  const handleTogglePrimary = async (
+    userId: number,
+    labId: number,
+    newIsPrimary: boolean,
+  ) => {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/auth/users/${userId}/assign-lab`,
+        {
+          method: "PUT", // or "PATCH"
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            lab_id: labId,
+            is_primary: newIsPrimary,
+          }),
+        },
+      );
+
+      if (res.ok) {
+        fetchConfigData();
+      } else {
+        alert(await readErrorDetail(res, "Failed to update primary status."));
+      }
+    } catch (error) {
+      console.error("Error updating primary status:", error);
+      alert("Failed to update primary status.");
+    }
+  };
   const handleAssignLabIC = async () => {
     if (!assignTargetLab || selectedLabICUserId === "") return;
     try {
@@ -423,32 +455,28 @@ export function SystemConfigPage() {
   };
 
   const handleUnassignLabIC = async (labic: any, labId: number) => {
-    // Extract user object if nested (e.g., assignment.user)
     const targetUser = labic?.user ?? labic;
     const userId = targetUser?.id ?? targetUser?.user_id;
 
-    if (!userId || !labId) {
-      console.error("Missing userId or labId:", {
-        labic,
-        targetUser,
-        labId,
-        userId,
-      });
-      alert("Invalid user or lab ID.");
+    if (!userId) {
+      alert("Invalid user ID.");
       return;
     }
 
     const userName = targetUser.full_name || targetUser.name || "this user";
 
-    if (!window.confirm(`Clear assignment for ${userName}?`)) {
+    if (!window.confirm(`Clear all assignments for ${userName}?`)) {
       return;
     }
 
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/auth/users/${userId}/unassign-lab?lab_id=${labId}`,
+        `${API_BASE_URL}/api/auth/users/${userId}/unassign-scope`,
         {
-          method: "DELETE",
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
           credentials: "include",
         },
       );
@@ -456,11 +484,11 @@ export function SystemConfigPage() {
       if (res.ok) {
         fetchConfigData();
       } else {
-        alert(await readErrorDetail(res, "Failed to clear Lab IC assignment."));
+        alert(await readErrorDetail(res, "Failed to clear assignments."));
       }
     } catch (error) {
       console.error("Error clearing assignment:", error);
-      alert("Failed to clear Lab IC assignment.");
+      alert("Failed to clear assignments.");
     }
   };
   const openAssignTeamLeadModal = (group: any) => {
@@ -878,48 +906,83 @@ export function SystemConfigPage() {
                                                               {u.email}
                                                             </p>
                                                           </div>
-                                                          <Button
-                                                            size="sm"
-                                                            variant="ghost"
-                                                            type="button" // Prevent accidental form submission
-                                                            className="h-6 w-6 p-0 shrink-0"
-                                                            title="Unassign user"
-                                                            onClick={(e) => {
-                                                              e.stopPropagation(); // Stop event bubbling to parent rows/cards
 
-                                                              // Log the actual object structure to see what fields exist on `u`
-                                                              console.log(
-                                                                "Unassign clicked for object u:",
-                                                                u,
-                                                              );
-
-                                                              // Resolve user ID across flat or nested structures
-                                                              const resolvedUser =
-                                                                u?.user ?? u;
-                                                              const userId =
-                                                                resolvedUser?.id ??
-                                                                resolvedUser?.user_id ??
-                                                                u?.user_id;
-
-                                                              if (!userId) {
-                                                                console.error(
-                                                                  "Could not find a valid user ID on object:",
-                                                                  u,
-                                                                );
-                                                                alert(
-                                                                  "Error: Missing User ID.",
-                                                                );
-                                                                return;
+                                                          <div className="flex items-center gap-1 shrink-0">
+                                                            {/* Toggle Primary / Secondary Button */}
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              type="button"
+                                                              className="h-6 w-6 p-0"
+                                                              title={
+                                                                isPrimary
+                                                                  ? "Set as Secondary"
+                                                                  : "Set as Primary"
                                                               }
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const resolvedUser =
+                                                                  u?.user ?? u;
+                                                                const userId =
+                                                                  resolvedUser?.id ??
+                                                                  resolvedUser?.user_id ??
+                                                                  u?.user_id;
 
-                                                              handleUnassignLabIC(
-                                                                resolvedUser,
-                                                                lab.id,
-                                                              );
-                                                            }}
-                                                          >
-                                                            <Unlink className="h-3 w-3 text-gray-400 hover:text-red-600" />
-                                                          </Button>
+                                                                if (!userId) {
+                                                                  alert(
+                                                                    "Error: Missing User ID.",
+                                                                  );
+                                                                  return;
+                                                                }
+
+                                                                handleTogglePrimary(
+                                                                  userId,
+                                                                  lab.id,
+                                                                  !isPrimary,
+                                                                );
+                                                              }}
+                                                            >
+                                                              <Star
+                                                                className={`h-3.5 w-3.5 ${
+                                                                  isPrimary
+                                                                    ? "fill-yellow-400 text-yellow-500 hover:text-gray-400"
+                                                                    : "text-gray-400 hover:text-yellow-500"
+                                                                }`}
+                                                              />
+                                                            </Button>
+
+                                                            {/* Unassign User Button */}
+                                                            <Button
+                                                              size="sm"
+                                                              variant="ghost"
+                                                              type="button"
+                                                              className="h-6 w-6 p-0"
+                                                              title="Unassign user"
+                                                              onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                const resolvedUser =
+                                                                  u?.user ?? u;
+                                                                const userId =
+                                                                  resolvedUser?.id ??
+                                                                  resolvedUser?.user_id ??
+                                                                  u?.user_id;
+
+                                                                if (!userId) {
+                                                                  alert(
+                                                                    "Error: Missing User ID.",
+                                                                  );
+                                                                  return;
+                                                                }
+
+                                                                handleUnassignLabIC(
+                                                                  resolvedUser,
+                                                                  lab.id,
+                                                                );
+                                                              }}
+                                                            >
+                                                              <Unlink className="h-3 w-3 text-gray-400 hover:text-red-600" />
+                                                            </Button>
+                                                          </div>
                                                         </div>
                                                       );
                                                     })}

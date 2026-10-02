@@ -146,8 +146,8 @@ class AuthRepository:
         )
 
         if existing:
-            existing.is_primary = is_primary
-            existing.assigned_by = assigned_by
+            setattr(existing, "is_primary", is_primary)
+            setattr(existing, "assigned_by", assigned_by)
         else:
             new_assign = LabIcAssignment(
                 lab_id=lab_id,

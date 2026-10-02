@@ -243,7 +243,35 @@ class AuthService:
             "must_reset_password": bool(payload.get("must_reset_password", False)),
             "assignedLabs": assigned_lab_codes if assigned_lab_codes else ([user.lab_group.wbs_code] if user.lab_group else []),
         }
+    def _send_temp_password_email(
+        self, email: str, name: str, temp_password: str
+    ) -> None:
+        msg = MIMEText(
+            f"Hi {name},\n\n"
+            f"Your temporary password is: {temp_password}\n\n"
+            f"It expires in 1 hour. Please log in and change your password immediately.\n\n"
+            f"If you did not request this, please contact your administrator."
+        )
+        msg["Subject"] = "Your Temporary Password"
+        msg["From"] = SMTP_USER
+        msg["To"] = email
 
+        with smtplib.SMTP(SMTP_HOST, 587) as server:
+            server.starttls()
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+    def forgot_password(self, email: str) -> None:
+        user = self.repository.get_user_by_email(self.db, email)
+        if not user or not user.is_active:
+            return
+        temp_password = "".join(
+            secrets.choice(string.ascii_letters + string.digits) for _ in range(12)
+        )
+        hashed = bcrypt.hashpw(temp_password.encode(), bcrypt.gensalt()).decode()
+        self.repository.invalidate_reset_tokens(self.db, user.user_id)
+        self.repository.create_reset_token(self.db, user.user_id, hashed)
+        self._send_temp_password_email(user.email, user.full_name, temp_password)
+        
     def update_user_profile(
         self,
         user_id: int,
@@ -259,92 +287,115 @@ class AuthService:
         self.db.commit()
         self.db.refresh(user)
         return {"success": True, "message": "Profile updated successfully."}
-
     def create_user(
-        self,
-        full_name: str,
-        email: str,
-        password: str,
-        role_id: int,
-        staff_id: Optional[str] = None,
-        lab_group_id: Optional[int] = None,
-        lab_id: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        """Create a new user account with a hashed password."""
-        normalized_email = email.strip().lower()
+            self,
+            full_name: str,
+            email: str,
+            password: str,
+            role_id: int,
+            staff_id: Optional[str] = None,
+            lab_group_id: Optional[int] = None,
+            lab_id: Optional[int] = None,
+            lab_ids: Optional[List[int]] = None,
+            primary_lab_id: Optional[int] = None,
+            creator_admin_id: Optional[int] = None,
+        ) -> Dict[str, Any]:
+            """Create a new user account and process lab assignments."""
+            normalized_email = email.strip().lower()
 
-        if not self._is_allowed_email_domain(normalized_email):
-            allowed = ", ".join(sorted(ALLOWED_EMAIL_DOMAINS))
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Email domain is not allowed. Allowed domains: {allowed}.",
-            )
-
-        existing = self.repository.get_user_by_email(self.db, normalized_email)
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="An account with this email already exists.",
-            )
-
-        role = self.repository.get_role_by_id(self.db, role_id)
-        if not role:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Selected role does not exist.",
-            )
-
-        role_name = role.role_name.lower()
-        if role_name == "teamlead" and lab_group_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Lab group is required for Team Lead users.",
-            )
-
-        if role_name == "admin":
-            lab_group_id = None
-        elif role_name == "labic":
-            lab_group_id = None
-
-        if role_name == "teamlead" and lab_group_id is not None:
-            assigned_user = self.repository.get_user_by_role_and_lab_group(
-                self.db, role_id, lab_group_id
-            )
-            if assigned_user:
+            if not self._is_allowed_email_domain(normalized_email):
+                allowed = ", ".join(sorted(ALLOWED_EMAIL_DOMAINS))
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=(
-                        f"This lab group already has a {role.role_name} assigned "
-                        f"to {assigned_user.full_name}."
-                    ),
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Email domain is not allowed. Allowed domains: {allowed}.",
                 )
 
-        password_hash = self._hash_password(password)
+            existing = self.repository.get_user_by_email(self.db, normalized_email)
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="An account with this email already exists.",
+                )
 
-        user = self.repository.create_user(
-            db=self.db,
-            role_id=role_id,
-            full_name=full_name,
-            email=normalized_email,
-            password_hash=password_hash,
-            staff_id=staff_id,
-            lab_group_id=lab_group_id,
-        )
+            role = self.repository.get_role_by_id(self.db, role_id)
+            if not role:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected role does not exist.",
+                )
 
-        if role_name == "labic" and lab_id is not None:
-            self.repository.assign_lab_to_user(self.db, user.user_id, lab_id, is_primary=True)
+            role_name = role.role_name.lower()
+            if role_name == "teamlead" and lab_group_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Lab group is required for Team Lead users.",
+                )
 
-        return {
-            "id": user.user_id,
-            "full_name": user.full_name,
-            "email": user.email,
-            "staff_id": user.staff_id,
-            "role_id": user.role_id,
-            "lab_group_id": user.lab_group_id,
-            "lab_assignments": self._format_user_assignments(user),
-        }
+            if role_name in ["admin", "labic"]:
+                lab_group_id = None
 
-    def assign_lab_to_user(self, user_id: int, lab_id: int, is_primary: bool = False) -> Dict[str, Any]:
+            if role_name == "teamlead" and lab_group_id is not None:
+                assigned_user = self.repository.get_user_by_role_and_lab_group(
+                    self.db, role_id, lab_group_id
+                )
+                if assigned_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            f"This lab group already has a {role.role_name} assigned "
+                            f"to {assigned_user.full_name}."
+                        ),
+                    )
+
+            password_hash = self._hash_password(password)
+
+            user = self.repository.create_user(
+                db=self.db,
+                role_id=role_id,
+                full_name=full_name,
+                email=normalized_email,
+                password_hash=password_hash,
+                staff_id=staff_id,
+                lab_group_id=lab_group_id,
+            )
+
+            # Process multiple or single lab assignments for Lab IC users
+            if role_name == "labic":
+                # Collect lab IDs to assign (supporting both list and single lab_id)
+                target_lab_ids = set(lab_ids or [])
+                if lab_id is not None:
+                    target_lab_ids.add(lab_id)
+
+                # Determine primary lab (fallback to first lab if not explicitly provided)
+                effective_primary_id = primary_lab_id or (
+                    next(iter(target_lab_ids)) if target_lab_ids else None
+                )
+
+                for target_lab_id in target_lab_ids:
+                    is_primary = target_lab_id == effective_primary_id
+                    self.repository.assign_lab_to_user(
+                        db=self.db,
+                        user_id=user.user_id,
+                        lab_id=target_lab_id,
+                        is_primary=is_primary,
+                        assigned_by=creator_admin_id,
+                    )
+
+            # Refresh user instance to ensure relationships (like lab_assignments) are loaded
+            self.db.refresh(user)
+            refreshed_user = self.repository.get_user_by_id(self.db, user.user_id) or user
+
+            return {
+                "id": refreshed_user.user_id,
+                "full_name": refreshed_user.full_name,
+                "email": refreshed_user.email,
+                "staff_id": refreshed_user.staff_id,
+                "role_id": refreshed_user.role_id,
+                "lab_group_id": refreshed_user.lab_group_id,
+                "lab_assignments": self._format_user_assignments(refreshed_user),
+            }
+
+    def assign_lab_to_user(self, user_id: int, lab_id: int, is_primary: bool = False,assigned_by: Optional[int] = None) -> Dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -388,10 +439,11 @@ class AuthService:
                     )
 
             # 3. Update lab group assignment in repository
-            updated_user = self.repository.assign_labgroup_to_user(
+            updated = self.repository.assign_labgroup_to_user(
                 self.db, user_id=user_id, lab_group_id=lab_group_id
             )
-
+# Fallback to initial user object if the repo method returns None or void
+            updated_user = updated or self.repository.get_user_by_id(self.db, user_id) or user
             return {
                 "message": "User assigned to lab group successfully",
                 "user_id": updated_user.user_id,
@@ -455,22 +507,32 @@ class AuthService:
             "is_active": user.is_active,
         }
 
-    def activate_user(self, user_id: int) -> Dict[str, Any]:
-        user = self.repository.get_user_by_id(self.db, user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found.")
+    def activate_user(
+            self, user_id: int, current_admin_id: Optional[int] = None
+        ) -> Dict[str, Any]:
+            """Activate a user account with optional admin audit tracking."""
+            user = self.repository.get_user_by_id(self.db, user_id)
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
 
-        if not user.is_active:
-            user.is_active = True
-            self.db.commit()
-            self.db.refresh(user)
+            if not user.is_active:
+                user.is_active = True
+                # Store admin audit reference if your model supports updated_by/activated_by
+                if hasattr(user, "updated_by") and current_admin_id is not None:
+                    setattr(user, "updated_by", current_admin_id)
 
-        return {
-            "user_id": user.user_id,
-            "full_name": user.full_name,
-            "email": user.email,
-            "is_active": user.is_active,
-        }
+                self.db.commit()
+                self.db.refresh(user)
+
+            return {
+                "user_id": user.user_id,
+                "full_name": user.full_name,
+                "email": user.email,
+                "is_active": user.is_active,
+            }
 
     def reset_password(
         self, user_id: int, current_password: Optional[str], new_password: str
