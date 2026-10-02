@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Sequence
-from sqlalchemy import select, delete, json
+from sqlalchemy import select, delete, update
+import json
 from sqlalchemy.orm import Session, joinedload
 from app.models.config import Lab, LabGroup, LabIcAssignment
 from app.models.auth import User, Role, PasswordResetToken
@@ -28,7 +29,7 @@ class AuthRepository:
                 joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab),
             )
             .where(User.user_id == user_id)
-        ).scalar_one_or_none()
+        ).unique().scalar_one_or_none()
 
     def get_user_by_staff_id(self, db: Session, staff_id: str) -> Optional[User]:
         """Fetch a user by their unique institutional staff identifier."""
@@ -158,7 +159,22 @@ class AuthRepository:
 
         if commit:
             db.commit()
+    def assign_labgroup_to_user(
+        self, db: Session, user_id: int, lab_group_id: int, commit: bool = True
+    ) -> Optional[User]:
+        """Update the lab_group_id column on the User model."""
+        stmt = (
+            update(User)
+            .where(User.user_id == user_id)
+            .values(lab_group_id=lab_group_id)
+        )
+        db.execute(stmt)
 
+        if commit:
+            db.commit()
+
+        # Return updated user model instance
+        return self.get_user_by_id(db, user_id)
     def unassign_lab_from_user(
         self, db: Session, user_id: int, lab_id: int, commit: bool = True
     ) -> None:
@@ -213,7 +229,14 @@ class AuthRepository:
         if active_only:
             query = query.filter(User.is_active.is_(True))
         return query.all()
-
+    def get_users_by_role(self, db: Session, role_name: str) -> List[User]:
+            """Fetch all users assigned to a given role name."""
+            stmt = (
+                select(User)
+                .join(Role, User.role_id == Role.role_id)
+                .where(Role.role_name.ilike(role_name))
+            )
+            return list(db.execute(stmt).unique().scalars().all())
     def get_lab_by_id(self, db: Session, lab_id: int) -> Optional[Lab]:
         return db.query(Lab).filter(Lab.lab_id == lab_id).first()
 
@@ -326,3 +349,39 @@ class AuthRepository:
             {"password_hash": hashed_password}
         )
         db.commit()
+        
+    def get_active_reset_token_by_user(
+        self, db: Session, user_id: int
+    ) -> Optional[PasswordResetToken]:
+        """Fetch the latest active (non-expired and non-used) reset token for a user."""
+        stmt = (
+            select(PasswordResetToken)
+            .where(
+                PasswordResetToken.user_id == user_id,
+                PasswordResetToken.is_used == False,  # noqa: E712
+                # If you have an expiration column:
+                # PasswordResetToken.expires_at > datetime.now(timezone.utc),
+            )
+            .order_by(PasswordResetToken.created_at.desc())
+        )
+        return db.execute(stmt).scalars().first()
+
+    def get_last_reset_token_by_user(
+        self, db: Session, user_id: int
+    ) -> Optional[PasswordResetToken]:
+        """Fetch the most recent reset token generated for a user."""
+        stmt = (
+            select(PasswordResetToken)
+            .where(PasswordResetToken.user_id == user_id)
+            .order_by(PasswordResetToken.created_at.desc())
+        )
+        return db.execute(stmt).scalars().first()
+
+    def unassign_all_labs_from_user(
+        self, db: Session, user_id: int, commit: bool = True
+    ) -> None:
+        """Remove all lab assignments for a specific user from lab_ic_assignments."""
+        stmt = delete(LabIcAssignment).where(LabIcAssignment.user_id == user_id)
+        db.execute(stmt)
+        if commit:
+            db.commit()

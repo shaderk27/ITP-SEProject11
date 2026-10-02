@@ -72,16 +72,15 @@ def get_spending_summary(
         )
 
     # Team Lead with no group / Lab IC with no lab → nothing in scope.
-    if (role_name == "teamlead" and not current_user.lab_group_id) or (
-        role_name == "labic" and not current_user.lab_id
-    ):
+    user_lab_ids = [a.lab_id for a in current_user.lab_assignments] if role_name == "labic" else []
+    if role_name == "labic" and not user_lab_ids:
         return SpendingSummary(
             total_actual_spend_sgd="0",
             by_lab_group={},
             total_pending_sgd="0",
             pending_by_lab_group={},
         )
-
+    
     start, end = _resolve_bounds(date_range, start_date, end_date)
     approved_by_group, approved_total = _aggregate_by_status(
         db, "approved%", current_user, start, end
@@ -127,18 +126,18 @@ def _apply_date_bounds(query, start, end):
 
 def _apply_role_scope(query, current_user):
     """
-    Restrict a PurchaseRequestLine query by the caller's role:
-      - Team Lead → labs in their lab group (needs Lab joined).
-      - Lab IC    → only their single assigned lab.
-      - Admin     → unrestricted.
+    Restrict query by caller's role:
+      - Team Lead -> labs in their lab group.
+      - Lab IC    -> all assigned labs (multi-lab support).
+      - Admin     -> unrestricted.
     """
     role_name = _role_name(current_user)
     if role_name == "teamlead":
         return query.filter(Lab.lab_group_id == current_user.lab_group_id)
     if role_name == "labic":
-        return query.filter(PurchaseRequestLine.lab_id == current_user.lab_id)
+        assigned_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        return query.filter(PurchaseRequestLine.lab_id.in_(assigned_lab_ids))
     return query
-
 
 def _aggregate_by_status(
     db: Session,
@@ -276,10 +275,10 @@ def get_breakdown(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Admin or Team Lead can view dashboard breakdown.",
         )
-
-    if (role_name == "teamlead" and not current_user.lab_group_id) or (
-        role_name == "labic" and not current_user.lab_id
-    ):
+    user_lab_ids = [a.lab_id for a in current_user.lab_assignments] if role_name == "labic" else []
+    if role_name == "labic" and not user_lab_ids:
+        return BreakdownResponse(lab_groups=[])
+    if (role_name == "teamlead" and not current_user.lab_group_id):
         return BreakdownResponse(lab_groups=[])
 
     # ─── 1. Name lookups (one DB hit each) ────────────────────────────
@@ -368,7 +367,8 @@ def get_breakdown(
             Budget.lab_group_id == current_user.lab_group_id
         )
     elif role_name == "labic":
-        budget_query = budget_query.filter(Budget.lab_id == current_user.lab_id)
+        assigned_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        budget_query = budget_query.filter(Budget.lab_id.in_(assigned_lab_ids))
 
     budget_by_lab_cat: dict[tuple[int, int], Decimal] = {}
     for lab_id, cat_id, amount in budget_query.all():
@@ -505,9 +505,10 @@ def get_monthly_spend(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Admin or Team Lead can view dashboard spending.",
         )
-    if (role_name == "teamlead" and not current_user.lab_group_id) or (
-        role_name == "labic" and not current_user.lab_id
-    ):
+    user_lab_ids = [a.lab_id for a in current_user.lab_assignments] if role_name == "labic" else []
+    if role_name == "labic" and not user_lab_ids:
+        return MonthlyResponse(points=[])
+    if (role_name == "teamlead" and not current_user.lab_group_id):
         return MonthlyResponse(points=[])
 
     month_expr = func.to_char(PurchaseRequest.request_date, "YYYY-MM")
