@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 
 export function AuditLogPage() {
-  const { user, hasPermission } = useAuth();
+  const { user } = useAuth();
   const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
