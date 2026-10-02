@@ -33,6 +33,13 @@ ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
 ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
 ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
 
+-- Randy (W13-04): Added notifications to lab_groups as well.
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
+
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
   ('admin'),
