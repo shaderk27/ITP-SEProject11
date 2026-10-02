@@ -641,11 +641,26 @@ export function SystemConfigPage() {
         </div>
 
         <Tabs defaultValue="labgroups" className="w-full">
-          <TabsList className="bg-white border border-border mb-6">
-            <TabsTrigger value="labgroups">Lab Groups & Budgets</TabsTrigger>
-            <TabsTrigger value="categories">Categories</TabsTrigger>
-            <TabsTrigger value="users">Users</TabsTrigger>
-          </TabsList>
+<TabsList className="bg-white border border-border mb-6">
+  <TabsTrigger
+    value="labgroups"
+    className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+  >
+    Lab Groups & Budgets
+  </TabsTrigger>
+  <TabsTrigger
+    value="categories"
+    className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+  >
+    Categories
+  </TabsTrigger>
+  <TabsTrigger
+    value="users"
+    className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+  >
+    Users
+  </TabsTrigger>
+</TabsList>
 
           <TabsContent value="labgroups">
             <Card className="bg-white border-border">
@@ -675,7 +690,7 @@ export function SystemConfigPage() {
                     <tr className="border-b border-border text-xs uppercase tracking-wider font-semibold text-muted-foreground">
                       <th className="w-12 p-4"></th>
                       <th className="text-left p-4">Group Name</th>
-                      <th className="text-left p-4">WBS Prefix</th>
+                      <th className="text-left p-4">WBS</th>
                       <th className="text-left p-4">Team Lead</th>
                       <th className="text-right p-4 text-[#1e3a8a]">
                         Total Budget
@@ -833,7 +848,7 @@ export function SystemConfigPage() {
                                       <thead className="bg-gray-50 border-b border-gray-200">
                                         <tr className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
                                           <th className="text-left p-3 pl-4">
-                                            Lab Code
+                                            Lab Location
                                           </th>
                                           <th className="text-left p-3">
                                             Lab Name
@@ -1172,7 +1187,7 @@ export function SystemConfigPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium">WBS Prefix</label>
+                  <label className="text-sm font-medium">WBS</label>
                   <input
                     type="text"
                     required
