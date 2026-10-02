@@ -103,7 +103,7 @@ async def logout(response: Response):
 async def create_user(
     payload: CreateUserRequest,
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     return service.create_user(
         full_name=payload.full_name,
@@ -112,7 +112,9 @@ async def create_user(
         role_id=payload.role_id,
         staff_id=payload.staff_id,
         lab_group_id=payload.lab_group_id,
-        lab_id=payload.lab_id,
+        lab_ids=payload.lab_ids,
+        primary_lab_id=payload.primary_lab_id,
+        creator_admin_id=admin.get("id"),
     )
 
 
@@ -126,7 +128,6 @@ async def forgot_password(
     payload: ForgotPasswordSchema,
     service: AuthService = Depends(get_auth_service),
 ):
-    # Always return 200 even if email not found — don't leak whether email exists
     service.forgot_password(payload.email)
     return {"message": "If that email exists, a temporary password has been sent."}
 
@@ -155,9 +156,14 @@ async def assign_lab_ic(
     user_id: int,
     payload: AssignLabSchema,
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return service.assign_lab_to_user(user_id, payload.lab_id)
+    return service.assign_lab_to_user(
+        user_id=user_id,
+        lab_id=payload.lab_id,
+        is_primary=payload.is_primary,
+        assigned_by=admin.get("id"),
+    )
 
 
 @router.put("/users/{user_id}/assign-labgroup")
@@ -186,13 +192,16 @@ async def deactivate_user(
     admin: dict = Depends(require_admin),
 ):
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
+
+
 @router.put("/users/{user_id}/activate")
 async def activate_user(
     user_id: int,
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
-    return service.activate_user(user_id)
+    return service.activate_user(user_id, current_admin_id=admin["id"])
+
 
 @router.post("/reset-password")
 async def reset_password(
@@ -225,28 +234,30 @@ async def admin_send_reset(
     return {"message": f"Temporary password sent to {user.email}."}
 
 
+# Updated session refresh payload to include lab_ids array
 @router.post("/refresh")
 async def refresh_session(
     response: Response,
     access_token: str | None = Cookie(None),
     service: AuthService = Depends(get_auth_service),
 ):
-    """Reissue a fresh JWT cookie to extend the session."""
     current_user = service.get_current_user(access_token)
 
     if current_user.get("must_reset_password", True):
-        # Fail closed: if the flag is missing OR true, don't refresh.
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Password reset required before session can be extended.",
         )
 
+    # Resolve all lab assignments for the current user
+    lab_ids = current_user.get("lab_ids", [])
+    
     token_payload = {
         "sub": str(current_user["id"]),
         "email": current_user["email"],
         "role": current_user["role"],
         "lab_group_id": current_user["lab_group_id"],
-        "lab_id": current_user["lab_id"],
+        "lab_ids": lab_ids,  # Replaces scalar lab_id
         "must_reset_password": current_user["must_reset_password"],
     }
     token = service._create_access_token(data=token_payload)

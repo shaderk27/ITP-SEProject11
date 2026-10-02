@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Sequence
-from sqlalchemy import select
+from sqlalchemy import select, delete, json
 from sqlalchemy.orm import Session, joinedload
-from app.models.config import Lab, LabGroup
+from app.models.config import Lab, LabGroup, LabIcAssignment
 from app.models.auth import User, Role, PasswordResetToken
 
 
@@ -10,7 +10,11 @@ class AuthRepository:
     def get_user_by_email(self, db: Session, email: str) -> Optional[User]:
         return (
             db.query(User)
-            .options(joinedload(User.lab_group), joinedload(User.lab))
+            .options(
+                joinedload(User.role),
+                joinedload(User.lab_group),
+                joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab),
+            )
             .filter(User.email == email)
             .first()
         )
@@ -19,7 +23,9 @@ class AuthRepository:
         return db.execute(
             select(User)
             .options(
-                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+                joinedload(User.role),
+                joinedload(User.lab_group),
+                joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab),
             )
             .where(User.user_id == user_id)
         ).scalar_one_or_none()
@@ -37,9 +43,11 @@ class AuthRepository:
         password_hash: str,
         staff_id: Optional[str] = None,
         lab_group_id: Optional[int] = None,
-        lab_id: Optional[int] = None,
+        lab_ids: Optional[List[int]] = None,
+        primary_lab_id: Optional[int] = None,
+        creator_admin_id: Optional[int] = None,
     ) -> User:
-        """Create and persist a new user in the system."""
+        """Create and persist a new user in the system with lab assignments."""
         db_user = User(
             role_id=role_id,
             full_name=full_name,
@@ -47,25 +55,123 @@ class AuthRepository:
             password_hash=password_hash,
             staff_id=staff_id,
             lab_group_id=lab_group_id,
+            is_active=True,
         )
         db.add(db_user)
         db.flush()  # populates db_user.user_id
-        if lab_id is not None:
-            # Lab IC link lives on labs.user_id (1-1), not on the user row.
-            db.query(Lab).filter(Lab.lab_id == lab_id).update(
-                {"user_id": db_user.user_id}
+
+        # Handle lab assignments via lab_ic_assignments
+        assigned_labs = set(lab_ids or [])
+        if primary_lab_id:
+            assigned_labs.add(primary_lab_id)
+
+        for lid in assigned_labs:
+            is_primary = lid == primary_lab_id
+            assignment = LabIcAssignment(
+                lab_id=lid,
+                user_id=db_user.user_id,
+                is_primary=is_primary,
+                assigned_by=creator_admin_id,
             )
+            db.add(assignment)
+
         db.commit()
         db.refresh(db_user)
         return db_user
 
+    def set_user_activation_status(
+        self,
+        db: Session,
+        user_id: int,
+        is_active: bool,
+        acting_admin_id: Optional[int] = None,
+    ) -> Optional[User]:
+        """Activate or deactivate a user and log the action to audit_logs."""
+        user = self.get_user_by_id(db, user_id)
+        if not user or user.is_active == is_active:
+            return user
+
+        old_status = user.is_active
+        user.is_active = is_active
+
+        # Audit log insertion according to project specification
+        action_type = "user_reactivated" if is_active else "user_deactivated"
+        from sqlalchemy import text
+
+        audit_stmt = text(
+            """
+            INSERT INTO audit_logs (user_id, action_type, entity_name, record_id, old_value, new_value)
+            VALUES (:admin_id, :action_type, 'users', :record_id, :old_val, :new_val)
+            """
+        )
+        db.execute(
+            audit_stmt,
+            {
+                "admin_id": acting_admin_id,
+                "action_type": action_type,
+                "record_id": str(user_id),
+                "old_val": json.dumps({"is_active": old_status}),
+                "new_val": json.dumps({"is_active": is_active}),
+            },
+        )
+
+        db.commit()
+        db.refresh(user)
+        return user
+
+    def assign_lab_to_user(
+        self,
+        db: Session,
+        user_id: int,
+        lab_id: int,
+        is_primary: bool = False,
+        assigned_by: Optional[int] = None,
+        commit: bool = True,
+    ) -> None:
+        """Assign a user to a lab via lab_ic_assignments."""
+        if is_primary:
+            # Clear existing primary IC for this lab if changing primary
+            db.query(LabIcAssignment).filter(
+                LabIcAssignment.lab_id == lab_id, LabIcAssignment.is_primary.is_(True)
+            ).update({"is_primary": False})
+
+        existing = (
+            db.query(LabIcAssignment)
+            .filter(
+                LabIcAssignment.lab_id == lab_id,
+                LabIcAssignment.user_id == user_id,
+            )
+            .first()
+        )
+
+        if existing:
+            existing.is_primary = is_primary
+            existing.assigned_by = assigned_by
+        else:
+            new_assign = LabIcAssignment(
+                lab_id=lab_id,
+                user_id=user_id,
+                is_primary=is_primary,
+                assigned_by=assigned_by,
+            )
+            db.add(new_assign)
+
+        if commit:
+            db.commit()
+
+    def unassign_lab_from_user(
+        self, db: Session, user_id: int, lab_id: int, commit: bool = True
+    ) -> None:
+        """Remove a lab IC assignment for a specific user and lab."""
+        db.query(LabIcAssignment).filter(
+            LabIcAssignment.lab_id == lab_id, LabIcAssignment.user_id == user_id
+        ).delete()
+        if commit:
+            db.commit()
+
     def update_password_hash(
         self, db: Session, user_id: int, new_password_hash: str
     ) -> Optional[User]:
-        """Update a user's password hash.
-
-        The updated_at field will automatically refresh via SQLAlchemy/DB triggers.
-        """
         user = self.get_user_by_id(db, user_id)
         if user:
             user.password_hash = new_password_hash
@@ -74,23 +180,21 @@ class AuthRepository:
         return user
 
     def get_role_by_id(self, db: Session, role_id: int) -> Optional[Role]:
-        """Fetch a role record by its primary key ID."""
         return db.query(Role).filter(Role.role_id == role_id).first()
 
     def get_role_by_name(self, db: Session, role_name: str) -> Optional[Role]:
-        """Fetch a role by its unique name string (e.g., 'admin', 'teamlead', 'labic')."""
         return db.query(Role).filter(Role.role_name == role_name).first()
 
     def get_all_roles(self, db: Session) -> Sequence[Role]:
-        """Retrieve all defined roles in the system."""
         return db.query(Role).all()
 
     def get_all_users(self, db: Session) -> Sequence[User]:
-        """Retrieve all users with role and scope relationships."""
         return (
             db.query(User)
             .options(
-                joinedload(User.role), joinedload(User.lab_group), joinedload(User.lab)
+                joinedload(User.role),
+                joinedload(User.lab_group),
+                joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab),
             )
             .order_by(User.user_id)
             .all()
@@ -99,10 +203,11 @@ class AuthRepository:
     def get_users_by_role_id(
         self, db: Session, role_id: int, active_only: bool = True
     ) -> List[User]:
-        """Fetch all users assigned to a given role."""
         query = (
             db.query(User)
-            .options(joinedload(User.lab))
+            .options(
+                joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab)
+            )
             .filter(User.role_id == role_id)
         )
         if active_only:
@@ -110,17 +215,14 @@ class AuthRepository:
         return query.all()
 
     def get_lab_by_id(self, db: Session, lab_id: int) -> Optional[Lab]:
-        """Fetch a lab by primary key."""
         return db.query(Lab).filter(Lab.lab_id == lab_id).first()
 
     def get_lab_group_by_id(self, db: Session, lab_group_id: int) -> Optional[LabGroup]:
-        """Fetch a lab group by primary key."""
         return db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
 
     def get_user_by_role_and_lab_group(
         self, db: Session, role_id: int, lab_group_id: int
     ) -> Optional[User]:
-        """Fetch a user assigned to a role/lab-group pair."""
         return (
             db.query(User)
             .filter(User.role_id == role_id, User.lab_group_id == lab_group_id)
@@ -128,44 +230,20 @@ class AuthRepository:
             .first()
         )
 
-    def get_user_by_role_and_lab(
+    def get_users_by_role_and_lab(
         self, db: Session, role_id: int, lab_id: int
-    ) -> Optional[User]:
-        """Fetch a user assigned to a role/lab pair."""
+    ) -> List[User]:
+        """Fetch all users assigned as IC for a specific lab."""
         return (
             db.query(User)
-            .join(Lab, Lab.user_id == User.user_id)
-            .filter(User.role_id == role_id, Lab.lab_id == lab_id)
+            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
+            .filter(User.role_id == role_id, LabIcAssignment.lab_id == lab_id)
             .filter(User.is_active.is_(True))
-            .first()
+            .all()
         )
 
-    def assign_lab_to_user(
-        self, db: Session, user_id: int, lab_id: int, commit: bool = True
-    ) -> None:
-        """Make the user the IC of the lab (1-1). Frees the user's previous lab first.
-
-        Caller must check the lab has no other IC (see get_user_by_role_and_lab);
-        otherwise the UNIQUE constraint on labs.user_id will raise IntegrityError.
-        """
-        db.query(Lab).filter(Lab.user_id == user_id).update({"user_id": None})
-        db.query(Lab).filter(Lab.lab_id == lab_id).update({"user_id": user_id})
-        if commit:
-            db.commit()
-
-    def unassign_lab_from_user(
-        self, db: Session, user_id: int, commit: bool = True
-    ) -> None:
-        """Clear the user's Lab IC assignment, if any.
-
-        Pass commit=False to make this part of a larger transaction.
-        """
-        db.query(Lab).filter(Lab.user_id == user_id).update({"user_id": None})
-        if commit:
-            db.commit()
-
     def get_assignments(self, db: Session) -> list[dict]:
-        """Return current lab group/lab role assignments for admin validation UIs."""
+        """Return current lab group and lab IC assignments for admin UIs."""
         rows = (
             db.query(
                 User.user_id,
@@ -173,12 +251,16 @@ class AuthRepository:
                 User.email,
                 User.role_id,
                 User.lab_group_id,
-                Lab.lab_id.label("lab_id"),
+                LabIcAssignment.lab_id,
+                LabIcAssignment.is_primary,
                 Role.role_name,
             )
             .join(Role, Role.role_id == User.role_id)
-            .outerjoin(Lab, Lab.user_id == User.user_id)
-            .filter((User.lab_group_id.isnot(None)) | (Lab.lab_id.isnot(None)))
+            .outerjoin(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
+            .filter(
+                (User.lab_group_id.isnot(None))
+                | (LabIcAssignment.assignment_id.isnot(None))
+            )
             .filter(User.is_active.is_(True))
             .all()
         )
@@ -191,12 +273,12 @@ class AuthRepository:
                 "role_name": row.role_name,
                 "lab_group_id": row.lab_group_id,
                 "lab_id": row.lab_id,
+                "is_primary": row.is_primary,
             }
             for row in rows
         ]
 
-    # forgot pw stuff
-
+    # Password reset helpers
     def get_active_reset_token(
         self, db: Session, user_id: int
     ) -> Optional[PasswordResetToken]:
@@ -230,33 +312,6 @@ class AuthRepository:
     def mark_token_used(self, db: Session, token: PasswordResetToken) -> None:
         token.used = True
         db.commit()
-
-    def get_active_reset_token_by_user(
-        self, db: Session, user_id: int
-    ) -> Optional[PasswordResetToken]:
-        return (
-            db.query(PasswordResetToken)
-            .filter(
-                PasswordResetToken.user_id == user_id,
-                ~PasswordResetToken.used,
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
-            )
-            .first()
-        )
-
-    def get_last_reset_token_by_user(  # check if password is allowed for resetting
-        self,
-        db: Session,
-        user_id: int,  # allows if used before, but not if expired
-    ) -> Optional[PasswordResetToken]:
-        return (
-            db.query(PasswordResetToken)
-            .filter(
-                PasswordResetToken.user_id == user_id,
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
-            )
-            .first()
-        )
 
     def delete_reset_tokens_by_user(self, db: Session, user_id: int) -> None:
         db.query(PasswordResetToken).filter(
