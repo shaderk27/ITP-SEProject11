@@ -39,7 +39,8 @@ import { FilterBar } from "../components/shared/FilterBar";
 import { DatePickerField } from "../components/shared/DatePickerField";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
-import { format, subDays } from "date-fns";
+import { format, parseISO, subDays } from "date-fns";
+import { setAskAiPageContext } from "../services/chatbotService";
 import {
   exportDashboard,
   getBreakdown,
@@ -566,11 +567,19 @@ export function DashboardPage() {
     }
   }, [slotsStorageKey, slots]);
 
+  // Selected fiscal year (undefined = "All time"). The 7/30/90-day presets
+  // count back from today, so they only make sense when today is inside the
+  // selected year; for a past or future year they would give an empty window.
+  const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
+  const fyStart = selectedPeriod?.start_date ?? "";
+  const fyEnd = selectedPeriod?.end_date ?? "";
+  const todayIso = format(new Date(), "yyyy-MM-dd");
+  const presetsAvailable =
+    !selectedPeriod || (fyStart <= todayIso && todayIso <= fyEnd);
+
   // Effective spend window: the selected FY's span, narrowed by a preset/custom.
-  const [effStart, effEnd] = useMemo(() => {
-    const period = periods.find((p) => p.id === selectedFYPeriodId);
-    const fyStart = period?.start_date ?? "";
-    const fyEnd = period?.end_date ?? "";
+  // `clipped` = the preset reached back before the FY start and was cut to it.
+  const [effStart, effEnd, clipped] = useMemo(() => {
     let rawStart = "";
     let rawEnd = "";
     if (startDate || endDate) {
@@ -584,8 +593,25 @@ export function DashboardPage() {
     // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
     const s = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
     const e = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
-    return [s, e] as const;
-  }, [periods, selectedFYPeriodId, dateRange, startDate, endDate]);
+    return [s, e, Boolean(rawStart && fyStart && rawStart < fyStart)] as const;
+  }, [fyStart, fyEnd, dateRange, startDate, endDate]);
+
+  // The window is narrower than the whole fiscal year (or than all time), so
+  // spend covers only part of the period the Total Budget is for.
+  const windowNarrowed = selectedPeriod
+    ? effStart !== fyStart || effEnd !== fyEnd
+    : Boolean(effStart || effEnd);
+
+  // Ask AI answers for the same period as the dashboard while it is open.
+  useEffect(() => {
+    if (selectedFYPeriodId == null) return;
+    setAskAiPageContext({
+      periodId: selectedFYPeriodId,
+      startDate: effStart,
+      endDate: effEnd,
+    });
+    return () => setAskAiPageContext(null);
+  }, [selectedFYPeriodId, effStart, effEnd]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1474,7 +1500,6 @@ export function DashboardPage() {
   }
 
   // ── Export ──────────────────────────────────────────────────────────
-  const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
   const selectedGroupName =
     selectedGroupId === "all"
       ? "All Lab Groups"
@@ -1555,8 +1580,24 @@ export function DashboardPage() {
           id === "pdf" ? handleExportPdf() : void handleExportExcel()
         }
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year")
-            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
+          if (filterId === "Fiscal Year") {
+            const id = value === "all" ? 0 : Number(value);
+            setSelectedFYPeriodId(id);
+            // Drop sub-window choices that don't fit the new year, rather than
+            // silently clamping them into an empty or partial window.
+            const next = periods.find((p) => p.id === id);
+            if (next) {
+              const inYear = (d: string) =>
+                !d || (next.start_date <= d && d <= next.end_date);
+              if (!(next.start_date <= todayIso && todayIso <= next.end_date)) {
+                setDateRange("all");
+              }
+              if (!inYear(startDate) || !inYear(endDate)) {
+                setStartDate("");
+                setEndDate("");
+              }
+            }
+          }
           if (filterId === "Lab Group") {
             setSelectedGroupId(value);
             // Lab list depends on the group, so reset the lab focus.
@@ -1587,11 +1628,17 @@ export function DashboardPage() {
           {
             label: "Date Range",
             value: dateRange,
+            // "Last N days" counts back from today, so it is only offered
+            // when today falls inside the selected fiscal year.
             options: [
               { value: "all", label: "Whole year" },
-              { value: "7d", label: "Last 7 days" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
+              ...(presetsAvailable
+                ? [
+                    { value: "7d", label: "Last 7 days" },
+                    { value: "30d", label: "Last 30 days" },
+                    { value: "90d", label: "Last 90 days" },
+                  ]
+                : []),
             ],
           },
           // Lab IC is scoped to a single lab and has no group choice, so the
@@ -1620,7 +1667,8 @@ export function DashboardPage() {
           <span className="text-muted-foreground">From</span>
           <DatePickerField
             value={startDate}
-            maxDate={endDate || undefined}
+            minDate={fyStart || undefined}
+            maxDate={endDate || fyEnd || undefined}
             onChange={setStartDate}
           />
         </label>
@@ -1628,10 +1676,23 @@ export function DashboardPage() {
           <span className="text-muted-foreground">To</span>
           <DatePickerField
             value={endDate}
-            minDate={startDate || undefined}
+            minDate={startDate || fyStart || undefined}
+            maxDate={fyEnd || undefined}
             onChange={setEndDate}
           />
         </label>
+        {selectedPeriod && (
+          <span className="text-xs text-muted-foreground">
+            Within {selectedPeriod.name}. For another year, change Fiscal Year
+            (or pick All time).
+          </span>
+        )}
+        {clipped && (
+          <span className="text-xs text-amber-700">
+            {DATE_RANGE_LABELS[dateRange]} starts before {selectedPeriod?.name}, so
+            it is counted from {formatIsoDate(fyStart)}.
+          </span>
+        )}
         {customActive && (
           <>
             <span className="text-xs text-blue-600">
@@ -1679,6 +1740,22 @@ export function DashboardPage() {
         {loadError && (
           <Card className="p-4 bg-[#fef2f2] border-[#fecaca]">
             <p className="text-sm text-[#b91c1c]">{loadError}</p>
+          </Card>
+        )}
+
+        {/* Spend covers a shorter window than the budget it is compared with;
+            say so, or a 30-day slice reads as a low utilisation. */}
+        {windowNarrowed && (
+          <Card className="print-keep p-3 bg-[#eff6ff] border-[#bfdbfe]">
+            <p className="text-sm text-[#1e3a8a]">
+              Spend is for {effStart ? formatIsoDate(effStart) : "the start"} to{" "}
+              {effEnd ? formatIsoDate(effEnd) : "today"}. Total Budget is the{" "}
+              {selectedPeriod
+                ? `full ${selectedPeriod.name} budget`
+                : "total across all fiscal years"}
+              , so Utilisation and Available Balance compare this shorter
+              period's spend against the whole budget.
+            </p>
           </Card>
         )}
 
@@ -1870,4 +1947,9 @@ function pctColor(pct: number): string {
   if (pct >= 95) return "text-[#dc2626]";
   if (pct >= 80) return "text-[#d97706]";
   return "text-foreground";
+}
+
+/** "2026-04-01" → "1 Apr 2026" (same style as the Ask AI period label). */
+function formatIsoDate(iso: string): string {
+  return iso ? format(parseISO(iso), "d MMM yyyy") : "";
 }
