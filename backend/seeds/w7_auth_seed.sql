@@ -3,10 +3,8 @@
 -- second set of lab groups/labs with older WBS aliases.
 
 ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
--- Lab IC is stored on labs.user_id (1-1). See migrate_lab_ic_to_labs.sql for older DBs.
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS user_id BIGINT
-  CONSTRAINT uq_labs_user UNIQUE
-  CONSTRAINT fk_labs_user REFERENCES users(user_id) ON DELETE SET NULL;
+-- Lab IC assignments live in lab_ic_assignments (many-to-many). Fresh DBs get it from
+-- db_setup.sql; older DBs: run migrate_lab_ic_to_assignments.sql once.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- Roles.
@@ -135,23 +133,22 @@ SET
   lab_group_id = EXCLUDED.lab_group_id,
   is_active = EXCLUDED.is_active;
 
--- Lab IC assignments (labs.user_id, 1-1). Clear the demo ICs first so the UNIQUE
--- constraint can't trip on a re-run, then assign. The seed wins over any lab that
--- already has a different IC (that user simply becomes unassigned).
-UPDATE labs
-SET user_id = NULL
-WHERE user_id IN (
-  SELECT user_id FROM users
-  WHERE email IN ('labic.fcb@example.com', 'labic.ict@example.com', 'labic.non@example.com')
-);
-
-UPDATE labs
-SET user_id = (SELECT user_id FROM users WHERE email = 'labic.fcb@example.com')
-WHERE lab_code = 'W3-01-021';
-
-UPDATE labs
-SET user_id = (SELECT user_id FROM users WHERE email = 'labic.ict@example.com')
-WHERE lab_code = 'E2-02-02';
+-- Lab IC assignments (lab_ic_assignments). Idempotent: existing rows are left alone and a
+-- demo IC becomes primary only if the lab has no primary yet. labic.non stays unassigned.
+INSERT INTO lab_ic_assignments (lab_id, user_id, is_primary)
+SELECT
+  l.lab_id,
+  u.user_id,
+  NOT EXISTS (
+    SELECT 1 FROM lab_ic_assignments a WHERE a.lab_id = l.lab_id AND a.is_primary
+  )
+FROM (VALUES
+  ('W3-01-021', 'labic.fcb@example.com'),
+  ('E2-02-02',  'labic.ict@example.com')
+) AS m(lab_code, email)
+JOIN labs  l ON l.lab_code = m.lab_code
+JOIN users u ON u.email = m.email
+ON CONFLICT (lab_id, user_id) DO NOTHING;
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 SELECT setval(pg_get_serial_sequence('roles', 'role_id'), (SELECT MAX(role_id) FROM roles));

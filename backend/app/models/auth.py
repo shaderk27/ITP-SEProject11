@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.models.config import Lab, LabGroup
+from app.models.config import Lab, LabGroup, LabIcAssignment  # noqa: F401 (registers mapper)
 
 
 class Role(Base):
@@ -64,19 +64,27 @@ class User(Base):
     # Relationships
     role: Mapped["Role"] = relationship("Role", back_populates="users")
     lab_group: Mapped[Optional["LabGroup"]] = relationship("LabGroup")
-    # Lab IC link lives on labs.user_id (1-1); a user is IC of at most one lab.
-    lab: Mapped[Optional["Lab"]] = relationship(
-        "Lab", back_populates="ic_user", foreign_keys="Lab.user_id", uselist=False
+    # Lab IC links live in lab_ic_assignments (many-to-many): a user can be IC of
+    # several labs, and a lab can have several ICs (at most one primary).
+    lab_assignments: Mapped[List["LabIcAssignment"]] = relationship(
+        "LabIcAssignment",
+        back_populates="user",
+        foreign_keys="LabIcAssignment.user_id",
+        cascade="all, delete-orphan",
     )
 
     @property
-    def lab_id(self) -> Optional[int]:
-        """Read-only. Derived from the assigned lab (labs.user_id); not a column.
+    def lab_ids(self) -> List[int]:
+        """Read-only ids of every lab this user is Lab IC of. Use for scope checks.
 
-        Not usable in queries: filter on Lab.user_id / join through Lab instead.
-        Assign via AuthRepository.assign_lab_to_user / unassign_lab_from_user.
+        Not usable in queries: join LabIcAssignment on user_id instead.
         """
-        return self.lab.lab_id if self.lab is not None else None
+        return [a.lab_id for a in self.lab_assignments]
+
+    @property
+    def labs(self) -> List["Lab"]:
+        """Read-only labs this user is Lab IC of."""
+        return [a.lab for a in self.lab_assignments]
 
     def __repr__(self) -> str:
         return f"<User(email={self.email!r}, full_name={self.full_name!r})>"

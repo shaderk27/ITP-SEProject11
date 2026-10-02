@@ -11,12 +11,8 @@
 -- Randy: allow labs.lab_group_id to be NULL. Safe to re-run.
 ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
 
--- Lab IC scoping (W7-02) now lives on labs.user_id (1-1), not users.lab_id.
--- Run migrate_lab_ic_to_labs.sql once on older DBs to move existing assignments.
--- This ADD COLUMN is only a safety net; IF NOT EXISTS = idempotent.
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS user_id BIGINT
-    CONSTRAINT uq_labs_user UNIQUE
-    CONSTRAINT fk_labs_user REFERENCES users(user_id) ON DELETE SET NULL;
+-- Lab IC scoping (W7-02) lives in lab_ic_assignments (many-to-many, optional primary).
+-- Fresh DBs get it from db_setup.sql; older DBs: run migrate_lab_ic_to_assignments.sql once.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- Irfan (W9-02 follow-up): source-system PR Status surfaced on PR Records page.
