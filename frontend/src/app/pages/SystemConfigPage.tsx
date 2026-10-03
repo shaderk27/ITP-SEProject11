@@ -1331,7 +1331,7 @@ export function SystemConfigPage() {
               <div className="grid grid-cols-2 gap-5">
                 <div>
                   <label className="text-sm font-medium text-gray-700">
-                    Lab Code
+                    Lab Location
                   </label>
                   <input
                     type="text"
