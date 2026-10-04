@@ -439,7 +439,7 @@ export function SystemConfigPage() {
           credentials: "include",
           body: JSON.stringify({
             lab_id: assignTargetLab.id,
-            is_primary: isPrimaryAssignment, // Sends boolean flag to server
+            // is_primary: isPrimaryAssignment, // Sends boolean flag to server
           }),
         },
       );

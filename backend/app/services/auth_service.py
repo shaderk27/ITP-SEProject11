@@ -395,7 +395,13 @@ class AuthService:
                 "lab_assignments": self._format_user_assignments(refreshed_user),
             }
 
-    def assign_lab_to_user(self, user_id: int, lab_id: int, is_primary: bool = False,assigned_by: Optional[int] = None) -> Dict[str, Any]:
+    def assign_lab_to_user(
+        self,
+        user_id: int,
+        lab_id: int,
+        is_primary: Optional[bool] = None,
+        assigned_by: Optional[int] = None,
+    ) -> Dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -409,7 +415,13 @@ class AuthService:
             raise HTTPException(status_code=404, detail="Lab not found.")
 
         user.lab_group_id = None
-        self.repository.assign_lab_to_user(self.db, user.user_id, lab_id, is_primary=is_primary)
+        self.repository.assign_lab_to_user(
+            self.db,
+            user.user_id,
+            lab_id,
+            is_primary=is_primary,
+            assigned_by=assigned_by,
+        )
         self.db.refresh(user)
 
         return {

@@ -125,17 +125,15 @@ class AuthRepository:
         db: Session,
         user_id: int,
         lab_id: int,
-        is_primary: bool = False,
+        is_primary: Optional[bool] = None,
         assigned_by: Optional[int] = None,
         commit: bool = True,
     ) -> None:
-        """Assign a user to a lab via lab_ic_assignments."""
-        if is_primary:
-            # Clear existing primary IC for this lab if changing primary
-            db.query(LabIcAssignment).filter(
-                LabIcAssignment.lab_id == lab_id, LabIcAssignment.is_primary.is_(True)
-            ).update({"is_primary": False})
+        """Assign a user to a lab via lab_ic_assignments.
 
+        If is_primary is None, the user becomes primary only when the lab
+        has no other primary IC; otherwise they are added as secondary.
+        """
         existing = (
             db.query(LabIcAssignment)
             .filter(
@@ -145,17 +143,44 @@ class AuthRepository:
             .first()
         )
 
-        if existing:
-            setattr(existing, "is_primary", is_primary)
-            setattr(existing, "assigned_by", assigned_by)
-        else:
-            new_assign = LabIcAssignment(
-                lab_id=lab_id,
-                user_id=user_id,
-                is_primary=is_primary,
-                assigned_by=assigned_by,
+        if is_primary is None:
+            # Is there a primary IC other than this user?
+            other_primary_exists = (
+                db.query(LabIcAssignment.user_id)
+                .filter(
+                    LabIcAssignment.lab_id == lab_id,
+                    LabIcAssignment.is_primary.is_(True),
+                    LabIcAssignment.user_id != user_id,
+                )
+                .first()
+                is not None
             )
-            db.add(new_assign)
+            if other_primary_exists:
+                # Keep an existing primary status if this user already holds it
+                is_primary = bool(existing.is_primary) if existing else False
+            else:
+                is_primary = True
+
+        if is_primary:
+            # Demote any other primary IC for this lab
+            db.query(LabIcAssignment).filter(
+                LabIcAssignment.lab_id == lab_id,
+                LabIcAssignment.is_primary.is_(True),
+                LabIcAssignment.user_id != user_id,
+            ).update({"is_primary": False})
+
+        if existing:
+            existing.is_primary = is_primary
+            existing.assigned_by = assigned_by
+        else:
+            db.add(
+                LabIcAssignment(
+                    lab_id=lab_id,
+                    user_id=user_id,
+                    is_primary=is_primary,
+                    assigned_by=assigned_by,
+                )
+            )
 
         if commit:
             db.commit()

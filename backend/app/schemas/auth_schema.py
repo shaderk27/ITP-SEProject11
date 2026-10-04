@@ -117,7 +117,7 @@ class LabICOut(BaseModel):
 
 class AssignLabSchema(BaseModel):
     lab_id: int
-    is_primary: bool = False
+    is_primary: Optional[bool] = None
 
 
 class AssignLabGroupSchema(BaseModel):
