@@ -87,7 +87,9 @@ class Lab(Base):
     @property
     def ic_users(self):
         """All Lab ICs (Users), primary first."""
-        ordered = sorted(self.ic_assignments, key=lambda a: (not a.is_primary, a.assignment_id or 0))
+        ordered = sorted(
+            self.ic_assignments, key=lambda a: (not a.is_primary, a.assignment_id or 0)
+        )
         return [a.user for a in ordered]
 
     @property

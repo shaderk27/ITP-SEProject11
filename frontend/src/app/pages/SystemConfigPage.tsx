@@ -465,18 +465,15 @@ export function SystemConfigPage() {
 
     const userName = targetUser.full_name || targetUser.name || "this user";
 
-    if (!window.confirm(`Clear all assignments for ${userName}?`)) {
+    if (!window.confirm(`Unassign ${userName} from this lab?`)) {
       return;
     }
 
     try {
       const res = await fetch(
-        `${API_BASE_URL}/api/auth/users/${userId}/unassign-scope`,
+        `${API_BASE_URL}/api/auth/users/${userId}/labs/${labId}`,
         {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          method: "DELETE",
           credentials: "include",
         },
       );
@@ -484,11 +481,11 @@ export function SystemConfigPage() {
       if (res.ok) {
         fetchConfigData();
       } else {
-        alert(await readErrorDetail(res, "Failed to clear assignments."));
+        alert(await readErrorDetail(res, "Failed to unassign lab."));
       }
     } catch (error) {
-      console.error("Error clearing assignment:", error);
-      alert("Failed to clear assignments.");
+      console.error("Error unassigning lab:", error);
+      alert("Failed to unassign lab.");
     }
   };
   const openAssignTeamLeadModal = (group: any) => {
@@ -641,26 +638,26 @@ export function SystemConfigPage() {
         </div>
 
         <Tabs defaultValue="labgroups" className="w-full">
-<TabsList className="bg-white border border-border mb-6">
-  <TabsTrigger
-    value="labgroups"
-    className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
-  >
-    Lab Groups & Budgets
-  </TabsTrigger>
-  <TabsTrigger
-    value="categories"
-    className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
-  >
-    Categories
-  </TabsTrigger>
-  <TabsTrigger
-    value="users"
-    className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
-  >
-    Users
-  </TabsTrigger>
-</TabsList>
+          <TabsList className="bg-white border border-border mb-6">
+            <TabsTrigger
+              value="labgroups"
+              className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+            >
+              Lab Groups & Budgets
+            </TabsTrigger>
+            <TabsTrigger
+              value="categories"
+              className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+            >
+              Categories
+            </TabsTrigger>
+            <TabsTrigger
+              value="users"
+              className="data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+            >
+              Users
+            </TabsTrigger>
+          </TabsList>
 
           <TabsContent value="labgroups">
             <Card className="bg-white border-border">
@@ -1684,8 +1681,8 @@ export function SystemConfigPage() {
                   })()}
                 </select>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Only unassigned Lab IC users are shown. To reassign from
-                  another lab, unassign them first via User Management.
+                  Users already assigned to this lab are hidden. Users assigned
+                  to other labs can still be added here.
                 </p>
                 {selectedLabICUserId !== "" && (
                   <div className="mt-3 rounded-md border border-[#1e3a8a]/20 bg-[#eff6ff] p-3 text-sm">

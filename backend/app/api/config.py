@@ -121,7 +121,9 @@ def get_lab_groups(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    role_name = (current_user.role.role_name if current_user.role else "").lower().strip()
+    role_name = (
+        (current_user.role.role_name if current_user.role else "").lower().strip()
+    )
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
     query = db.query(LabGroup)
@@ -130,20 +132,20 @@ def get_lab_groups(
             return []
         query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-            # Multi-lab resolution via user assignments
-            user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
-            if not user_lab_ids:
-                return []
-            user_lab_group_ids = (
-                db.query(Lab.lab_group_id)
-                .filter(Lab.lab_id.in_(user_lab_ids), Lab.lab_group_id.isnot(None))
-                .distinct()
-                .all()
-            )
-            group_ids = [gid[0] for gid in user_lab_group_ids if gid[0]]
-            if not group_ids:
-                return []
-            query = query.filter(LabGroup.lab_group_id.in_(group_ids))
+        # Multi-lab resolution via user assignments
+        user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        if not user_lab_ids:
+            return []
+        user_lab_group_ids = (
+            db.query(Lab.lab_group_id)
+            .filter(Lab.lab_id.in_(user_lab_ids), Lab.lab_group_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        group_ids = [gid[0] for gid in user_lab_group_ids if gid[0]]
+        if not group_ids:
+            return []
+        query = query.filter(LabGroup.lab_group_id.in_(group_ids))
     elif role_name != "admin":
         return []
 
@@ -532,10 +534,10 @@ def get_labs(
             return []
         query = query.filter(Lab.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-            user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
-            if not user_lab_ids:
-                return []
-            query = query.filter(Lab.lab_id.in_(user_lab_ids))
+        user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        if not user_lab_ids:
+            return []
+        query = query.filter(Lab.lab_id.in_(user_lab_ids))
     elif role_name != "admin":
         return []
 

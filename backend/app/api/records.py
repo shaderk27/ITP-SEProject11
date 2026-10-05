@@ -101,7 +101,9 @@ def list_committed_prs(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Admin or Team Lead can view PR Records.",
         )
-    user_lab_ids = [a.lab_id for a in current_user.lab_assignments] if role_name == "labic" else []
+    user_lab_ids = (
+        [a.lab_id for a in current_user.lab_assignments] if role_name == "labic" else []
+    )
 
     query = db.query(PurchaseRequest)
     if role_name == "teamlead":
@@ -144,9 +146,7 @@ def list_committed_prs(
     )
     # Lab IC only sees their own lab's lines within each PR.
     if role_name == "labic":
-        lines_query = lines_query.filter(
-            PurchaseRequestLine.lab_id.in_(user_lab_ids)
-        )
+        lines_query = lines_query.filter(PurchaseRequestLine.lab_id.in_(user_lab_ids))
     all_lines = lines_query.order_by(
         PurchaseRequestLine.pr_id, PurchaseRequestLine.line_no
     ).all()

@@ -185,6 +185,16 @@ async def unassign_user_scope(
     return service.unassign_user_scope(user_id)
 
 
+@router.delete("/users/{user_id}/labs/{lab_id}")
+async def unassign_lab_from_user(
+    user_id: int,
+    lab_id: int,
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin),
+):
+    return service.unassign_lab_from_user(user_id, lab_id)
+
+
 @router.put("/users/{user_id}/deactivate")
 async def deactivate_user(
     user_id: int,
@@ -251,7 +261,7 @@ async def refresh_session(
 
     # Resolve all lab assignments for the current user
     lab_ids = current_user.get("lab_ids", [])
-    
+
     token_payload = {
         "sub": str(current_user["id"]),
         "email": current_user["email"],

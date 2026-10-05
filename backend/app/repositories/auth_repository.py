@@ -21,15 +21,19 @@ class AuthRepository:
         )
 
     def get_user_by_id(self, db: Session, user_id: int) -> Optional[User]:
-        return db.execute(
-            select(User)
-            .options(
-                joinedload(User.role),
-                joinedload(User.lab_group),
-                joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab),
+        return (
+            db.execute(
+                select(User)
+                .options(
+                    joinedload(User.role),
+                    joinedload(User.lab_group),
+                    joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab),
+                )
+                .where(User.user_id == user_id)
             )
-            .where(User.user_id == user_id)
-        ).unique().scalar_one_or_none()
+            .unique()
+            .scalar_one_or_none()
+        )
 
     def get_user_by_staff_id(self, db: Session, staff_id: str) -> Optional[User]:
         """Fetch a user by their unique institutional staff identifier."""
@@ -184,6 +188,7 @@ class AuthRepository:
 
         if commit:
             db.commit()
+
     def assign_labgroup_to_user(
         self, db: Session, user_id: int, lab_group_id: int, commit: bool = True
     ) -> Optional[User]:
@@ -200,6 +205,7 @@ class AuthRepository:
 
         # Return updated user model instance
         return self.get_user_by_id(db, user_id)
+
     def unassign_lab_from_user(
         self, db: Session, user_id: int, lab_id: int, commit: bool = True
     ) -> None:
@@ -246,22 +252,22 @@ class AuthRepository:
     ) -> List[User]:
         query = (
             db.query(User)
-            .options(
-                joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab)
-            )
+            .options(joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab))
             .filter(User.role_id == role_id)
         )
         if active_only:
             query = query.filter(User.is_active.is_(True))
         return query.all()
+
     def get_users_by_role(self, db: Session, role_name: str) -> List[User]:
-            """Fetch all users assigned to a given role name."""
-            stmt = (
-                select(User)
-                .join(Role, User.role_id == Role.role_id)
-                .where(Role.role_name.ilike(role_name))
-            )
-            return list(db.execute(stmt).unique().scalars().all())
+        """Fetch all users assigned to a given role name."""
+        stmt = (
+            select(User)
+            .join(Role, User.role_id == Role.role_id)
+            .where(Role.role_name.ilike(role_name))
+        )
+        return list(db.execute(stmt).unique().scalars().all())
+
     def get_lab_by_id(self, db: Session, lab_id: int) -> Optional[Lab]:
         return db.query(Lab).filter(Lab.lab_id == lab_id).first()
 
@@ -374,7 +380,7 @@ class AuthRepository:
             {"password_hash": hashed_password}
         )
         db.commit()
-        
+
     def get_active_reset_token_by_user(
         self, db: Session, user_id: int
     ) -> Optional[PasswordResetToken]:
@@ -383,9 +389,9 @@ class AuthRepository:
             select(PasswordResetToken)
             .where(
                 PasswordResetToken.user_id == user_id,
-                PasswordResetToken.is_used == False,  # noqa: E712
+                PasswordResetToken.used,  # noqa: E712
                 # If you have an expiration column:
-                # PasswordResetToken.expires_at > datetime.now(timezone.utc),
+                PasswordResetToken.expires_at > datetime.now(timezone.utc),
             )
             .order_by(PasswordResetToken.created_at.desc())
         )
