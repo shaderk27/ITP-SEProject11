@@ -18,6 +18,7 @@ from app.models.config import (
     LabGroupCreate,
     LabCreate,
     CategoryCreate,
+    LabIcAssignment,
 )
 from app.database import get_db
 from app.dependencies.auth import get_current_user
@@ -131,12 +132,20 @@ def get_lab_groups(
             return []
         query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-        if not current_user.lab_id:
+        # Multi-lab resolution via user assignments
+        user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        if not user_lab_ids:
             return []
-        user_lab = db.query(Lab).filter(Lab.lab_id == current_user.lab_id).first()
-        if not user_lab or not user_lab.lab_group_id:
+        user_lab_group_ids = (
+            db.query(Lab.lab_group_id)
+            .filter(Lab.lab_id.in_(user_lab_ids), Lab.lab_group_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        group_ids = [gid[0] for gid in user_lab_group_ids if gid[0]]
+        if not group_ids:
             return []
-        query = query.filter(LabGroup.lab_group_id == user_lab.lab_group_id)
+        query = query.filter(LabGroup.lab_group_id.in_(group_ids))
     elif role_name != "admin":
         return []
 
@@ -214,7 +223,6 @@ def create_lab_group(
 ):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
-    # --- PREVENT DUPLICATE WBS CODES ---
     existing_wbs = (
         db.query(LabGroup)
         .filter(func.lower(LabGroup.wbs_code) == group.wbs_code.lower())
@@ -225,7 +233,6 @@ def create_lab_group(
             status_code=400,
             detail=f"Cannot create Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
         )
-    # -----------------------------------
 
     new_group = LabGroup(
         lab_group_name=group.name,
@@ -279,7 +286,7 @@ def create_lab_group(
 def update_lab_group(
     group_id: int,
     group: LabGroupCreate,
-    background_tasks: BackgroundTasks,  # <-- 1. ADD THIS PARAMETER
+    background_tasks: BackgroundTasks,
     period_id: int | None = None,
     db: Session = Depends(get_db),
 ):
@@ -289,7 +296,6 @@ def update_lab_group(
 
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
-    # --- PREVENT DUPLICATE WBS CODES ON RENAME ---
     existing_wbs = (
         db.query(LabGroup)
         .filter(
@@ -303,7 +309,6 @@ def update_lab_group(
             status_code=400,
             detail=f"Cannot update Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
         )
-    # ---------------------------------------------
 
     db_group.lab_group_name = group.name
     db_group.wbs_code = group.wbs_code
@@ -347,9 +352,7 @@ def update_lab_group(
 
     db.commit()
 
-    # --- 2. ADD THIS: FIRE ALERTS AFTER BUDGET CHANGE ---
     background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
-    # ----------------------------------------------------
 
     allocated = float(
         db.query(func.sum(Budget.budget_amount))
@@ -422,7 +425,6 @@ def get_categories(db: Session = Depends(get_db)):
 
 @router.post("/categories", response_model=CategoryOut)
 def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
-    # --- PREVENT DUPLICATE CATEGORY NAMES ---
     existing_cat = (
         db.query(SpendingCategory)
         .filter(func.lower(SpendingCategory.category_name) == cat_in.name.lower())
@@ -433,7 +435,6 @@ def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
             status_code=400,
             detail=f"Cannot create category: The name '{cat_in.name}' is already in use.",
         )
-    # ----------------------------------------
 
     new_cat = SpendingCategory(
         category_name=cat_in.name, description=cat_in.description
@@ -458,7 +459,6 @@ def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(g
     if not db_cat:
         raise HTTPException(status_code=404)
 
-    # --- PREVENT DUPLICATE CATEGORY NAMES ON RENAME ---
     existing_cat = (
         db.query(SpendingCategory)
         .filter(
@@ -472,7 +472,6 @@ def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(g
             status_code=400,
             detail=f"Cannot update category: The name '{cat_in.name}' is already in use.",
         )
-    # --------------------------------------------------
 
     db_cat.category_name = cat_in.name
     db_cat.description = cat_in.description
@@ -535,9 +534,10 @@ def get_labs(
             return []
         query = query.filter(Lab.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-        if not current_user.lab_id:
+        user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        if not user_lab_ids:
             return []
-        query = query.filter(Lab.lab_id == current_user.lab_id)
+        query = query.filter(Lab.lab_id.in_(user_lab_ids))
     elif role_name != "admin":
         return []
 
@@ -553,6 +553,22 @@ def get_labs(
         )
         total_budget = sum(float(b.budget_amount) for b in budgets) if budgets else 0.0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
+
+        # Dynamically resolve Primary Lab IC details
+        primary_ic_assignment = (
+            db.query(LabIcAssignment)
+            .filter(
+                LabIcAssignment.lab_id == lab.lab_id,
+                LabIcAssignment.is_primary.is_(True),
+            )
+            .first()
+        )
+        if primary_ic_assignment and primary_ic_assignment.user:
+            ic_name = primary_ic_assignment.user.full_name
+            ic_email = primary_ic_assignment.user.email
+        else:
+            ic_name = ""
+            ic_email = ""
 
         if active_period:
             total_spent = float(
@@ -618,8 +634,8 @@ def get_labs(
                 "venue": lab.venue or "",
                 "budget": total_budget,
                 "spent": total_spent,
-                "ic_name": "",
-                "ic_email": "",
+                "ic_name": ic_name,
+                "ic_email": ic_email,
                 "budgets": budget_map,
                 "spent_by_category": spent_by_cat,
             }
@@ -635,7 +651,6 @@ def create_lab(
 ):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
-    # --- PREVENT DUPLICATE LAB CODES ---
     existing_lab = (
         db.query(Lab)
         .filter(func.lower(Lab.lab_code) == lab_in.lab_code.lower())
@@ -647,7 +662,6 @@ def create_lab(
             detail=f"Cannot create lab: The code '{lab_in.lab_code}' is already in use by another lab.",
         )
 
-    # --- TOP DOWN BUDGET VALIDATION ---
     requested_total = sum(amount for amount in lab_in.budgets.values() if amount > 0)
 
     group_envelope = float(
@@ -678,7 +692,6 @@ def create_lab(
             status_code=400,
             detail=f"Budget Exceeded: You requested ${requested_total:,.2f}, but the Lab Group only has ${remaining:,.2f} of unallocated funds remaining.",
         )
-    # ----------------------------------
 
     new_lab = Lab(
         lab_code=lab_in.lab_code,
@@ -735,7 +748,6 @@ def update_lab(
 
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
-    # --- PREVENT DUPLICATE LAB CODES ---
     existing_lab = (
         db.query(Lab)
         .filter(
@@ -750,7 +762,6 @@ def update_lab(
             detail=f"Cannot update lab: The code '{lab_in.lab_code}' is already in use by another lab.",
         )
 
-    # --- TOP DOWN BUDGET VALIDATION ---
     requested_total = sum(amount for amount in lab_in.budgets.values() if amount > 0)
 
     group_envelope = float(
@@ -782,7 +793,6 @@ def update_lab(
             status_code=400,
             detail=f"Budget Exceeded: You requested ${requested_total:,.2f}, but the Lab Group only has ${remaining:,.2f} of unallocated funds remaining.",
         )
-    # ----------------------------------
 
     db_lab.lab_code = lab_in.lab_code
     db_lab.lab_name = lab_in.lab_name

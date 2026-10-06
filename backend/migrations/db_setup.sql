@@ -30,6 +30,7 @@ DROP TABLE IF EXISTS budget_periods                CASCADE;
 DROP TABLE IF EXISTS spending_categories           CASCADE;
 DROP TABLE IF EXISTS requester_lab_mappings        CASCADE;
 DROP TABLE IF EXISTS lab_aliases                   CASCADE;
+DROP TABLE IF EXISTS lab_ic_assignments            CASCADE;
 DROP TABLE IF EXISTS labs                          CASCADE;
 DROP TABLE IF EXISTS users                         CASCADE;
 DROP TABLE IF EXISTS lab_groups                    CASCADE;
@@ -66,6 +67,10 @@ CREATE TABLE users (
     email           varchar(255)    NOT NULL UNIQUE,
     staff_id        varchar(50)     UNIQUE,
     password_hash   text            NOT NULL,
+    -- Deactivate/reactivate history (who + when) is recorded in audit_logs, section 8:
+    --   action_type 'user_deactivated' / 'user_reactivated', entity_name 'users',
+    --   record_id = target user_id, user_id = acting admin.
+    is_active       boolean         NOT NULL DEFAULT true,
     created_at      timestamptz     NOT NULL DEFAULT now(),
     updated_at      timestamptz     NOT NULL DEFAULT now(),
     lab_group_id    bigint          -- FK added after lab_groups is created
@@ -104,6 +109,22 @@ CREATE TABLE labs (
     is_general      boolean         NOT NULL DEFAULT false,
     created_at      timestamptz     NOT NULL DEFAULT now()
 );
+
+-- Lab IC assignments (many-to-many):
+--   * one user can be Lab IC of several labs
+--   * one lab can have several Lab ICs, at most one of them primary
+CREATE TABLE lab_ic_assignments (
+    assignment_id   bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    lab_id          bigint          NOT NULL REFERENCES labs (lab_id)   ON DELETE CASCADE,
+    user_id         bigint          NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    is_primary      boolean         NOT NULL DEFAULT false,
+    assigned_at     timestamptz     NOT NULL DEFAULT now(),
+    assigned_by     bigint          REFERENCES users (user_id) ON DELETE SET NULL,
+    CONSTRAINT uq_lab_ic_lab_user UNIQUE (lab_id, user_id)
+);
+
+-- At most one primary Lab IC per lab.
+CREATE UNIQUE INDEX uq_lab_ic_one_primary ON lab_ic_assignments (lab_id) WHERE is_primary;
 
 CREATE TABLE lab_aliases (
     lab_alias_id    bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -383,6 +404,9 @@ CREATE INDEX idx_labs_lab_group_id    ON labs (lab_group_id);
 -- lab_aliases
 CREATE INDEX idx_lab_aliases_lab_id   ON lab_aliases (lab_id);
 
+-- lab_ic_assignments (lab_id is covered by uq_lab_ic_lab_user)
+CREATE INDEX idx_lic_user_id          ON lab_ic_assignments (user_id);
+
 -- requester_lab_mappings
 CREATE INDEX idx_req_lab_map_lab_id   ON requester_lab_mappings (default_lab_id);
 
@@ -435,6 +459,7 @@ CREATE INDEX idx_ba_alert_status      ON budget_alerts (alert_status);
 CREATE INDEX idx_al_user_id           ON audit_logs (user_id);
 CREATE INDEX idx_al_entity_name       ON audit_logs (entity_name);
 CREATE INDEX idx_al_created_at        ON audit_logs (created_at);
+CREATE INDEX idx_al_entity_record     ON audit_logs (entity_name, record_id);
 
 -- chatbot_queries
 CREATE INDEX idx_cq_user_id           ON chatbot_queries (user_id);
