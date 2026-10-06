@@ -298,10 +298,12 @@ export function RecordsPage() {
           {filteredRecords.map((pr) => {
             const isExpanded = expandedPr === pr.pr_id;
             return (
-              <Card key={pr.pr_id} className="bg-white border-border overflow-hidden">
+              <Card key={pr.pr_id} className="bg-white border-[#cbd5e1] overflow-hidden">
                 <button
                   type="button"
-                  className="w-full p-5 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
+                  className={`w-full p-5 flex items-center justify-between gap-4 text-left ${
+                    isExpanded ? "bg-[#e2e8f0]" : "hover:bg-[#f1f5f9]"
+                  }`}
                   onClick={() => setExpandedPr(isExpanded ? null : pr.pr_id)}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -328,25 +330,25 @@ export function RecordsPage() {
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-border overflow-x-auto">
+                  <div className="border-t border-[#cbd5e1] overflow-x-auto">
                     <table className="w-full">
-                      <thead className="bg-[#f8f9fa]">
-                        <tr className="border-b border-border">
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Line</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Lab</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Category</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">PR Date</th>
-                          <th className="text-right p-3 text-xs font-medium text-muted-foreground">Qty</th>
-                          <th className="text-right p-3 text-xs font-medium text-muted-foreground">Unit Rate</th>
-                          <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Status</th>
+                      <thead className="bg-[#e2e8f0]">
+                        <tr className="border-b border-[#cbd5e1]">
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Line</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Item</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Lab</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Category</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">PR Date</th>
+                          <th className="text-right p-3 text-xs font-semibold text-[#334155]">Qty</th>
+                          <th className="text-right p-3 text-xs font-semibold text-[#334155]">Unit Rate</th>
+                          <th className="text-right p-3 text-xs font-semibold text-[#334155]">Amount + GST</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Status</th>
                         </tr>
                       </thead>
                       <tbody>
                         {pr.lines.map((line) => (
                           <Fragment key={line.pr_line_id}>
-                            <tr className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
+                            <tr className="border-b border-[#e2e8f0] last:border-0 even:bg-[#f1f5f9] hover:bg-[#e0f2fe]">
                               <td className="p-3 text-sm font-medium text-foreground">
                                 Line {line.line_no ?? "—"}
                               </td>
