@@ -389,7 +389,7 @@ class AuthRepository:
             select(PasswordResetToken)
             .where(
                 PasswordResetToken.user_id == user_id,
-                PasswordResetToken.used,  # noqa: E712
+                ~PasswordResetToken.used,  # noqa: E712
                 # If you have an expiration column:
                 PasswordResetToken.expires_at > datetime.now(timezone.utc),
             )
