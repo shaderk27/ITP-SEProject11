@@ -37,9 +37,10 @@ import {
 } from "../components/ui/popover";
 import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
+import { MonthRangePicker } from "../components/shared/MonthRangePicker";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
-import { eachMonthOfInterval, endOfMonth, format, parseISO } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { setAskAiPageContext } from "../services/chatbotService";
 import {
   exportDashboard,
@@ -611,19 +612,6 @@ export function DashboardPage() {
   const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
   const fyStart = selectedPeriod?.start_date ?? "";
   const fyEnd = selectedPeriod?.end_date ?? "";
-
-  // Months offered in the custom range: the selected fiscal year's months, or
-  // every month across all fiscal years for "All time".
-  const monthOptions = useMemo(() => {
-    const spans = selectedPeriod ? [selectedPeriod] : periods;
-    if (spans.length === 0) return [];
-    const first = spans.reduce((a, p) => (p.start_date < a ? p.start_date : a), spans[0].start_date);
-    const last = spans.reduce((a, p) => (p.end_date > a ? p.end_date : a), spans[0].end_date);
-    return eachMonthOfInterval({ start: parseISO(first), end: parseISO(last) }).map((d) => ({
-      value: format(d, "yyyy-MM"),
-      label: format(d, "MMM yyyy"),
-    }));
-  }, [selectedPeriod, periods]);
 
   // Effective spend window: the selected FY's span, narrowed by the custom
   // month range and clamped to the FY (ISO dates sort lexicographically).
@@ -1689,46 +1677,13 @@ export function DashboardPage() {
       {/* Custom month range — narrows the spend window within the fiscal year. */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
         <span className="text-muted-foreground">Custom range:</span>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">From</span>
-          <select
-            value={startDate.slice(0, 7)}
-            onChange={(e) => setStartDate(e.target.value ? `${e.target.value}-01` : "")}
-            className="text-sm border border-border rounded-md px-2 py-1 bg-white"
-          >
-            <option value="">Select month</option>
-            {monthOptions
-              .filter((m) => !endDate || m.value <= endDate.slice(0, 7))
-              .map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">To</span>
-          <select
-            value={endDate.slice(0, 7)}
-            onChange={(e) =>
-              setEndDate(
-                e.target.value
-                  ? format(endOfMonth(parseISO(`${e.target.value}-01`)), "yyyy-MM-dd")
-                  : "",
-              )
-            }
-            className="text-sm border border-border rounded-md px-2 py-1 bg-white"
-          >
-            <option value="">Select month</option>
-            {monthOptions
-              .filter((m) => !startDate || m.value >= startDate.slice(0, 7))
-              .map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-          </select>
-        </label>
+        <MonthRangePicker
+          periods={selectedPeriod ? [selectedPeriod] : periods}
+          startDate={startDate}
+          endDate={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
         {selectedPeriod && (
           <span className="text-xs text-muted-foreground">
             Within {selectedPeriod.name}. For another year, change Fiscal Year

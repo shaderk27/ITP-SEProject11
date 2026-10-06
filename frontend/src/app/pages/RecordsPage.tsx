@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
-import { DatePickerField } from "../components/shared/DatePickerField";
+import { MonthRangePicker } from "../components/shared/MonthRangePicker";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
@@ -27,10 +27,12 @@ export function RecordsPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
   const [dateRange, setDateRange] = useState("all");
-  // Custom date range (overrides the preset when either is set).
+  // Custom month range (overrides the preset when either is set): startDate is
+  // the 1st of the From month, endDate the last day of the To month.
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
+  const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
 
   // Effective request window: the selected fiscal year's Apr–Mar span,
   // narrowed by the custom range (if set) or the preset. Shared by the list
@@ -53,7 +55,7 @@ export function RecordsPage() {
     // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
     return {
       effStart: !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart,
-      effEnd: !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd,
+      effEnd: !rawEnd ? fyEnd : !fyEnd || rawEnd < fyEnd ? rawEnd : fyEnd,
     };
   };
 
@@ -156,8 +158,19 @@ export function RecordsPage() {
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year")
-            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
+          if (filterId === "Fiscal Year") {
+            const id = value === "all" ? 0 : Number(value);
+            setSelectedFYPeriodId(id);
+            // Drop a custom range that falls outside the new year rather than
+            // silently clamping it into an empty or partial window.
+            const next = periods.find((p) => p.id === id);
+            const inYear = (d: string) =>
+              !next || !d || (next.start_date <= d && d <= next.end_date);
+            if (!inYear(startDate) || !inYear(endDate)) {
+              setStartDate("");
+              setEndDate("");
+            }
+          }
           if (filterId === "Lab Group") setLabGroupFilter(value);
           if (filterId === "Date Range") {
             // Picking a preset clears any custom range so the preset applies.
@@ -208,25 +221,16 @@ export function RecordsPage() {
         onExport={() => setShowExportDialog(true)}
       />
 
-      {/* Custom date range — overrides the preset when set. */}
+      {/* Custom month range — overrides the preset when set. */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
         <span className="text-muted-foreground">Custom range:</span>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">From</span>
-          <DatePickerField
-            value={startDate}
-            maxDate={endDate || undefined}
-            onChange={setStartDate}
-          />
-        </label>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">To</span>
-          <DatePickerField
-            value={endDate}
-            minDate={startDate || undefined}
-            onChange={setEndDate}
-          />
-        </label>
+        <MonthRangePicker
+          periods={selectedPeriod ? [selectedPeriod] : periods}
+          startDate={startDate}
+          endDate={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
         {customActive && (
           <>
             <span className="text-xs text-blue-600">
