@@ -21,6 +21,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
+import { InfoTip } from "../components/shared/InfoTip";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import {
@@ -83,6 +84,21 @@ function utilColor(pct: number): string {
 }
 
 // Max entities shown at once in a comparison chart.
+// Plain-English meaning of each budget figure, shown on the KPI cards and the
+// breakdown table headers. Keep in sync with how backend/app/api/dashboard.py
+// calculates them.
+const TERM_INFO = {
+  totalBudget: "The full-year budget for your current selection.",
+  actualSpend: 'Total of PR lines whose status starts with "Approved".',
+  pending:
+    'Total of PR lines whose status starts with "Pending". This money is committed but not yet approved.',
+  available:
+    "Budget minus Actual Spend minus Pending: what's left if every pending PR gets approved.",
+  utilisation: "Actual Spend as a percentage of Budget.",
+  projected:
+    "(Actual Spend + Pending) as a percentage of Budget: where you'll end up if all pending PRs are approved.",
+};
+
 const MAX_COMPARE = 20;
 
 // Value-label font size that scales with how crowded the chart is: fewer bars
@@ -1763,36 +1779,42 @@ export function DashboardPage() {
         <div className="print-keep grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6">
           <KPICard
             title="Total Budget"
+            description={TERM_INFO.totalBudget}
             value={formatCurrency(totalBudget)}
             icon={DollarSign}
             status="info"
           />
           <KPICard
             title="Actual Spend"
+            description={TERM_INFO.actualSpend}
             value={formatCurrency(actualSpend)}
             icon={TrendingUp}
             status="info"
           />
           <KPICard
             title="Pending Amount"
+            description={TERM_INFO.pending}
             value={formatCurrency(pendingSpend)}
             icon={Clock}
             status="info"
           />
           <KPICard
             title="Available Balance"
+            description={TERM_INFO.available}
             value={formatCurrency(availableBalance)}
             icon={Wallet}
             status="info"
           />
           <KPICard
             title="Utilisation %"
+            description={TERM_INFO.utilisation}
             value={`${utilizationPct.toFixed(1)}%`}
             icon={Percent}
             status={utilizationPct >= 95 ? "error" : utilizationPct >= 80 ? "warning" : "info"}
           />
           <KPICard
             title="Projected Utilisation %"
+            description={TERM_INFO.projected}
             value={`${projectedUtilizationPct.toFixed(1)}%`}
             icon={Activity}
             status={
@@ -1826,8 +1848,18 @@ export function DashboardPage() {
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Actual Spend</th>
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Pending</th>
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Available</th>
-                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Util %</th>
-                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Proj %</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        Util %
+                        <InfoTip label="Utilisation %" text={TERM_INFO.utilisation} />
+                      </span>
+                    </th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        Proj %
+                        <InfoTip label="Projected Utilisation %" text={TERM_INFO.projected} />
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
