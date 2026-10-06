@@ -99,7 +99,10 @@ const TERM_INFO = {
     "(Actual Spend + Pending) ÷ Budget × 100%. Where you'll end up if all pending PRs are approved.",
 };
 
-const MAX_COMPARE = 20;
+const MAX_COMPARE = 100;
+// Past this many bars a comparison chart stops squeezing and scrolls instead,
+// giving each bar a fixed slot so labels stay readable.
+const SCROLL_AFTER = 20;
 
 // Value-label font size that scales with how crowded the chart is: fewer bars
 // → larger, more readable text; many bars → smaller so labels don't collide.
@@ -153,7 +156,7 @@ function EntityFilter({
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Filter className="h-4 w-4" />
-            {label} ({selected.size}/{max})
+            {label}
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-2">
@@ -384,6 +387,38 @@ function AdaptiveBarChart({
         {children(charsPerLine)}
       </ResponsiveContainer>
     </div>
+  );
+}
+
+// Lets a long comparison chart scroll instead of cramming every bar into the
+// card. Up to SCROLL_AFTER bars render unchanged; past that the chart gets
+// `slotSize` px per bar and a native scrollbar (sideways, or up/down for the
+// horizontal-bar category chart).
+function ChartScroll({
+  bars,
+  slotSize = 110,
+  vertical = false,
+  children,
+}: {
+  bars: number;
+  slotSize?: number;
+  vertical?: boolean;
+  children: ReactNode;
+}) {
+  if (bars <= SCROLL_AFTER) return <>{children}</>;
+  return (
+    <>
+      {vertical ? (
+        <div className="max-h-[460px] overflow-y-auto pr-1">{children}</div>
+      ) : (
+        <div className="overflow-x-auto pb-2">
+          <div style={{ width: bars * slotSize, minWidth: "100%" }}>{children}</div>
+        </div>
+      )}
+      <p className="no-print mt-1 text-center text-xs text-muted-foreground">
+        Showing all {bars}. Scroll {vertical ? "down" : "sideways"} to see more.
+      </p>
+    </>
   );
 }
 
@@ -1034,6 +1069,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={utilVisible.length}>
               <AdaptiveBarChart height={300} bars={utilVisible.length}>
                 {(maxChars) => (
                   <BarChart data={utilVisible} barCategoryGap="25%" margin={{ top: 18 }}>
@@ -1081,6 +1117,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
@@ -1117,6 +1154,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={avbVisible.length} slotSize={130}>
               <AdaptiveBarChart height={300} bars={avbVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1157,6 +1195,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
@@ -1180,6 +1219,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={categoryVisible.length} vertical>
               <ResponsiveContainer
                 width="100%"
                 height={Math.max(300, categoryVisible.length * 22)}
@@ -1222,6 +1262,7 @@ export function DashboardPage() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              </ChartScroll>
             )}
           </>
         );
@@ -1321,6 +1362,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={stackVisible.length}>
               <AdaptiveBarChart height={320} bars={stackVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1362,6 +1404,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
@@ -1427,6 +1470,10 @@ export function DashboardPage() {
                     emptyChartMessage(false, "")}
               </div>
             ) : (
+              <ChartScroll
+                bars={yoyVisible.length}
+                slotSize={Math.max(110, yoySelectedYears.length * 36 + 40)}
+              >
               <AdaptiveBarChart height={300} bars={yoyVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1472,6 +1519,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
