@@ -93,10 +93,10 @@ const TERM_INFO = {
   pending:
     'Total of PR lines whose status starts with "Pending". This money is committed but not yet approved.',
   available:
-    "Budget minus Actual Spend minus Pending: what's left if every pending PR gets approved.",
-  utilisation: "Actual Spend as a percentage of Budget.",
+    "Budget − Actual Spend − Pending. What's left if every pending PR gets approved.",
+  utilisation: "Actual Spend ÷ Budget × 100%.",
   projected:
-    "(Actual Spend + Pending) as a percentage of Budget: where you'll end up if all pending PRs are approved.",
+    "(Actual Spend + Pending) ÷ Budget × 100%. Where you'll end up if all pending PRs are approved.",
 };
 
 const MAX_COMPARE = 20;
