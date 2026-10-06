@@ -113,9 +113,6 @@ export function ReportsPage() {
           {
             label: "Date Range",
             options: [
-              { value: "7d", label: "Last 7 days" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
               { value: "ytd", label: "Year to date" },
             ],
           },

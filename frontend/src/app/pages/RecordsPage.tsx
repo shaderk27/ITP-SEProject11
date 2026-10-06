@@ -10,7 +10,7 @@ import { ExportConfirmDialog } from "../components/shared/ExportConfirmDialog";
 import { toast } from "sonner";
 import { exportCommittedPRs, listCommittedPRs } from "../services/recordsService";
 import { listPeriods, type Period } from "../services/dashboardService";
-import { format, subDays } from "date-fns";
+import { format } from "date-fns";
 import type { CommittedPR } from "../types/records";
 
 export function RecordsPage() {
@@ -46,10 +46,6 @@ export function RecordsPage() {
     if (startDate || endDate) {
       rawStart = startDate;
       rawEnd = endDate;
-    } else if (dateRange === "30d" || dateRange === "90d") {
-      const days = dateRange === "30d" ? 30 : 90;
-      rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
-      rawEnd = format(new Date(), "yyyy-MM-dd");
     } else if (dateRange === "ytd") {
       rawStart = `${new Date().getFullYear()}-01-01`;
       rawEnd = format(new Date(), "yyyy-MM-dd");
@@ -204,8 +200,6 @@ export function RecordsPage() {
             value: dateRange,
             options: [
               { value: "all", label: "Whole year" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
               { value: "ytd", label: "Year to date" },
             ],
           },

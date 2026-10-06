@@ -37,10 +37,9 @@ import {
 } from "../components/ui/popover";
 import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
-import { DatePickerField } from "../components/shared/DatePickerField";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
-import { format, parseISO, subDays } from "date-fns";
+import { eachMonthOfInterval, endOfMonth, format, parseISO } from "date-fns";
 import { setAskAiPageContext } from "../services/chatbotService";
 import {
   exportDashboard,
@@ -263,15 +262,6 @@ const DASHBOARD_CHARTS = [
 const SLOT_OPTIONS = [...DASHBOARD_CHARTS];
 const CHART_IDS = new Set<string>(DASHBOARD_CHARTS.map((c) => c.id));
 
-// Mirrors the FilterBar "Date Range" options, for the printed cover block.
-const DATE_RANGE_LABELS: Record<string, string> = {
-  all: "Whole year",
-  "7d": "Last 7 days",
-  "30d": "Last 30 days",
-  "90d": "Last 90 days",
-  ytd: "Year to date",
-};
-
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
   teamlead: "Team Lead",
@@ -439,12 +429,11 @@ export function DashboardPage() {
     user?.labGroupId ? String(user.labGroupId) : "all",
   );
   // Fiscal year is the master time scope: it sets the budget year AND the base
-  // spend window (Apr–Mar). The Date Range presets + custom range narrow within.
+  // spend window (Apr–Mar). The custom month range narrows within it.
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
-  // Date Range dropdown: all (whole FY) / 7d / 30d / 90d — a sub-window on spend.
-  const [dateRange, setDateRange] = useState("all");
-  // Custom date range (overrides the preset when either is set).
+  // Custom month range, stored as ISO dates: startDate is the 1st of the From
+  // month, endDate the last day of the To month. Empty = open-ended.
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
@@ -618,34 +607,31 @@ export function DashboardPage() {
     }
   }, [slotsStorageKey, slots]);
 
-  // Selected fiscal year (undefined = "All time"). The 7/30/90-day presets
-  // count back from today, so they only make sense when today is inside the
-  // selected year; for a past or future year they would give an empty window.
+  // Selected fiscal year (undefined = "All time").
   const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
   const fyStart = selectedPeriod?.start_date ?? "";
   const fyEnd = selectedPeriod?.end_date ?? "";
-  const todayIso = format(new Date(), "yyyy-MM-dd");
-  const presetsAvailable =
-    !selectedPeriod || (fyStart <= todayIso && todayIso <= fyEnd);
 
-  // Effective spend window: the selected FY's span, narrowed by a preset/custom.
-  // `clipped` = the preset reached back before the FY start and was cut to it.
-  const [effStart, effEnd, clipped] = useMemo(() => {
-    let rawStart = "";
-    let rawEnd = "";
-    if (startDate || endDate) {
-      rawStart = startDate;
-      rawEnd = endDate;
-    } else if (dateRange === "7d" || dateRange === "30d" || dateRange === "90d") {
-      const days = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 90;
-      rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
-      rawEnd = format(new Date(), "yyyy-MM-dd");
-    }
-    // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
-    const s = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
-    const e = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
-    return [s, e, Boolean(rawStart && fyStart && rawStart < fyStart)] as const;
-  }, [fyStart, fyEnd, dateRange, startDate, endDate]);
+  // Months offered in the custom range: the selected fiscal year's months, or
+  // every month across all fiscal years for "All time".
+  const monthOptions = useMemo(() => {
+    const spans = selectedPeriod ? [selectedPeriod] : periods;
+    if (spans.length === 0) return [];
+    const first = spans.reduce((a, p) => (p.start_date < a ? p.start_date : a), spans[0].start_date);
+    const last = spans.reduce((a, p) => (p.end_date > a ? p.end_date : a), spans[0].end_date);
+    return eachMonthOfInterval({ start: parseISO(first), end: parseISO(last) }).map((d) => ({
+      value: format(d, "yyyy-MM"),
+      label: format(d, "MMM yyyy"),
+    }));
+  }, [selectedPeriod, periods]);
+
+  // Effective spend window: the selected FY's span, narrowed by the custom
+  // month range and clamped to the FY (ISO dates sort lexicographically).
+  const [effStart, effEnd] = useMemo(() => {
+    const s = !startDate ? fyStart : startDate > fyStart ? startDate : fyStart;
+    const e = !endDate ? fyEnd : !fyEnd || endDate < fyEnd ? endDate : fyEnd;
+    return [s, e] as const;
+  }, [fyStart, fyEnd, startDate, endDate]);
 
   // The window is narrower than the whole fiscal year (or than all time), so
   // spend covers only part of the period the Total Budget is for.
@@ -1571,9 +1557,10 @@ export function DashboardPage() {
         selectedGroupId);
   const selectedLabName =
     selectedLabId === "all" ? "All labs" : (selectedLab?.lab_name ?? "All labs");
+  const monthLabel = (iso: string) => (iso ? format(parseISO(iso), "MMM yyyy") : "");
   const dateRangeLabel = customActive
-    ? `Custom: ${startDate || "beginning"} to ${endDate || "today"}`
-    : (DATE_RANGE_LABELS[dateRange] ?? "Whole year");
+    ? `${monthLabel(startDate) || "Start"} to ${monthLabel(endDate) || "end"}`
+    : "Whole year";
 
   /** Filter context stamped onto the printed page, mirroring the .xlsx cover. */
   const printContext: [string, string][] = [
@@ -1600,7 +1587,7 @@ export function DashboardPage() {
       const filename = await exportDashboard({
         startDate: effStart,
         endDate: effEnd,
-        dateRange,
+        dateRange: "all",
         periodId: selectedFYPeriodId,
         labGroupId: selectedGroupId === "all" ? null : Number(selectedGroupId),
         labId: selectedLabId === "all" ? null : Number(selectedLabId),
@@ -1653,9 +1640,6 @@ export function DashboardPage() {
             if (next) {
               const inYear = (d: string) =>
                 !d || (next.start_date <= d && d <= next.end_date);
-              if (!(next.start_date <= todayIso && todayIso <= next.end_date)) {
-                setDateRange("all");
-              }
               if (!inYear(startDate) || !inYear(endDate)) {
                 setStartDate("");
                 setEndDate("");
@@ -1668,12 +1652,6 @@ export function DashboardPage() {
             setSelectedLabId("all");
           }
           if (filterId === "Lab") setSelectedLabId(value);
-          if (filterId === "Date Range") {
-            // Picking a preset clears any custom range so the preset applies.
-            setDateRange(value);
-            setStartDate("");
-            setEndDate("");
-          }
         }}
         filters={[
           {
@@ -1687,22 +1665,6 @@ export function DashboardPage() {
             options: [
               { value: "all", label: "All time" },
               ...periods.map((p) => ({ value: String(p.id), label: p.name })),
-            ],
-          },
-          {
-            label: "Date Range",
-            value: dateRange,
-            // "Last N days" counts back from today, so it is only offered
-            // when today falls inside the selected fiscal year.
-            options: [
-              { value: "all", label: "Whole year" },
-              ...(presetsAvailable
-                ? [
-                    { value: "7d", label: "Last 7 days" },
-                    { value: "30d", label: "Last 30 days" },
-                    { value: "90d", label: "Last 90 days" },
-                  ]
-                : []),
             ],
           },
           // Lab IC is scoped to a single lab and has no group choice, so the
@@ -1724,26 +1686,48 @@ export function DashboardPage() {
         ]}
       />
 
-      {/* Custom date range — overrides the preset when set. */}
+      {/* Custom month range — narrows the spend window within the fiscal year. */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
         <span className="text-muted-foreground">Custom range:</span>
         <label className="flex items-center gap-1.5">
           <span className="text-muted-foreground">From</span>
-          <DatePickerField
-            value={startDate}
-            minDate={fyStart || undefined}
-            maxDate={endDate || fyEnd || undefined}
-            onChange={setStartDate}
-          />
+          <select
+            value={startDate.slice(0, 7)}
+            onChange={(e) => setStartDate(e.target.value ? `${e.target.value}-01` : "")}
+            className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+          >
+            <option value="">Select month</option>
+            {monthOptions
+              .filter((m) => !endDate || m.value <= endDate.slice(0, 7))
+              .map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+          </select>
         </label>
         <label className="flex items-center gap-1.5">
           <span className="text-muted-foreground">To</span>
-          <DatePickerField
-            value={endDate}
-            minDate={startDate || fyStart || undefined}
-            maxDate={fyEnd || undefined}
-            onChange={setEndDate}
-          />
+          <select
+            value={endDate.slice(0, 7)}
+            onChange={(e) =>
+              setEndDate(
+                e.target.value
+                  ? format(endOfMonth(parseISO(`${e.target.value}-01`)), "yyyy-MM-dd")
+                  : "",
+              )
+            }
+            className="text-sm border border-border rounded-md px-2 py-1 bg-white"
+          >
+            <option value="">Select month</option>
+            {monthOptions
+              .filter((m) => !startDate || m.value >= startDate.slice(0, 7))
+              .map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+          </select>
         </label>
         {selectedPeriod && (
           <span className="text-xs text-muted-foreground">
@@ -1751,28 +1735,17 @@ export function DashboardPage() {
             (or pick All time).
           </span>
         )}
-        {clipped && (
-          <span className="text-xs text-amber-700">
-            {DATE_RANGE_LABELS[dateRange]} starts before {selectedPeriod?.name}, so
-            it is counted from {formatIsoDate(fyStart)}.
-          </span>
-        )}
         {customActive && (
-          <>
-            <span className="text-xs text-blue-600">
-              Custom range active — preset ignored
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setStartDate("");
-                setEndDate("");
-              }}
-            >
-              Clear
-            </Button>
-          </>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setStartDate("");
+              setEndDate("");
+            }}
+          >
+            Clear
+          </Button>
         )}
       </div>
       </div>

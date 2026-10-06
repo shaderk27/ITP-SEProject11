@@ -45,7 +45,7 @@ export interface ExportFilters {
   /** Effective window already clamped to the selected fiscal year. */
   startDate: string;
   endDate: string;
-  /** Date Range preset ("all" | "30d" | "90d" | "ytd") — cover-block label. */
+  /** Date Range preset ("all" | "ytd") — cover-block label. */
   dateRange: string;
   /** Free-text search box contents. */
   search: string;
