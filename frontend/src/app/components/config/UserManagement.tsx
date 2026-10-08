@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus, Trash2, Unlink, KeyRound } from "lucide-react";
+import { Plus, Trash2, Unlink, KeyRound, UserCheck } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
@@ -138,6 +138,28 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
       onUsersChanged?.();
     } catch {
       alert("Failed to deactivate user.");
+    }
+  };
+
+  const handleActivateUser = async (user: UserData) => {
+    if (user.is_active) return;
+
+    const confirmed = window.confirm(`Reactivate ${user.full_name}?`);
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`${API}/auth/users/${user.id}/activate`, {
+        method: "PUT",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        alert(await readErrorDetail(res, "Failed to activate user."));
+        return;
+      }
+      loadUsers();
+      onUsersChanged?.();
+    } catch {
+      alert("Failed to activate user.");
     }
   };
 
@@ -304,22 +326,31 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
                     >
                       <Unlink className="h-3 w-3" />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-[#dc2626] hover:text-[#dc2626]"
-                      disabled={!user.is_active}
-                      title={
-                        !user.is_active
-                          ? "User is already inactive"
-                          : hasScope(user)
+                    {user.is_active ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-[#dc2626] hover:text-[#dc2626]"
+                        title={
+                          hasScope(user)
                             ? "Unassign user before deactivation"
                             : "Deactivate user"
-                      }
-                      onClick={() => handleDeactivateUser(user)}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                        }
+                        onClick={() => handleDeactivateUser(user)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-[#16a34a] hover:text-[#16a34a]"
+                        title="Activate user"
+                        onClick={() => handleActivateUser(user)}
+                      >
+                        <UserCheck className="h-3 w-3" />
+                      </Button>
+                    )}
                   </div>
                 </td>
               </tr>

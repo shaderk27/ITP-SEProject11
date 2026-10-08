@@ -9,7 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
-import { FileDown, CheckCircle } from "lucide-react";
+import { FileDown } from "lucide-react";
 
 interface ExportConfirmDialogProps {
   open: boolean;

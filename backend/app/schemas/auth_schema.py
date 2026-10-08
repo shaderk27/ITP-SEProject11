@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ==========================================
@@ -8,14 +8,13 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class LoginRequest(BaseModel):
-    """Validates the incoming login credentials."""
+    """Validates incoming login credentials."""
 
     email: EmailStr = Field(
         ..., description="The user's registered institutional email address"
     )
     password: str = Field(..., min_length=1, description="Plaintext password")
 
-    # In Pydantic v2, 'Config' becomes 'model_config'
     model_config = {
         "json_schema_extra": {
             "example": {"email": "admin@test.local", "password": "your_secure_password"}
@@ -24,8 +23,15 @@ class LoginRequest(BaseModel):
 
 
 # ==========================================
-# RESPONSE SCHEMAS (Sanitized User Objects)
+# RESPONSE SCHEMAS
 # ==========================================
+
+
+class UserLabAssignmentResponse(BaseModel):
+    lab_id: int
+    is_primary: bool
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserBaseResponse(BaseModel):
@@ -37,6 +43,9 @@ class UserBaseResponse(BaseModel):
     role: Optional[str] = Field(
         None, description="Assigned role name (e.g., admin, teamlead, labic)"
     )
+    is_active: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoginResponse(BaseModel):
@@ -55,10 +64,11 @@ class CurrentUserResponse(UserBaseResponse):
     lab_group_id: Optional[int] = Field(
         None, description="Associated primary lab group cluster identifier, if scoped"
     )
+    lab_ids: List[int] = Field(
+        default_factory=list, description="IDs of labs where user is assigned as IC"
+    )
 
-    class Config:
-        # Allows Pydantic to read data seamlessly if you pass a raw SQLAlchemy model instance
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CreateUserRequest(BaseModel):
@@ -68,7 +78,12 @@ class CreateUserRequest(BaseModel):
     role_id: int
     staff_id: Optional[str] = None
     lab_group_id: Optional[int] = None
-    lab_id: Optional[int] = None
+    lab_ids: Optional[List[int]] = Field(
+        default=None, description="List of lab IDs to assign this user to"
+    )
+    primary_lab_id: Optional[int] = Field(
+        default=None, description="Lab ID to mark as primary for this user"
+    )
 
 
 class RoleResponse(BaseModel):
@@ -81,10 +96,6 @@ class RoleResponse(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     full_name: Optional[str] = None
-    # current_password: Optional[str] = None
-    # new_password: Optional[str] = Field(
-    #     None, min_length=8, description="Must be at least 8 characters"
-    # )
 
 
 class ForgotPasswordSchema(BaseModel):
@@ -98,11 +109,15 @@ class LabICOut(BaseModel):
     user_id: int
     full_name: str
     email: str
-    lab_id: Optional[int]
+    lab_ids: List[int] = []
+    is_primary: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssignLabSchema(BaseModel):
     lab_id: int
+    is_primary: Optional[bool] = None
 
 
 class AssignLabGroupSchema(BaseModel):
@@ -119,7 +134,3 @@ class ResetPasswordSchema(BaseModel):
         if len(v) < 8:
             raise ValueError("Password must be at least 8 characters.")
         return v
-
-
-class Config:
-    from_attributes = True

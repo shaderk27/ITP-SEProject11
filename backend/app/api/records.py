@@ -74,6 +74,7 @@ def list_committed_prs(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[CommittedPR]:
+    role_name = _role_name(current_user)
     """
     Return all committed purchase requests (with their lines).
 
@@ -100,6 +101,9 @@ def list_committed_prs(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only Admin or Team Lead can view PR Records.",
         )
+    user_lab_ids = (
+        [a.lab_id for a in current_user.lab_assignments] if role_name == "labic" else []
+    )
 
     query = db.query(PurchaseRequest)
     if role_name == "teamlead":
@@ -107,11 +111,11 @@ def list_committed_prs(
             return []
         query = query.filter(PurchaseRequest.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-        if not current_user.lab_id:
+        if not user_lab_ids:
             return []
-        # Only PRs that carry at least one line in the Lab IC's own lab.
+        # Match PRs that contain lines for ANY of the Lab IC's assigned labs
         query = query.filter(
-            PurchaseRequest.lines.any(PurchaseRequestLine.lab_id == current_user.lab_id)
+            PurchaseRequest.lines.any(PurchaseRequestLine.lab_id.in_(user_lab_ids))
         )
 
     # Custom range wins; otherwise fall back to the preset. date_range_bounds
@@ -142,9 +146,7 @@ def list_committed_prs(
     )
     # Lab IC only sees their own lab's lines within each PR.
     if role_name == "labic":
-        lines_query = lines_query.filter(
-            PurchaseRequestLine.lab_id == current_user.lab_id
-        )
+        lines_query = lines_query.filter(PurchaseRequestLine.lab_id.in_(user_lab_ids))
     all_lines = lines_query.order_by(
         PurchaseRequestLine.pr_id, PurchaseRequestLine.line_no
     ).all()
