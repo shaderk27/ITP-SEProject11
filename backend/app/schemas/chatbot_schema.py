@@ -44,7 +44,7 @@ class ChatbotContextRequest(BaseModel):
 class ChatbotScope(BaseModel):
     role: str
     lab_group_id: int | None
-    lab_id: int | None
+    lab_ids: list[int] = []
     scope_description: str
 
 

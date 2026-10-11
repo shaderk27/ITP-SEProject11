@@ -11,7 +11,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from app.api.review import (
     CorrectionRequest,
@@ -39,7 +39,9 @@ def test_commit_creates_pr_and_version(db, admin_user, make_staging_batch):
     """First commit of a never-seen source_pr_number → 1 PR + 1 'created' version."""
     batch = make_staging_batch(source_pr_number="PR-W902-CREATE")
 
-    response = commit_batch(batch.batch_id, db=db, current_user=admin_user)
+    response = commit_batch(
+        batch.batch_id, BackgroundTasks(), db=db, current_user=admin_user
+    )
 
     assert response.success is True
     assert response.prs_created == 1
@@ -67,13 +69,15 @@ def test_recommit_same_pr_updates_in_place(db, admin_user, make_staging_batch):
         source_pr_number="PR-W902-UPDATE",
         grand_total=Decimal("1000.00"),
     )
-    commit_batch(batch_1.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch_1.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     batch_2 = make_staging_batch(
         source_pr_number="PR-W902-UPDATE",
         grand_total=Decimal("2500.00"),
     )
-    response = commit_batch(batch_2.batch_id, db=db, current_user=admin_user)
+    response = commit_batch(
+        batch_2.batch_id, BackgroundTasks(), db=db, current_user=admin_user
+    )
 
     assert response.prs_created == 0
     assert response.prs_updated == 1
@@ -118,7 +122,7 @@ def test_recommit_preserves_lines_by_identity(db, admin_user, make_staging_batch
             ("item B", Decimal("50.00")),
         ],
     )
-    commit_batch(batch_1.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch_1.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     pr = (
         db.query(PurchaseRequest)
@@ -136,7 +140,7 @@ def test_recommit_preserves_lines_by_identity(db, admin_user, make_staging_batch
             ("item C", Decimal("123.00")),
         ],
     )
-    commit_batch(batch_2.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch_2.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     db.refresh(pr)
     final_lines = (
@@ -165,7 +169,7 @@ def test_source_staging_line_id_traceability(db, admin_user, make_staging_batch)
         source_pr_number="PR-W902-TRACE",
         lines=[("traceable item", Decimal("123.45"))],
     )
-    commit_batch(batch.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     pr = (
         db.query(PurchaseRequest)
@@ -195,7 +199,7 @@ def test_source_staging_line_id_traceability(db, admin_user, make_staging_batch)
 def test_commit_writes_audit_log(db, admin_user, make_staging_batch):
     """Commit writes one BATCH_COMMITTED audit_logs row with the right counts."""
     batch = make_staging_batch(source_pr_number="PR-W902-AUDIT-COMMIT")
-    commit_batch(batch.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     rows = (
         db.query(AuditLog)
@@ -295,6 +299,7 @@ def test_upload_writes_audit_log(db, admin_user, seed_refs):
                 unit_rate=Decimal("10.00"),
                 wbs="WBS-TEST",
                 instruction_to_vendor="",
+                req_type="",
                 pr_category="General",
                 amount_gst=Decimal("10.00"),
                 line_identity_key="key1",
@@ -336,10 +341,10 @@ def test_upload_writes_audit_log(db, admin_user, seed_refs):
 def test_commit_blocked_when_already_committed(db, admin_user, make_staging_batch):
     """A second commit on the same batch must 409, not duplicate rows."""
     batch = make_staging_batch(source_pr_number="PR-W902-LOCK-COMMIT")
-    commit_batch(batch.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     with pytest.raises(HTTPException) as exc_info:
-        commit_batch(batch.batch_id, db=db, current_user=admin_user)
+        commit_batch(batch.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
     assert exc_info.value.status_code == 409
 
 
@@ -373,7 +378,7 @@ def test_correction_blocked_after_commit(db, admin_user, make_staging_batch, see
         db=db,
         current_user=admin_user,
     )
-    commit_batch(batch.batch_id, db=db, current_user=admin_user)
+    commit_batch(batch.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
 
     # Now attempt another correction on the same item — should be blocked.
     with pytest.raises(HTTPException) as exc_info:

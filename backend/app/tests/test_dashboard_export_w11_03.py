@@ -298,10 +298,11 @@ def export_client(db):
     from app.dependencies.auth import get_current_user
     from app.main import app
     from app.models.auth import User
+    from app.models.config import LabIcAssignment
 
     state: dict[str, User] = {}
 
-    def _as(role: str, lab_group_id=None, lab_id=None) -> None:
+    def _as(role: str, lab_group_id=None, lab_ids=()) -> None:
         state["user"] = User(
             user_id=999,
             email=f"{role}@test.com",
@@ -309,7 +310,7 @@ def export_client(db):
             role_id=1,
             role=MagicMock(role_name=role),
             lab_group_id=lab_group_id,
-            lab_id=lab_id,
+            lab_assignments=[LabIcAssignment(lab_id=lab_id) for lab_id in lab_ids],
         )
 
     previous = dict(app.dependency_overrides)

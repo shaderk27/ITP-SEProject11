@@ -106,7 +106,7 @@ def build_chatbot_context(
         return _empty_response(
             request, current_user, "Team Lead has no assigned Lab Group."
         )
-    if role_name == "labic" and not current_user.lab_id:
+    if role_name == "labic" and not current_user.lab_ids:
         return _empty_response(request, current_user, "Lab IC has no assigned Lab.")
 
     start, end = _resolve_bounds(request)
@@ -273,7 +273,7 @@ def _budget_context(
             Budget.lab_group_id == current_user.lab_group_id
         )
     elif role_name == "labic":
-        budget_query = budget_query.filter(Budget.lab_id == current_user.lab_id)
+        budget_query = budget_query.filter(Budget.lab_id.in_(current_user.lab_ids))
 
     budgets: dict[tuple[int, int, int | None], Decimal] = {}
     for group_id, lab_id, category_id, amount in budget_query.all():
@@ -442,7 +442,7 @@ def _apply_role_scope(query, current_user: User):
     if role_name == "teamlead":
         return query.filter(Lab.lab_group_id == current_user.lab_group_id)
     if role_name == "labic":
-        return query.filter(PurchaseRequestLine.lab_id == current_user.lab_id)
+        return query.filter(PurchaseRequestLine.lab_id.in_(current_user.lab_ids))
     return query
 
 
@@ -471,13 +471,13 @@ def _scope(user: User) -> ChatbotScope:
     elif role_name == "teamlead":
         description = "Assigned Lab Group only."
     elif role_name == "labic":
-        description = "Assigned Lab only."
+        description = "Assigned Labs only."
     else:
         description = "No chatbot data scope."
     return ChatbotScope(
         role=role_name,
         lab_group_id=user.lab_group_id,
-        lab_id=user.lab_id,
+        lab_ids=user.lab_ids,
         scope_description=description,
     )
 

@@ -34,7 +34,7 @@ def _context(role: str, rows: list[ChatbotBudgetContext]) -> ChatbotContextRespo
         query_type="budget_utilisation_summary",
         question=None,
         scope=ChatbotScope(
-            role=role, lab_group_id=None, lab_id=None, scope_description=""
+            role=role, lab_group_id=None, lab_ids=[], scope_description=""
         ),
         data_sources=[],
         supported_query_types=[],

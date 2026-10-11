@@ -187,9 +187,9 @@ def test_login_with_temp_password_sets_must_reset_flag():
     user.role = MagicMock()
     user.role.role_name = "labic"
     user.lab_group_id = None
-    user.lab_id = 1
-    user.lab = MagicMock()
-    user.lab.lab_code = "E2-02-02"
+    user.lab_assignments = [
+        MagicMock(lab_id=1, is_primary=True, lab=MagicMock(lab_code="E2-02-02"))
+    ]
     user.staff_id = "TEST-001"
     service.repository.get_user_by_email.return_value = user
 
@@ -222,8 +222,7 @@ def test_login_with_normal_password_does_not_set_must_reset_flag():
     user.role = MagicMock()
     user.role.role_name = "admin"
     user.lab_group_id = None
-    user.lab_id = None
-    user.lab = None
+    user.lab_assignments = []
     user.lab_group = None
     user.staff_id = "ADMIN-001"
     service.repository.get_user_by_email.return_value = user

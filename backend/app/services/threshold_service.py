@@ -2,7 +2,7 @@ import logging
 from datetime import date
 from sqlalchemy import func, or_, and_
 from app.database import SessionLocal
-from app.models.config import Lab, Budget, BudgetPeriod
+from app.models.config import LabGroup, Lab, LabIcAssignment, Budget, BudgetPeriod
 from app.models.staging import PurchaseRequestLine, PurchaseRequest
 from app.models.auth import User
 from app.services.email_service import send_threshold_alert
@@ -108,9 +108,8 @@ def check_and_notify_lab_thresholds(lab_id: int):
 
         # Gather recipients and send email
         recipients = []
-        lab_ic = (
-            db.query(User).filter(User.lab_id == lab.lab_id, User.role_id == 3).first()
-        )
+        # Lab IC link lives on labs.user_id (1-1), so read it off the lab itself.
+        lab_ic = lab.ic_user
 
         if lab_ic and lab_ic.email:
             recipients.append(lab_ic.email)
@@ -170,6 +169,187 @@ def check_and_notify_lab_thresholds(lab_id: int):
                 <div style="background-color: #f3f4f6; padding: 16px; border-radius: 6px; margin: 20px 0;">
                     <p style="margin: 0 0 8px 0;"><strong>Total Allocated Budget:</strong> {budget_str}</p>
                     <p style="margin: 0 0 8px 0;"><strong>Current Spending:</strong> {spent_str}</p>
+                    <p style="margin: 0;"><strong>Current Utilization:</strong> {utilization_pct:.1f}%</p>
+                </div>
+                <p style="font-size: 16px; color: {color}; font-weight: bold;">{message}</p>
+            </div>
+        </div>
+        """
+        send_threshold_alert(recipients, subject, html_body)
+
+
+def check_and_notify_lab_group_thresholds(lab_group_id: int):
+    with SessionLocal() as db:
+        group = db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
+        if not group:
+            return
+
+        # 1. Determine the CURRENT Fiscal Year
+        today = date.today()
+        current_period = (
+            db.query(BudgetPeriod)
+            .filter(BudgetPeriod.start_date <= today, BudgetPeriod.end_date >= today)
+            .first()
+        )
+
+        if not current_period:
+            return
+
+        # 2. FY-Aware Budget Math (The Lab Group Envelope)
+        total_budget = (
+            db.query(func.sum(Budget.budget_amount))
+            .filter(
+                Budget.lab_group_id == lab_group_id,
+                Budget.lab_id.is_(None),  # Explicitly grab the envelope
+                Budget.period_id == current_period.period_id,
+            )
+            .scalar()
+            or 0
+        )
+
+        if total_budget <= 0:
+            return
+
+        # 3. FY-Aware & Status-Aware Spent Math (Sum of ALL labs in this group)
+        total_spent = (
+            db.query(func.sum(PurchaseRequestLine.amount_gst))
+            .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+            .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+            .filter(
+                Lab.lab_group_id == lab_group_id,
+                PurchaseRequest.request_date >= current_period.start_date,
+                PurchaseRequest.request_date <= current_period.end_date,
+                or_(
+                    PurchaseRequestLine.pr_status.is_(None),
+                    and_(
+                        PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                        PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+                    ),
+                ),
+            )
+            .scalar()
+            or 0
+        )
+
+        utilization_pct = (float(total_spent) / float(total_budget)) * 100
+
+        # --- SMART FY RESET (Now tracked on the Lab Group) ---
+        if group.alert_period_id != current_period.period_id:
+            group.notified_50 = False
+            group.notified_80 = False
+            group.notified_95 = False
+            group.notified_100 = False
+            group.alert_period_id = current_period.period_id
+
+        # Secondary Reset: if an admin manually increases the budget envelope later
+        if utilization_pct < 100 and getattr(group, "notified_100", False):
+            group.notified_100 = False
+        if utilization_pct < 95 and group.notified_95:
+            group.notified_95 = False
+        if utilization_pct < 80 and group.notified_80:
+            group.notified_80 = False
+        if utilization_pct < 50 and group.notified_50:
+            group.notified_50 = False
+        # ----------------------
+
+        threshold_hit = None
+        if utilization_pct >= 100 and not getattr(group, "notified_100", False):
+            threshold_hit = 100
+            group.notified_100 = True
+            group.notified_95 = True
+            group.notified_80 = True
+            group.notified_50 = True
+        elif utilization_pct >= 95 and not group.notified_95:
+            threshold_hit = 95
+            group.notified_95 = True
+            group.notified_80 = True
+            group.notified_50 = True
+        elif utilization_pct >= 80 and not group.notified_80:
+            threshold_hit = 80
+            group.notified_80 = True
+            group.notified_50 = True
+        elif utilization_pct >= 50 and not group.notified_50:
+            threshold_hit = 50
+            group.notified_50 = True
+
+        db.commit()
+
+        if not threshold_hit:
+            return
+
+        # Gather recipients and send email
+        recipients = []
+
+        # 1. Alert the Team Lead of the Lab Group
+        team_lead = (
+            db.query(User)
+            .filter(User.lab_group_id == group.lab_group_id, User.role_id == 2)
+            .first()
+        )
+        if team_lead and team_lead.email:
+            recipients.append(team_lead.email)
+
+        # 2. Alert ALL Lab ICs beneath this group
+        lab_ics = (
+            db.query(User)
+            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
+            .join(Lab, Lab.lab_id == LabIcAssignment.lab_id)
+            .filter(Lab.lab_group_id == group.lab_group_id, User.role_id == 3)
+            .all()
+        )
+        for ic in lab_ics:
+            if ic.email:
+                recipients.append(ic.email)
+
+        # Ensure unique emails
+        recipients = list(set(recipients))
+
+        if not recipients:
+            return
+
+        spent_str = f"${float(total_spent):,.2f}"
+        budget_str = f"${float(total_budget):,.2f}"
+
+        # --- EMAIL CONTENT & COLOR PROGRESSION ---
+        if threshold_hit == 50:
+            subject, color = (
+                f"Notice: Lab Group {group.lab_group_name} has reached 50% Budget Utilization",
+                "#2563eb",  # Blue
+            )
+            message = "Your Lab Group has utilized half of its total allocated budget envelope. Please review upcoming planned expenses."
+        elif threshold_hit == 80:
+            subject, color = (
+                f"WARNING: Lab Group {group.lab_group_name} has reached 80% Budget Utilization",
+                "#eab308",  # Yellow
+            )
+            message = "Your Lab Group is approaching its budget envelope limit. Please prioritize essential purchases only."
+        elif threshold_hit == 95:
+            subject, color = (
+                f"CRITICAL: Lab Group {group.lab_group_name} has reached 95% Budget Utilization",
+                "#ea580c",  # Orange
+            )
+            message = "Immediate attention required. Your Lab Group budget is nearly exhausted. Please review spending across all underlying labs carefully."
+        else:  # Exceeded
+            subject, color = (
+                f"EXCEEDED: Lab Group {group.lab_group_name} has EXCEEDED its Budget",
+                "#dc2626",  # Red
+            )
+            message = "Action required. Your Lab Group budget has been completely exhausted and exceeded. Please adjust spending immediately."
+
+        html_body = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+            <div style="background-color: {color}; padding: 20px; text-align: center; color: white;">
+                <h2 style="margin: 0;">Budget Threshold Alert</h2>
+            </div>
+            <div style="padding: 24px;">
+                <p style="font-size: 16px; color: #374151;">Hello,</p>
+                <p style="font-size: 16px; color: #374151;">
+                    This is an automated notification that the <strong>{group.wbs_code or "Department"} - {group.lab_group_name}</strong> Lab Group has crossed the
+                    <strong style="color: {color};">{threshold_hit}%</strong> overall budget utilization threshold.
+                </p>
+                <div style="background-color: #f3f4f6; padding: 16px; border-radius: 6px; margin: 20px 0;">
+                    <p style="margin: 0 0 8px 0;"><strong>Total Group Envelope:</strong> {budget_str}</p>
+                    <p style="margin: 0 0 8px 0;"><strong>Total Group Spending:</strong> {spent_str}</p>
                     <p style="margin: 0;"><strong>Current Utilization:</strong> {utilization_pct:.1f}%</p>
                 </div>
                 <p style="font-size: 16px; color: {color}; font-weight: bold;">{message}</p>

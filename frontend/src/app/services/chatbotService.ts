@@ -12,7 +12,7 @@ export type ChatbotQueryType =
 interface ChatbotScope {
   role: string;
   lab_group_id: number | null;
-  lab_id: number | null;
+  lab_ids: number[];
   scope_description: string;
 }
 

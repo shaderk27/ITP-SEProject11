@@ -6,7 +6,14 @@ from decimal import Decimal
 import pytest
 
 from app.models.auth import Role, User
-from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
+from app.models.config import (
+    Budget,
+    BudgetPeriod,
+    Lab,
+    LabGroup,
+    LabIcAssignment,
+    SpendingCategory,
+)
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
 from app.schemas.chatbot_schema import ChatbotContextRequest
 from app.services.chatbot_service import (
@@ -173,10 +180,12 @@ def _make_labic(db, lab: Lab) -> User:
         full_name=f"W13 IC {suffix}",
         email=f"w13.ic.{suffix}@example.test",
         password_hash="placeholder",
-        lab_id=lab.lab_id,
     )
     db.add(user)
     db.flush()
+    db.add(LabIcAssignment(lab_id=lab.lab_id, user_id=user.user_id, is_primary=True))
+    db.flush()
+    db.refresh(user)
     return user
 
 

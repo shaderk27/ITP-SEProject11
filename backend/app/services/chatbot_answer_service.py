@@ -458,7 +458,10 @@ def _user_line(context: ChatbotContextResponse) -> str:
         group = rows[0].lab_group_name if rows else "their assigned lab group"
         return f"A Team Lead, who can only see lab group {group} and its labs."
     if role == "labic":
-        lab = rows[0].lab_name if rows else "their assigned lab"
+        labs = sorted({row.lab_name for row in rows})
+        if len(labs) > 1:
+            return f"A Lab-in-Charge, who can only see the labs {', '.join(labs)}."
+        lab = labs[0] if labs else "their assigned lab"
         return f"A Lab-in-Charge, who can only see the lab {lab}."
     return "A user with no data access."
 

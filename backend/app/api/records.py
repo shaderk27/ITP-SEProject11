@@ -28,8 +28,8 @@ router = APIRouter(prefix="/api/records", tags=["Records"])
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-# Lab IC may view PR Records, but scoped to their single assigned lab only
-# (see the query filter below): only PRs that have a line in their lab, and
+# Lab IC may view PR Records, but scoped to their assigned labs only (see the
+# query filter below): only PRs that have a line in one of their labs, and
 # only those lines are returned.
 ALLOWED_RECORDS_ROLES = {"admin", "teamlead", "labic"}
 
@@ -101,7 +101,7 @@ def list_committed_prs(
     Role scoping:
       - Admin     → every committed PR.
       - Team Lead → only PRs whose lab_group_id matches their lab_group_id.
-      - Lab IC    → only PRs that have a line in their assigned lab, and only
+      - Lab IC    → only PRs that have a line in one of their assigned labs, and only
         those lines are returned (other labs' lines in the same PR are hidden,
         and the PR total is recomputed from the visible lines).
 
@@ -194,17 +194,18 @@ def _scoped_committed_prs(
     end_date: date | None,
 ) -> list[CommittedPR]:
     """Role-scoped, date-filtered committed PRs. Shared by /prs and /export."""
+    user_lab_ids = current_user.lab_ids if role_name == "labic" else []
     query = db.query(PurchaseRequest)
     if role_name == "teamlead":
         if not current_user.lab_group_id:
             return []
         query = query.filter(PurchaseRequest.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-        if not current_user.lab_id:
+        if not user_lab_ids:
             return []
-        # Only PRs that carry at least one line in the Lab IC's own lab.
+        # Match PRs that contain lines for ANY of the Lab IC's assigned labs
         query = query.filter(
-            PurchaseRequest.lines.any(PurchaseRequestLine.lab_id == current_user.lab_id)
+            PurchaseRequest.lines.any(PurchaseRequestLine.lab_id.in_(user_lab_ids))
         )
 
     # Custom range wins; otherwise fall back to the preset. date_range_bounds
@@ -233,11 +234,9 @@ def _scoped_committed_prs(
     lines_query = db.query(PurchaseRequestLine).filter(
         PurchaseRequestLine.pr_id.in_(pr_ids)
     )
-    # Lab IC only sees their own lab's lines within each PR.
+    # Lab IC only sees their own labs' lines within each PR.
     if role_name == "labic":
-        lines_query = lines_query.filter(
-            PurchaseRequestLine.lab_id == current_user.lab_id
-        )
+        lines_query = lines_query.filter(PurchaseRequestLine.lab_id.in_(user_lab_ids))
     all_lines = lines_query.order_by(
         PurchaseRequestLine.pr_id, PurchaseRequestLine.line_no
     ).all()
@@ -364,9 +363,10 @@ def _scope_label(db: Session, user: User, role_name: str) -> str:
         name = group.lab_group_name if group else "Unassigned"
         return f"Lab Group: {name} (Team Lead scope)"
     if role_name == "labic":
-        lab = db.query(Lab).filter(Lab.lab_id == user.lab_id).first()
-        name = lab.lab_name if lab else "Unassigned"
-        return f"Lab: {name} (Lab IC scope — own lab's lines only)"
+        labs = db.query(Lab).filter(Lab.lab_id.in_(user.lab_ids)).all()
+        names = ", ".join(sorted(lab.lab_name for lab in labs)) or "Unassigned"
+        noun = "Labs" if len(labs) > 1 else "Lab"
+        return f"{noun}: {names} (Lab IC scope — own labs' lines only)"
     return "All Lab Groups (Admin — full access)"
 
 

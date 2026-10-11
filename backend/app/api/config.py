@@ -18,12 +18,16 @@ from app.models.config import (
     LabGroupCreate,
     LabCreate,
     CategoryCreate,
+    LabIcAssignment,
 )
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
 
-from app.services.threshold_service import check_and_notify_lab_thresholds
+from app.services.threshold_service import (
+    check_and_notify_lab_thresholds,
+    check_and_notify_lab_group_thresholds,
+)
 from app.models.staging import PurchaseRequestLine, PurchaseRequest
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
@@ -80,7 +84,6 @@ class PeriodCreate(BaseModel):
 
 @router.get("/periods")
 def list_periods(db: Session = Depends(get_db)):
-    """All fiscal years, newest first. Ensures the current FY exists."""
     get_or_create_current_period(db)
     periods = db.query(BudgetPeriod).order_by(BudgetPeriod.year_no.desc()).all()
     return [_period_out(p) for p in periods]
@@ -88,7 +91,6 @@ def list_periods(db: Session = Depends(get_db)):
 
 @router.post("/periods")
 def create_period(payload: PeriodCreate, db: Session = Depends(get_db)):
-    """Create a fiscal year from a year number: FY{year}, Apr 1 → Mar 31."""
     year = payload.year
     if year < 2000 or year > 2100:
         raise HTTPException(
@@ -122,37 +124,60 @@ def get_lab_groups(
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
     )
-
-    if period_id == 0:
-        pid = None
-    elif period_id is not None:
-        pid = period_id
-    else:
-        pid = get_or_create_current_period(db)
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
 
     query = db.query(LabGroup)
     if role_name == "teamlead":
         if not current_user.lab_group_id:
             return []
         query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
-    elif role_name not in {"admin", "teamlead"}:
+    elif role_name == "labic":
+        # Multi-lab resolution via user assignments
+        user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        if not user_lab_ids:
+            return []
+        user_lab_group_ids = (
+            db.query(Lab.lab_group_id)
+            .filter(Lab.lab_id.in_(user_lab_ids), Lab.lab_group_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        group_ids = [gid[0] for gid in user_lab_group_ids if gid[0]]
+        if not group_ids:
+            return []
+        query = query.filter(LabGroup.lab_group_id.in_(group_ids))
+    elif role_name != "admin":
         return []
 
     groups = query.all()
     result = []
-
     active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
 
     for g in groups:
-        budget_q = db.query(func.sum(Budget.budget_amount)).filter(
-            Budget.lab_group_id == g.lab_group_id
+        total_budget_envelope = float(
+            db.query(func.sum(Budget.budget_amount))
+            .filter(
+                Budget.lab_group_id == g.lab_group_id,
+                Budget.lab_id.is_(None),
+                Budget.period_id == pid,
+            )
+            .scalar()
+            or 0
         )
-        if pid is not None:
-            budget_q = budget_q.filter(Budget.period_id == pid)
-        total_budget = budget_q.scalar() or 0
+
+        allocated_to_labs = float(
+            db.query(func.sum(Budget.budget_amount))
+            .filter(
+                Budget.lab_group_id == g.lab_group_id,
+                Budget.lab_id.isnot(None),
+                Budget.period_id == pid,
+            )
+            .scalar()
+            or 0
+        )
 
         if active_period:
-            total_spent = (
+            total_spent = float(
                 db.query(func.sum(PurchaseRequestLine.amount_gst))
                 .join(
                     PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id
@@ -174,7 +199,7 @@ def get_lab_groups(
                 or 0
             )
         else:
-            total_spent = 0
+            total_spent = 0.0
 
         result.append(
             {
@@ -182,8 +207,10 @@ def get_lab_groups(
                 "name": g.lab_group_name,
                 "wbs_code": g.wbs_code or "",
                 "description": g.description or "",
-                "budget": total_budget,
-                "spent": float(total_spent),
+                "budget": total_budget_envelope,
+                "allocated_to_labs": allocated_to_labs,
+                "unallocated": total_budget_envelope - allocated_to_labs,
+                "spent": total_spent,
                 "threshold": 80,
             }
         )
@@ -191,7 +218,22 @@ def get_lab_groups(
 
 
 @router.post("/labgroups", response_model=LabGroupOut)
-def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
+def create_lab_group(
+    group: LabGroupCreate, period_id: int | None = None, db: Session = Depends(get_db)
+):
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
+
+    existing_wbs = (
+        db.query(LabGroup)
+        .filter(func.lower(LabGroup.wbs_code) == group.wbs_code.lower())
+        .first()
+    )
+    if existing_wbs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot create Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
+        )
+
     new_group = LabGroup(
         lab_group_name=group.name,
         wbs_code=group.wbs_code,
@@ -199,6 +241,17 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
     )
     db.add(new_group)
     db.flush()
+
+    if group.budget > 0:
+        envelope = Budget(
+            period_id=pid,
+            lab_group_id=new_group.lab_group_id,
+            lab_id=None,
+            category_id=None,
+            budget_amount=group.budget,
+            updated_at=func.now(),
+        )
+        db.add(envelope)
 
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         labs_to_update = (
@@ -215,12 +268,15 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(new_group)
+
     return {
         "id": new_group.lab_group_id,
         "name": new_group.lab_group_name,
         "wbs_code": new_group.wbs_code,
         "description": new_group.description,
-        "budget": 0,
+        "budget": float(group.budget),
+        "allocated_to_labs": 0.0,
+        "unallocated": float(group.budget),
         "spent": 0.0,
         "threshold": 80,
     }
@@ -228,15 +284,58 @@ def create_lab_group(group: LabGroupCreate, db: Session = Depends(get_db)):
 
 @router.put("/labgroups/{group_id}", response_model=LabGroupOut)
 def update_lab_group(
-    group_id: int, group: LabGroupCreate, db: Session = Depends(get_db)
+    group_id: int,
+    group: LabGroupCreate,
+    background_tasks: BackgroundTasks,
+    period_id: int | None = None,
+    db: Session = Depends(get_db),
 ):
     db_group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not db_group:
         raise HTTPException(status_code=404)
 
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
+
+    existing_wbs = (
+        db.query(LabGroup)
+        .filter(
+            func.lower(LabGroup.wbs_code) == group.wbs_code.lower(),
+            LabGroup.lab_group_id != group_id,
+        )
+        .first()
+    )
+    if existing_wbs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot update Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
+        )
+
     db_group.lab_group_name = group.name
     db_group.wbs_code = group.wbs_code
     db_group.description = group.description
+
+    envelope = (
+        db.query(Budget)
+        .filter(
+            Budget.lab_group_id == group_id,
+            Budget.lab_id.is_(None),
+            Budget.period_id == pid,
+        )
+        .first()
+    )
+
+    if envelope:
+        envelope.budget_amount = group.budget
+    else:
+        envelope = Budget(
+            period_id=pid,
+            lab_group_id=group_id,
+            lab_id=None,
+            category_id=None,
+            budget_amount=group.budget,
+            updated_at=func.now(),
+        )
+        db.add(envelope)
 
     if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
         labs_to_update = (
@@ -252,12 +351,28 @@ def update_lab_group(
             b.lab_group_id = group_id
 
     db.commit()
+
+    background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
+
+    allocated = float(
+        db.query(func.sum(Budget.budget_amount))
+        .filter(
+            Budget.lab_group_id == group_id,
+            Budget.lab_id.isnot(None),
+            Budget.period_id == pid,
+        )
+        .scalar()
+        or 0
+    )
+
     return {
         "id": db_group.lab_group_id,
         "name": db_group.lab_group_name,
         "wbs_code": db_group.wbs_code,
         "description": db_group.description,
-        "budget": 0,
+        "budget": float(group.budget),
+        "allocated_to_labs": allocated,
+        "unallocated": float(group.budget) - allocated,
         "spent": 0.0,
         "threshold": 80,
     }
@@ -265,25 +380,31 @@ def update_lab_group(
 
 @router.delete("/labgroups/{group_id}")
 def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
-    budgets = db.query(Budget).filter(Budget.lab_group_id == group_id).all()
-    for b in budgets:
-        b.lab_group_id = None
-
-    labs = db.query(Lab).filter(Lab.lab_group_id == group_id).all()
-    for lab in labs:
-        lab.lab_group_id = None
-
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Lab Group not found")
 
-    db.delete(group)
-    db.commit()
+    try:
+        budgets = db.query(Budget).filter(Budget.lab_group_id == group_id).all()
+        for b in budgets:
+            db.delete(b)
 
-    return {
-        "success": True,
-        "message": "Lab group deleted and all associated labs and budgets unassigned.",
-    }
+        labs = db.query(Lab).filter(Lab.lab_group_id == group_id).all()
+        for lab in labs:
+            lab.lab_group_id = None
+
+        db.delete(group)
+        db.commit()
+        return {
+            "success": True,
+            "message": "Lab group deleted and all associated labs unassigned.",
+        }
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete this group because it is already tied to existing Purchase Requests or users.",
+        )
 
 
 # ==============================
@@ -304,6 +425,17 @@ def get_categories(db: Session = Depends(get_db)):
 
 @router.post("/categories", response_model=CategoryOut)
 def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
+    existing_cat = (
+        db.query(SpendingCategory)
+        .filter(func.lower(SpendingCategory.category_name) == cat_in.name.lower())
+        .first()
+    )
+    if existing_cat:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot create category: The name '{cat_in.name}' is already in use.",
+        )
+
     new_cat = SpendingCategory(
         category_name=cat_in.name, description=cat_in.description
     )
@@ -326,6 +458,21 @@ def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(g
     )
     if not db_cat:
         raise HTTPException(status_code=404)
+
+    existing_cat = (
+        db.query(SpendingCategory)
+        .filter(
+            func.lower(SpendingCategory.category_name) == cat_in.name.lower(),
+            SpendingCategory.category_id != cat_id,
+        )
+        .first()
+    )
+    if existing_cat:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot update category: The name '{cat_in.name}' is already in use.",
+        )
+
     db_cat.category_name = cat_in.name
     db_cat.description = cat_in.description
     db.commit()
@@ -343,10 +490,8 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
         .filter(SpendingCategory.category_id == cat_id)
         .first()
     )
-
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found.")
-
     try:
         db.delete(cat)
         db.commit()
@@ -355,7 +500,7 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete '{cat.category_name}' because it is currently assigned to one or more labs. Please remove the budgets for this category first.",
+            detail=f"Cannot delete '{cat.category_name}' because it is in use by existing budgets or requests.",
         )
 
 
@@ -379,7 +524,6 @@ def get_labs(
 ):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
-    # START ROLE-BASED FILTERING
     query = db.query(Lab)
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
@@ -390,15 +534,14 @@ def get_labs(
             return []
         query = query.filter(Lab.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-        if not current_user.lab_id:
+        user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
+        if not user_lab_ids:
             return []
-        query = query.filter(Lab.lab_id == current_user.lab_id)
+        query = query.filter(Lab.lab_id.in_(user_lab_ids))
     elif role_name != "admin":
         return []
 
     labs = query.all()
-    # END ROLE-BASED FILTERING
-
     result = []
     active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
 
@@ -408,11 +551,27 @@ def get_labs(
             .filter(Budget.lab_id == lab.lab_id, Budget.period_id == pid)
             .all()
         )
-        total_budget = sum(b.budget_amount for b in budgets) if budgets else 0
+        total_budget = sum(float(b.budget_amount) for b in budgets) if budgets else 0.0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
 
+        # Dynamically resolve Primary Lab IC details
+        primary_ic_assignment = (
+            db.query(LabIcAssignment)
+            .filter(
+                LabIcAssignment.lab_id == lab.lab_id,
+                LabIcAssignment.is_primary.is_(True),
+            )
+            .first()
+        )
+        if primary_ic_assignment and primary_ic_assignment.user:
+            ic_name = primary_ic_assignment.user.full_name
+            ic_email = primary_ic_assignment.user.email
+        else:
+            ic_name = ""
+            ic_email = ""
+
         if active_period:
-            total_spent = (
+            total_spent = float(
                 db.query(func.sum(PurchaseRequestLine.amount_gst))
                 .join(
                     PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id
@@ -462,7 +621,7 @@ def get_labs(
                 if cat_id is not None
             }
         else:
-            total_spent = 0
+            total_spent = 0.0
             spent_by_cat = {}
 
         result.append(
@@ -474,9 +633,9 @@ def get_labs(
                 "group_id": lab.lab_group_id if lab.lab_group_id else 0,
                 "venue": lab.venue or "",
                 "budget": total_budget,
-                "spent": float(total_spent),
-                "ic_name": "",
-                "ic_email": "",
+                "spent": total_spent,
+                "ic_name": ic_name,
+                "ic_email": ic_email,
                 "budgets": budget_map,
                 "spent_by_category": spent_by_cat,
             }
@@ -490,9 +649,50 @@ def create_lab(
     period_id: int | None = None,
     db: Session = Depends(get_db),
 ):
-    current_period_id = (
-        period_id if period_id is not None else get_or_create_current_period(db)
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
+
+    existing_lab = (
+        db.query(Lab)
+        .filter(func.lower(Lab.lab_code) == lab_in.lab_code.lower())
+        .first()
     )
+    if existing_lab:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot create lab: The code '{lab_in.lab_code}' is already in use by another lab.",
+        )
+
+    requested_total = sum(amount for amount in lab_in.budgets.values() if amount > 0)
+
+    group_envelope = float(
+        db.query(func.sum(Budget.budget_amount))
+        .filter(
+            Budget.lab_group_id == lab_in.lab_group_id,
+            Budget.lab_id.is_(None),
+            Budget.period_id == pid,
+        )
+        .scalar()
+        or 0
+    )
+
+    existing_allocated = float(
+        db.query(func.sum(Budget.budget_amount))
+        .filter(
+            Budget.lab_group_id == lab_in.lab_group_id,
+            Budget.lab_id.isnot(None),
+            Budget.period_id == pid,
+        )
+        .scalar()
+        or 0
+    )
+
+    if (existing_allocated + requested_total) > group_envelope:
+        remaining = group_envelope - existing_allocated
+        raise HTTPException(
+            status_code=400,
+            detail=f"Budget Exceeded: You requested ${requested_total:,.2f}, but the Lab Group only has ${remaining:,.2f} of unallocated funds remaining.",
+        )
+
     new_lab = Lab(
         lab_code=lab_in.lab_code,
         lab_name=lab_in.lab_name,
@@ -501,11 +701,12 @@ def create_lab(
     )
     db.add(new_lab)
     db.flush()
-    total_assigned = 0
+
+    total_assigned = 0.0
     for cat_id_str, amount in lab_in.budgets.items():
         if amount > 0:
             b = Budget(
-                period_id=current_period_id,
+                period_id=pid,
                 lab_group_id=new_lab.lab_group_id,
                 lab_id=new_lab.lab_id,
                 category_id=int(cat_id_str),
@@ -514,8 +715,10 @@ def create_lab(
             )
             db.add(b)
             total_assigned += amount
+
     db.commit()
     db.refresh(new_lab)
+
     return {
         "id": new_lab.lab_id,
         "code": new_lab.lab_code or "",
@@ -542,22 +745,67 @@ def update_lab(
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab:
         raise HTTPException(status_code=404)
-    current_period_id = (
-        period_id if period_id is not None else get_or_create_current_period(db)
+
+    pid = period_id if period_id is not None else get_or_create_current_period(db)
+
+    existing_lab = (
+        db.query(Lab)
+        .filter(
+            func.lower(Lab.lab_code) == lab_in.lab_code.lower(), Lab.lab_id != lab_id
+        )
+        .first()
     )
+
+    if existing_lab:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot update lab: The code '{lab_in.lab_code}' is already in use by another lab.",
+        )
+
+    requested_total = sum(amount for amount in lab_in.budgets.values() if amount > 0)
+
+    group_envelope = float(
+        db.query(func.sum(Budget.budget_amount))
+        .filter(
+            Budget.lab_group_id == lab_in.lab_group_id,
+            Budget.lab_id.is_(None),
+            Budget.period_id == pid,
+        )
+        .scalar()
+        or 0
+    )
+
+    existing_allocated = float(
+        db.query(func.sum(Budget.budget_amount))
+        .filter(
+            Budget.lab_group_id == lab_in.lab_group_id,
+            Budget.lab_id.isnot(None),
+            Budget.lab_id != lab_id,
+            Budget.period_id == pid,
+        )
+        .scalar()
+        or 0
+    )
+
+    if (existing_allocated + requested_total) > group_envelope:
+        remaining = group_envelope - existing_allocated
+        raise HTTPException(
+            status_code=400,
+            detail=f"Budget Exceeded: You requested ${requested_total:,.2f}, but the Lab Group only has ${remaining:,.2f} of unallocated funds remaining.",
+        )
+
     db_lab.lab_code = lab_in.lab_code
     db_lab.lab_name = lab_in.lab_name
     db_lab.lab_group_id = lab_in.lab_group_id
     db_lab.venue = lab_in.venue
 
-    db.query(Budget).filter(
-        Budget.lab_id == lab_id, Budget.period_id == current_period_id
-    ).delete()
-    total_assigned = 0
+    db.query(Budget).filter(Budget.lab_id == lab_id, Budget.period_id == pid).delete()
+
+    total_assigned = 0.0
     for cat_id_str, amount in lab_in.budgets.items():
         if amount > 0:
             b = Budget(
-                period_id=current_period_id,
+                period_id=pid,
                 lab_group_id=db_lab.lab_group_id,
                 lab_id=db_lab.lab_id,
                 category_id=int(cat_id_str),
@@ -571,15 +819,13 @@ def update_lab(
     db.refresh(db_lab)
 
     background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
-
-    active_period = (
-        db.query(BudgetPeriod)
-        .filter(BudgetPeriod.period_id == current_period_id)
-        .first()
+    background_tasks.add_task(
+        check_and_notify_lab_group_thresholds, db_lab.lab_group_id
     )
 
+    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
     if active_period:
-        total_spent = (
+        total_spent = float(
             db.query(func.sum(PurchaseRequestLine.amount_gst))
             .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
             .filter(
@@ -598,7 +844,7 @@ def update_lab(
             or 0
         )
     else:
-        total_spent = 0
+        total_spent = 0.0
 
     return {
         "id": db_lab.lab_id,
@@ -608,7 +854,7 @@ def update_lab(
         "group_id": db_lab.lab_group_id,
         "venue": db_lab.venue,
         "budget": total_assigned,
-        "spent": float(total_spent),
+        "spent": total_spent,
         "ic_name": lab_in.ic_name,
         "ic_email": lab_in.ic_email,
         "budgets": lab_in.budgets,
@@ -618,23 +864,17 @@ def update_lab(
 @router.delete("/labs/{lab_id}")
 def delete_lab(lab_id: int, db: Session = Depends(get_db)):
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
-    if lab:
-        db.delete(lab)
-        db.commit()
-    return {"success": True}
-
-
-@router.put("/labs/{lab_id}/unassign")
-def unassign_lab_from_group(lab_id: int, db: Session = Depends(get_db)):
-    lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
 
-    lab.lab_group_id = None
-
-    budgets = db.query(Budget).filter(Budget.lab_id == lab_id).all()
-    for b in budgets:
-        b.lab_group_id = None
-
-    db.commit()
-    return {"success": True, "message": "Lab successfully removed from the group."}
+    try:
+        db.query(Budget).filter(Budget.lab_id == lab_id).delete()
+        db.delete(lab)
+        db.commit()
+        return {"success": True}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete this lab because it is already tied to existing Purchase Requests or users.",
+        )

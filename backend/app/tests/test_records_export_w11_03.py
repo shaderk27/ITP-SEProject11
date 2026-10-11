@@ -364,7 +364,6 @@ def test_labic_without_lab_exports_nothing(db) -> None:
         full_name="Orphan IC",
         email="orphan.ic@test.com",
         password_hash="x",
-        lab_id=None,
     )
     assert _scoped_committed_prs(db, orphan, "labic", "all", None, None) == []
 
@@ -397,10 +396,11 @@ def export_client(db):
     from app.dependencies.auth import get_current_user
     from app.main import app
     from app.models.auth import User
+    from app.models.config import LabIcAssignment
 
     state: dict[str, User] = {}
 
-    def _as(role: str, lab_group_id=None, lab_id=None) -> None:
+    def _as(role: str, lab_group_id=None, lab_ids=()) -> None:
         state["user"] = User(
             user_id=999,
             email=f"{role}@test.com",
@@ -408,7 +408,7 @@ def export_client(db):
             role_id=1,
             role=MagicMock(role_name=role),
             lab_group_id=lab_group_id,
-            lab_id=lab_id,
+            lab_assignments=[LabIcAssignment(lab_id=lab_id) for lab_id in lab_ids],
         )
 
     previous = dict(app.dependency_overrides)
@@ -551,12 +551,26 @@ def test_labic_export_scoped_to_own_lab(db, export_client) -> None:
     _make_committed_pr(db, "PR-LAB-A", group_a.lab_group_id, lab_a.lab_id, category_id)
     _make_committed_pr(db, "PR-LAB-B", group_b.lab_group_id, lab_b.lab_id, category_id)
 
-    export_client.login_as("labic", lab_id=lab_a.lab_id)
+    export_client.login_as("labic", lab_ids=[lab_a.lab_id])
     text = _sheet_text(export_client.get("/api/records/export"))
 
     assert "PR-LAB-A" in text
     assert "PR-LAB-B" not in text
     assert "Lab IC scope" in text
+
+
+def test_labic_with_two_labs_exports_both(db, export_client) -> None:
+    pairs, category_id = _two_groups(db)
+    (group_a, lab_a), (group_b, lab_b) = pairs
+    _make_committed_pr(db, "PR-LAB-A", group_a.lab_group_id, lab_a.lab_id, category_id)
+    _make_committed_pr(db, "PR-LAB-B", group_b.lab_group_id, lab_b.lab_id, category_id)
+
+    export_client.login_as("labic", lab_ids=[lab_a.lab_id, lab_b.lab_id])
+    text = _sheet_text(export_client.get("/api/records/export"))
+
+    assert "PR-LAB-A" in text
+    assert "PR-LAB-B" in text
+    assert "Labs: " in text
 
 
 def test_export_honours_the_search_filter(db, export_client) -> None:

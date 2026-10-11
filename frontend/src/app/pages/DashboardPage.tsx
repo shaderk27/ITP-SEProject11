@@ -416,9 +416,9 @@ function ChartScroll({
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  // Lab IC is scoped to a single lab: the "By Lab Group" view and the
+  // Lab IC is scoped to their own labs: the "By Lab Group" view and the
   // entity-select filter are meaningless for them, so both are hidden and
-  // only the single lab's chart shows.
+  // only their labs' charts show.
   const isLabIc = user?.role === "labic";
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
@@ -499,7 +499,7 @@ export function DashboardPage() {
   // Done during render with a previous-value guard (React's "adjust state when
   // a prop changes" pattern) instead of an effect, which would fire an extra
   // cascading render on every identity change.
-  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labId ?? ""}`;
+  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labIds.join(",") ?? ""}`;
   const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
   if (userKey !== prevUserKey) {
     setPrevUserKey(userKey);
@@ -515,9 +515,10 @@ export function DashboardPage() {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
       setSelectedGroupId("all");
-    } else if (user?.role === "labic" && user.labId) {
-      // Lab IC is locked to their single assigned lab.
-      setSelectedLabId(String(user.labId));
+    } else if (user?.role === "labic" && user.labIds.length > 0) {
+      // Lab IC starts on their primary lab; the Lab filter lists only their
+      // own labs if they run more than one.
+      setSelectedLabId(String(user.labIds[0]));
     }
   }
 

@@ -9,15 +9,15 @@ to the budget_system database. Each test starts clean, no truncation needed.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Callable
+from typing import Callable, Generator
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
 from app.models.auth import User
-from app.models.config import Lab, LabGroup, SpendingCategory
+from app.models.config import Lab, LabGroup, SpendingCategory, BudgetPeriod, Budget
 from app.models.staging import (
     ReviewQueueItem,
     StagingPRHeader,
@@ -27,7 +27,7 @@ from app.models.staging import (
 
 
 @pytest.fixture
-def db() -> Session:
+def db() -> Generator[Session, None, None]:
     """
     Per-test transactional session against the real budget_system DB.
 
@@ -77,6 +77,30 @@ def seed_refs(db: Session) -> dict:
     if lab is None:
         pytest.skip("No labs seeded for any lab_group; run dev_seed.sql.")
     category = db.query(SpendingCategory).first()
+    period = db.query(BudgetPeriod).first()
+
+    # --- TOP-DOWN ENVELOPE SAFETY GUARD ---
+    # Automatically injects a massive envelope budget for this group if it doesn't
+    # exist, ensuring that legacy integration tests building labs dynamically
+    # don't crash from the new 400 Bad Request mathematical threshold guards.
+    if period and group:
+        existing_env = (
+            db.query(Budget)
+            .filter(Budget.lab_group_id == group.lab_group_id, Budget.lab_id.is_(None))
+            .first()
+        )
+        if not existing_env:
+            db.add(
+                Budget(
+                    period_id=period.period_id,
+                    lab_group_id=group.lab_group_id,
+                    budget_amount=Decimal("9999999.00"),
+                    updated_at=func.now(),
+                )
+            )
+            db.flush()
+    # ----------------------------------------
+
     return {
         "lab_group_id": group.lab_group_id,
         "lab_id": lab.lab_id,
@@ -124,9 +148,6 @@ def make_staging_batch(db: Session, admin_user, seed_refs) -> Callable:
         db.flush()
 
         for i, (desc, amount) in enumerate(lines, start=1):
-            # line_identity_key drives Harry's W9-04 preserve-by-identity logic.
-            # Deriving from source_pr_number + description means a re-upload of
-            # the same line (regardless of staging row id) is treated as a match.
             line_identity_key = f"{source_pr_number}::{desc}"
             line = StagingPRLine(
                 staging_header_id=header.staging_header_id,

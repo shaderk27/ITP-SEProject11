@@ -9,6 +9,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Date,
+    UniqueConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,6 +29,15 @@ class LabGroup(Base):
     wbs_code = Column(String(100))
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # --- LAB GROUP ENVELOPE THRESHOLDS ---
+    notified_50 = Column(Boolean, default=False)
+    notified_80 = Column(Boolean, default=False)
+    notified_95 = Column(Boolean, default=False)
+    notified_100 = Column(Boolean, default=False)
+    alert_period_id = Column(
+        BigInteger, ForeignKey("budget_periods.period_id"), nullable=True
+    )
 
     labs = relationship("Lab", back_populates="group")
 
@@ -47,7 +59,15 @@ class Lab(Base):
 
     group = relationship("LabGroup", back_populates="labs")
     aliases = relationship("LabAlias", back_populates="lab")
+    # Lab ICs (many-to-many via lab_ic_assignments): any number per lab, at most one primary.
+    ic_assignments = relationship(
+        "LabIcAssignment",
+        back_populates="lab",
+        cascade="all, delete-orphan",
+        order_by="LabIcAssignment.assignment_id",
+    )
 
+    # --- INDIVIDUAL LAB THRESHOLDS ---
     notified_50 = Column(Boolean, default=False)
     notified_80 = Column(Boolean, default=False)
     notified_95 = Column(Boolean, default=False)
@@ -55,6 +75,62 @@ class Lab(Base):
     alert_period_id = Column(
         BigInteger, ForeignKey("budget_periods.period_id"), nullable=True
     )
+
+    @property
+    def primary_ic(self):
+        """The primary Lab IC (User) or None."""
+        for a in self.ic_assignments:
+            if a.is_primary:
+                return a.user
+        return None
+
+    @property
+    def ic_users(self):
+        """All Lab ICs (Users), primary first."""
+        ordered = sorted(
+            self.ic_assignments, key=lambda a: (not a.is_primary, a.assignment_id or 0)
+        )
+        return [a.user for a in ordered]
+
+    @property
+    def ic_user(self):
+        """Back-compat for code written against the 1-1 model: the primary IC, else the
+        first assigned IC, else None. Read-only. New code should use primary_ic / ic_users."""
+        return self.primary_ic or (self.ic_users[0] if self.ic_assignments else None)
+
+
+class LabIcAssignment(Base):
+    """A user acting as Lab IC for a lab. Many-to-many; at most one primary per lab."""
+
+    __tablename__ = "lab_ic_assignments"
+    __table_args__ = (
+        UniqueConstraint("lab_id", "user_id", name="uq_lab_ic_lab_user"),
+        Index(
+            "uq_lab_ic_one_primary",
+            "lab_id",
+            unique=True,
+            postgresql_where=text("is_primary"),
+        ),
+    )
+
+    assignment_id = Column(BigInteger, primary_key=True)
+    lab_id = Column(
+        BigInteger, ForeignKey("labs.lab_id", ondelete="CASCADE"), nullable=False
+    )
+    user_id = Column(
+        BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False
+    )
+    is_primary = Column(Boolean, nullable=False, default=False)
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+    assigned_by = Column(
+        BigInteger, ForeignKey("users.user_id", ondelete="SET NULL"), nullable=True
+    )
+
+    lab = relationship("Lab", back_populates="ic_assignments")
+    user = relationship(
+        "User", back_populates="lab_assignments", foreign_keys=[user_id]
+    )
+    assigned_by_user = relationship("User", foreign_keys=[assigned_by])
 
 
 class LabAlias(Base):
@@ -106,8 +182,12 @@ class Budget(Base):
     budget_id = Column(BigInteger, primary_key=True)
     period_id = Column(BigInteger)
     lab_group_id = Column(BigInteger, ForeignKey("lab_groups.lab_group_id"))
-    lab_id = Column(BigInteger, ForeignKey("labs.lab_id"))
-    category_id = Column(BigInteger, ForeignKey("spending_categories.category_id"))
+    lab_id = Column(
+        BigInteger, ForeignKey("labs.lab_id"), nullable=True
+    )  # Explicitly nullable for envelopes
+    category_id = Column(
+        BigInteger, ForeignKey("spending_categories.category_id"), nullable=True
+    )  # Explicitly nullable for envelopes
     budget_amount = Column(Numeric(14, 2))
     created_by = Column(BigInteger)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -122,9 +202,18 @@ class LabGroupOut(BaseModel):
     name: str
     wbs_code: str | None = None
     description: str | None = None
-    budget: float
+    budget: float  # The Total Envelope
+    allocated_to_labs: float  # How much is given to labs
+    unallocated: float  # Remaining available
     spent: float = 0.0
     threshold: int
+
+
+class LabIcOut(BaseModel):
+    user_id: int
+    name: str
+    email: str
+    is_primary: bool
 
 
 class LabOut(BaseModel):
@@ -137,7 +226,8 @@ class LabOut(BaseModel):
     budget: float
     spent: float = 0.0
     ic_name: str | None = None
-    ic_email: str | None = None
+    ic_email: str | None = None  # primary IC (kept for existing clients)
+    ics: list[LabIcOut] = []  # all Lab ICs, primary first
     budgets: dict[str, float] = {}
     spent_by_category: dict[str, float] = {}
 
@@ -152,6 +242,7 @@ class LabGroupCreate(BaseModel):
     name: str
     wbs_code: str
     description: str | None = None
+    budget: float = 0.0  # Support adding the envelope budget on creation
     assigned_lab_ids: list[int] | None = []
 
 
