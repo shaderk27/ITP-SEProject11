@@ -335,10 +335,14 @@ def _grouped(rows: list[ChatbotBudgetContext], key) -> list[dict]:
 
     out = []
     for name, bucket in buckets.items():
-        entry = {"name": name} if isinstance(name, str) else {
-            "lab_group": name[0],
-            "name": name[1],
-        }
+        entry = (
+            {"name": name}
+            if isinstance(name, str)
+            else {
+                "lab_group": name[0],
+                "name": name[1],
+            }
+        )
         entry.update(_totals(bucket))
         out.append(entry)
     out.sort(key=lambda e: e["approved_spend"], reverse=True)
