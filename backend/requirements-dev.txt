@@ -2,7 +2,7 @@ pytest
 pytest-asyncio
 pytest-cov
 httpx
-ruff
+ruff==0.15.22
 black
 mypy
 pandas-stubs

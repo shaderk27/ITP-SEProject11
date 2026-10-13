@@ -66,11 +66,13 @@ class User(Base):
     lab_group: Mapped[Optional["LabGroup"]] = relationship("LabGroup")
     # Lab IC links live in lab_ic_assignments (many-to-many): a user can be IC of
     # several labs, and a lab can have several ICs (at most one primary).
+    # Primary first, so lab_ids[0] is the IC's primary lab when they have one.
     lab_assignments: Mapped[List["LabIcAssignment"]] = relationship(
         "LabIcAssignment",
         back_populates="user",
         foreign_keys="LabIcAssignment.user_id",
         cascade="all, delete-orphan",
+        order_by="(LabIcAssignment.is_primary.desc(), LabIcAssignment.assignment_id)",
     )
 
     @property

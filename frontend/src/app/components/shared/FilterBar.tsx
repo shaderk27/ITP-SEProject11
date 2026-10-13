@@ -1,6 +1,12 @@
-import { Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -22,6 +28,17 @@ interface FilterBarProps {
   onFilterChange?: (filterId: string, value: string) => void;
   showExport?: boolean;
   onExport?: () => void;
+  /**
+   * Turns the Export button into a dropdown. Used where a page can be
+   * exported in more than one format; omit it for a single-action button.
+   */
+  exportOptions?: {
+    id: string;
+    label: string;
+    description?: string;
+  }[];
+  onExportOption?: (id: string) => void;
+  exportDisabled?: boolean;
 }
 
 export function FilterBar({
@@ -31,6 +48,9 @@ export function FilterBar({
   onFilterChange,
   showExport = false,
   onExport,
+  exportOptions,
+  onExportOption,
+  exportDisabled = false,
 }: FilterBarProps) {
   return (
     <div className="flex items-center gap-4 p-4 bg-white border-b border-border">
@@ -64,12 +84,38 @@ export function FilterBar({
         </Select>
       ))}
 
-      {/* Export button */}
-      {showExport && (
-        <Button variant="outline" onClick={onExport}>
-          Export
-        </Button>
-      )}
+      {/* Export — a menu when several formats are offered, else a button. */}
+      {showExport &&
+        (exportOptions?.length ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" disabled={exportDisabled}>
+                Export
+                <ChevronDown className="ml-1 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {exportOptions.map((option) => (
+                <DropdownMenuItem
+                  key={option.id}
+                  onSelect={() => onExportOption?.(option.id)}
+                  className="flex-col items-start gap-0.5 py-2"
+                >
+                  <span className="text-sm font-medium">{option.label}</span>
+                  {option.description && (
+                    <span className="text-xs text-muted-foreground">
+                      {option.description}
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button variant="outline" onClick={onExport} disabled={exportDisabled}>
+            Export
+          </Button>
+        ))}
     </div>
   );
 }

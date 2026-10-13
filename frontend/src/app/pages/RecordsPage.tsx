@@ -2,15 +2,15 @@ import { Fragment, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { Card } from "../components/ui/card";
 import { FilterBar } from "../components/shared/FilterBar";
-import { DatePickerField } from "../components/shared/DatePickerField";
+import { MonthRangePicker } from "../components/shared/MonthRangePicker";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 import { ExportConfirmDialog } from "../components/shared/ExportConfirmDialog";
 import { toast } from "sonner";
-import { listCommittedPRs } from "../services/recordsService";
+import { exportCommittedPRs, listCommittedPRs } from "../services/recordsService";
 import { listPeriods, type Period } from "../services/dashboardService";
-import { format, subDays } from "date-fns";
+import { format } from "date-fns";
 import type { CommittedPR } from "../types/records";
 
 export function RecordsPage() {
@@ -27,37 +27,43 @@ export function RecordsPage() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
   const [dateRange, setDateRange] = useState("all");
-  // Custom date range (overrides the preset when either is set).
+  // Custom month range (overrides the preset when either is set): startDate is
+  // the 1st of the From month, endDate the last day of the To month.
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
+  const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
+
+  // Effective request window: the selected fiscal year's Apr–Mar span,
+  // narrowed by the custom range (if set) or the preset. Shared by the list
+  // fetch and the export so the downloaded file covers the same window.
+  const effectiveRange = (): { effStart: string; effEnd: string } => {
+    // Base window = the selected fiscal year's Apr–Mar span.
+    const period = periods.find((p) => p.id === selectedFYPeriodId);
+    const fyStart = period?.start_date ?? "";
+    const fyEnd = period?.end_date ?? "";
+    // Optional sub-window: custom range wins, else a preset.
+    let rawStart = "";
+    let rawEnd = "";
+    if (startDate || endDate) {
+      rawStart = startDate;
+      rawEnd = endDate;
+    } else if (dateRange === "ytd") {
+      rawStart = `${new Date().getFullYear()}-01-01`;
+      rawEnd = format(new Date(), "yyyy-MM-dd");
+    }
+    // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
+    return {
+      effStart: !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart,
+      effEnd: !rawEnd ? fyEnd : !fyEnd || rawEnd < fyEnd ? rawEnd : fyEnd,
+    };
+  };
 
   const fetchRecords = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Base window = the selected fiscal year's Apr–Mar span.
-      const period = periods.find((p) => p.id === selectedFYPeriodId);
-      const fyStart = period?.start_date ?? "";
-      const fyEnd = period?.end_date ?? "";
-      // Optional sub-window: custom range wins, else a preset.
-      let rawStart = "";
-      let rawEnd = "";
-      if (startDate || endDate) {
-        rawStart = startDate;
-        rawEnd = endDate;
-      } else if (dateRange === "30d" || dateRange === "90d") {
-        const days = dateRange === "30d" ? 30 : 90;
-        rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
-        rawEnd = format(new Date(), "yyyy-MM-dd");
-      } else if (dateRange === "ytd") {
-        rawStart = `${new Date().getFullYear()}-01-01`;
-        rawEnd = format(new Date(), "yyyy-MM-dd");
-      }
-      // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
-      const effStart = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
-      const effEnd = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
-
+      const { effStart, effEnd } = effectiveRange();
       const data = await listCommittedPRs("all", effStart, effEnd);
       setRecords(data);
       if (data.length > 0 && expandedPr === null) {
@@ -87,12 +93,36 @@ export function RecordsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.email, selectedFYPeriodId, dateRange, startDate, endDate, periods]);
 
-  const handleExport = () => {
-    // Real CSV/Excel export is future work; for now confirm the click.
-    toast.success("Export prepared", {
-      description: `${records.length} PR record${records.length === 1 ? "" : "s"} ready (export wiring is a future step).`,
-    });
-    setShowExportDialog(false);
+  // Download exactly what the page is showing. The date window and the
+  // search / Lab Group filters all go to the server, which re-applies this
+  // user's role scoping before building the workbook. Throws on failure so
+  // the dialog can stay open for a retry.
+  const handleExport = async () => {
+    const { effStart, effEnd } = effectiveRange();
+    try {
+      const filename = await exportCommittedPRs({
+        startDate: effStart,
+        endDate: effEnd,
+        dateRange,
+        search: searchQuery,
+        // Only Admin has the Lab Group dropdown; the others are already
+        // scoped server-side, so never send a stale value for them.
+        labGroup: user?.role === "admin" ? labGroupFilter : "all",
+        periodId: selectedFYPeriodId,
+        customStart: startDate,
+        customEnd: endDate,
+      });
+      toast.success("Export complete", {
+        description: `${filename} — ${filteredRecords.length} PR record${filteredRecords.length === 1 ? "" : "s"} saved to your downloads folder.`,
+      });
+      setShowExportDialog(false);
+    } catch (err) {
+      toast.error("Export failed", {
+        description:
+          err instanceof Error ? err.message : "Could not generate the report.",
+      });
+      throw err;
+    }
   };
 
   // Lab Group options pulled from current data so the filter chip reflects reality.
@@ -128,8 +158,19 @@ export function RecordsPage() {
         searchPlaceholder="Search PR, requestor, WBS, status, item details..."
         onSearchChange={setSearchQuery}
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year")
-            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
+          if (filterId === "Fiscal Year") {
+            const id = value === "all" ? 0 : Number(value);
+            setSelectedFYPeriodId(id);
+            // Drop a custom range that falls outside the new year rather than
+            // silently clamping it into an empty or partial window.
+            const next = periods.find((p) => p.id === id);
+            const inYear = (d: string) =>
+              !next || !d || (next.start_date <= d && d <= next.end_date);
+            if (!inYear(startDate) || !inYear(endDate)) {
+              setStartDate("");
+              setEndDate("");
+            }
+          }
           if (filterId === "Lab Group") setLabGroupFilter(value);
           if (filterId === "Date Range") {
             // Picking a preset clears any custom range so the preset applies.
@@ -172,8 +213,6 @@ export function RecordsPage() {
             value: dateRange,
             options: [
               { value: "all", label: "Whole year" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
               { value: "ytd", label: "Year to date" },
             ],
           },
@@ -182,25 +221,16 @@ export function RecordsPage() {
         onExport={() => setShowExportDialog(true)}
       />
 
-      {/* Custom date range — overrides the preset when set. */}
+      {/* Custom month range — overrides the preset when set. */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
         <span className="text-muted-foreground">Custom range:</span>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">From</span>
-          <DatePickerField
-            value={startDate}
-            maxDate={endDate || undefined}
-            onChange={setStartDate}
-          />
-        </label>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">To</span>
-          <DatePickerField
-            value={endDate}
-            minDate={startDate || undefined}
-            onChange={setEndDate}
-          />
-        </label>
+        <MonthRangePicker
+          periods={selectedPeriod ? [selectedPeriod] : periods}
+          startDate={startDate}
+          endDate={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
         {customActive && (
           <>
             <span className="text-xs text-blue-600">
@@ -266,10 +296,12 @@ export function RecordsPage() {
           {filteredRecords.map((pr) => {
             const isExpanded = expandedPr === pr.pr_id;
             return (
-              <Card key={pr.pr_id} className="bg-white border-border overflow-hidden">
+              <Card key={pr.pr_id} className="bg-white border-[#cbd5e1] overflow-hidden">
                 <button
                   type="button"
-                  className="w-full p-5 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
+                  className={`w-full p-5 flex items-center justify-between gap-4 text-left ${
+                    isExpanded ? "bg-[#e2e8f0]" : "hover:bg-[#f1f5f9]"
+                  }`}
                   onClick={() => setExpandedPr(isExpanded ? null : pr.pr_id)}
                 >
                   <div className="flex items-center gap-3 min-w-0 flex-1">
@@ -296,25 +328,25 @@ export function RecordsPage() {
                 </button>
 
                 {isExpanded && (
-                  <div className="border-t border-border overflow-x-auto">
+                  <div className="border-t border-[#cbd5e1] overflow-x-auto">
                     <table className="w-full">
-                      <thead className="bg-[#f8f9fa]">
-                        <tr className="border-b border-border">
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Line</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Lab</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Category</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">PR Date</th>
-                          <th className="text-right p-3 text-xs font-medium text-muted-foreground">Qty</th>
-                          <th className="text-right p-3 text-xs font-medium text-muted-foreground">Unit Rate</th>
-                          <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
-                          <th className="text-left p-3 text-xs font-medium text-muted-foreground">Status</th>
+                      <thead className="bg-[#e2e8f0]">
+                        <tr className="border-b border-[#cbd5e1]">
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Line</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Item</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Lab</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Category</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">PR Date</th>
+                          <th className="text-right p-3 text-xs font-semibold text-[#334155]">Qty</th>
+                          <th className="text-right p-3 text-xs font-semibold text-[#334155]">Unit Rate</th>
+                          <th className="text-right p-3 text-xs font-semibold text-[#334155]">Amount + GST</th>
+                          <th className="text-left p-3 text-xs font-semibold text-[#334155]">Status</th>
                         </tr>
                       </thead>
                       <tbody>
                         {pr.lines.map((line) => (
                           <Fragment key={line.pr_line_id}>
-                            <tr className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
+                            <tr className="border-b border-[#e2e8f0] last:border-0 even:bg-[#f1f5f9] hover:bg-[#e0f2fe]">
                               <td className="p-3 text-sm font-medium text-foreground">
                                 Line {line.line_no ?? "—"}
                               </td>
@@ -360,7 +392,7 @@ export function RecordsPage() {
         open={showExportDialog}
         onOpenChange={setShowExportDialog}
         onConfirm={handleExport}
-        recordCount={records.length}
+        recordCount={filteredRecords.length}
       />
     </div>
   );

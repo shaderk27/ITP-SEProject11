@@ -63,8 +63,7 @@ export function AlertsPage() {
         if (user?.role === "admin") return true;
         if (user?.role === "teamlead") return g.id === user?.labGroupId;
         if (user?.role === "labic") {
-            const myLab = labs.find(l => l.id === user?.labId);
-            return g.id === myLab?.group_id;
+            return labs.some(l => l.group_id === g.id && user.labIds.includes(l.id));
         }
         return false;
     });
@@ -79,7 +78,7 @@ export function AlertsPage() {
         let groupLabs = labs.filter(l => l.group_id === group.id && l.budget > 0);
 
         if (isLabIC) {
-            groupLabs = groupLabs.filter(l => l.id === user?.labId);
+            groupLabs = groupLabs.filter(l => user?.labIds.includes(l.id));
         }
 
         const labAlerts: LabAlert[] = [];

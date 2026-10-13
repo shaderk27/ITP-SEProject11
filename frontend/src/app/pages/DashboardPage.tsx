@@ -21,6 +21,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
+import { InfoTip } from "../components/shared/InfoTip";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import {
@@ -36,11 +37,13 @@ import {
 } from "../components/ui/popover";
 import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
-import { DatePickerField } from "../components/shared/DatePickerField";
+import { MonthRangePicker } from "../components/shared/MonthRangePicker";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
-import { format, subDays } from "date-fns";
+import { format, parseISO } from "date-fns";
+import { setAskAiPageContext } from "../services/chatbotService";
 import {
+  exportDashboard,
   getBreakdown,
   getMonthly,
   getSpendingSummary,
@@ -49,6 +52,7 @@ import {
   type MonthlyPoint,
   type Period,
 } from "../services/dashboardService";
+import { toast } from "sonner";
 import type {
   BreakdownLabGroup,
   BreakdownResponse,
@@ -80,7 +84,25 @@ function utilColor(pct: number): string {
 }
 
 // Max entities shown at once in a comparison chart.
-const MAX_COMPARE = 20;
+// Plain-English meaning of each budget figure, shown on the KPI cards and the
+// breakdown table headers. Keep in sync with how backend/app/api/dashboard.py
+// calculates them.
+const TERM_INFO = {
+  totalBudget: "The full-year budget for your current selection.",
+  actualSpend: 'Total of PR lines whose status starts with "Approved".',
+  pending:
+    'Total of PR lines whose status starts with "Pending". This money is committed but not yet approved.',
+  available:
+    "Budget − Actual Spend − Pending. What's left if every pending PR gets approved.",
+  utilisation: "Actual Spend ÷ Budget × 100%.",
+  projected:
+    "(Actual Spend + Pending) ÷ Budget × 100%. Where you'll end up if all pending PRs are approved.",
+};
+
+const MAX_COMPARE = 100;
+// Past this many bars a comparison chart stops squeezing and scrolls instead,
+// giving each bar a fixed slot so labels stay readable.
+const SCROLL_AFTER = 20;
 
 // Value-label font size that scales with how crowded the chart is: fewer bars
 // → larger, more readable text; many bars → smaller so labels don't collide.
@@ -129,12 +151,12 @@ function EntityFilter({
     n.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="mb-3">
+    <div className="mb-3 no-print">
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Filter className="h-4 w-4" />
-            {label} ({selected.size}/{max})
+            {label}
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-2">
@@ -240,6 +262,12 @@ const DASHBOARD_CHARTS = [
 // Options offered in each slot's title dropdown.
 const SLOT_OPTIONS = [...DASHBOARD_CHARTS];
 const CHART_IDS = new Set<string>(DASHBOARD_CHARTS.map((c) => c.id));
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  teamlead: "Team Lead",
+  labic: "Lab IC",
+};
 
 // Default slot layout: 6 slots, each showing its original chart.
 const DEFAULT_SLOTS = [
@@ -353,12 +381,44 @@ function AdaptiveBarChart({
   );
 }
 
+// Lets a long comparison chart scroll instead of cramming every bar into the
+// card. Up to SCROLL_AFTER bars render unchanged; past that the chart gets
+// `slotSize` px per bar and a native scrollbar (sideways, or up/down for the
+// horizontal-bar category chart).
+function ChartScroll({
+  bars,
+  slotSize = 110,
+  vertical = false,
+  children,
+}: {
+  bars: number;
+  slotSize?: number;
+  vertical?: boolean;
+  children: ReactNode;
+}) {
+  if (bars <= SCROLL_AFTER) return <>{children}</>;
+  return (
+    <>
+      {vertical ? (
+        <div className="max-h-[460px] overflow-y-auto pr-1">{children}</div>
+      ) : (
+        <div className="overflow-x-auto pb-2">
+          <div style={{ width: bars * slotSize, minWidth: "100%" }}>{children}</div>
+        </div>
+      )}
+      <p className="no-print mt-1 text-center text-xs text-muted-foreground">
+        Showing all {bars}. Scroll {vertical ? "down" : "sideways"} to see more.
+      </p>
+    </>
+  );
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  // Lab IC is scoped to a single lab: the "By Lab Group" view and the
+  // Lab IC is scoped to their own labs: the "By Lab Group" view and the
   // entity-select filter are meaningless for them, so both are hidden and
-  // only the single lab's chart shows.
+  // only their labs' charts show.
   const isLabIc = user?.role === "labic";
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
@@ -370,12 +430,11 @@ export function DashboardPage() {
     user?.labGroupId ? String(user.labGroupId) : "all",
   );
   // Fiscal year is the master time scope: it sets the budget year AND the base
-  // spend window (Apr–Mar). The Date Range presets + custom range narrow within.
+  // spend window (Apr–Mar). The custom month range narrows within it.
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
-  // Date Range dropdown: all (whole FY) / 7d / 30d / 90d — a sub-window on spend.
-  const [dateRange, setDateRange] = useState("all");
-  // Custom date range (overrides the preset when either is set).
+  // Custom month range, stored as ISO dates: startDate is the 1st of the From
+  // month, endDate the last day of the To month. Empty = open-ended.
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
@@ -400,6 +459,7 @@ export function DashboardPage() {
         return next;
       });
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
@@ -439,7 +499,7 @@ export function DashboardPage() {
   // Done during render with a previous-value guard (React's "adjust state when
   // a prop changes" pattern) instead of an effect, which would fire an extra
   // cascading render on every identity change.
-  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labId ?? ""}`;
+  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labIds.join(",") ?? ""}`;
   const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
   if (userKey !== prevUserKey) {
     setPrevUserKey(userKey);
@@ -455,9 +515,10 @@ export function DashboardPage() {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
       setSelectedGroupId("all");
-    } else if (user?.role === "labic" && user.labId) {
-      // Lab IC is locked to their single assigned lab.
-      setSelectedLabId(String(user.labId));
+    } else if (user?.role === "labic" && user.labIds.length > 0) {
+      // Lab IC starts on their primary lab; the Lab filter lists only their
+      // own labs if they run more than one.
+      setSelectedLabId(String(user.labIds[0]));
     }
   }
 
@@ -548,26 +609,35 @@ export function DashboardPage() {
     }
   }, [slotsStorageKey, slots]);
 
-  // Effective spend window: the selected FY's span, narrowed by a preset/custom.
+  // Selected fiscal year (undefined = "All time").
+  const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
+  const fyStart = selectedPeriod?.start_date ?? "";
+  const fyEnd = selectedPeriod?.end_date ?? "";
+
+  // Effective spend window: the selected FY's span, narrowed by the custom
+  // month range and clamped to the FY (ISO dates sort lexicographically).
   const [effStart, effEnd] = useMemo(() => {
-    const period = periods.find((p) => p.id === selectedFYPeriodId);
-    const fyStart = period?.start_date ?? "";
-    const fyEnd = period?.end_date ?? "";
-    let rawStart = "";
-    let rawEnd = "";
-    if (startDate || endDate) {
-      rawStart = startDate;
-      rawEnd = endDate;
-    } else if (dateRange === "7d" || dateRange === "30d" || dateRange === "90d") {
-      const days = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 90;
-      rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
-      rawEnd = format(new Date(), "yyyy-MM-dd");
-    }
-    // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
-    const s = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
-    const e = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
+    const s = !startDate ? fyStart : startDate > fyStart ? startDate : fyStart;
+    const e = !endDate ? fyEnd : !fyEnd || endDate < fyEnd ? endDate : fyEnd;
     return [s, e] as const;
-  }, [periods, selectedFYPeriodId, dateRange, startDate, endDate]);
+  }, [fyStart, fyEnd, startDate, endDate]);
+
+  // The window is narrower than the whole fiscal year (or than all time), so
+  // spend covers only part of the period the Total Budget is for.
+  const windowNarrowed = selectedPeriod
+    ? effStart !== fyStart || effEnd !== fyEnd
+    : Boolean(effStart || effEnd);
+
+  // Ask AI answers for the same period as the dashboard while it is open.
+  useEffect(() => {
+    if (selectedFYPeriodId == null) return;
+    setAskAiPageContext({
+      periodId: selectedFYPeriodId,
+      startDate: effStart,
+      endDate: effEnd,
+    });
+    return () => setAskAiPageContext(null);
+  }, [selectedFYPeriodId, effStart, effEnd]);
 
   useEffect(() => {
     let cancelled = false;
@@ -942,7 +1012,7 @@ export function DashboardPage() {
         return (
           <>
             {!isLabIc && (
-              <div className="flex justify-end mb-3">
+              <div className="flex justify-end mb-3 no-print">
                 <select
                   value={utilViewBy}
                   onChange={(e) =>
@@ -974,6 +1044,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={utilVisible.length}>
               <AdaptiveBarChart height={300} bars={utilVisible.length}>
                 {(maxChars) => (
                   <BarChart data={utilVisible} barCategoryGap="25%" margin={{ top: 18 }}>
@@ -1021,6 +1092,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
@@ -1028,7 +1100,7 @@ export function DashboardPage() {
         return (
           <>
             {!isLabIc && (
-              <div className="flex justify-end mb-3">
+              <div className="flex justify-end mb-3 no-print">
                 <select
                   value={avbViewBy}
                   onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
@@ -1057,6 +1129,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={avbVisible.length} slotSize={130}>
               <AdaptiveBarChart height={300} bars={avbVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1097,6 +1170,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
@@ -1120,6 +1194,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={categoryVisible.length} vertical>
               <ResponsiveContainer
                 width="100%"
                 height={Math.max(300, categoryVisible.length * 22)}
@@ -1162,6 +1237,7 @@ export function DashboardPage() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              </ChartScroll>
             )}
           </>
         );
@@ -1231,7 +1307,7 @@ export function DashboardPage() {
         return (
           <>
             {!isLabIc && (
-              <div className="flex justify-end mb-3">
+              <div className="flex justify-end mb-3 no-print">
                 <select
                   value={stackViewBy}
                   onChange={(e) =>
@@ -1261,6 +1337,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll bars={stackVisible.length}>
               <AdaptiveBarChart height={320} bars={stackVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1302,13 +1379,14 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
       case "yoy":
         return (
           <>
-            <div className="flex flex-wrap items-center justify-end mb-3 gap-2">
+            <div className="flex flex-wrap items-center justify-end mb-3 gap-2 no-print">
               <label className="text-sm text-muted-foreground">Month</label>
               <select
                 value={yoyMonth}
@@ -1367,6 +1445,10 @@ export function DashboardPage() {
                     emptyChartMessage(false, "")}
               </div>
             ) : (
+              <ChartScroll
+                bars={yoyVisible.length}
+                slotSize={Math.max(110, yoySelectedYears.length * 36 + 40)}
+              >
               <AdaptiveBarChart height={300} bars={yoyVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1412,6 +1494,7 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              </ChartScroll>
             )}
           </>
         );
@@ -1455,26 +1538,109 @@ export function DashboardPage() {
     );
   }
 
+  // ── Export ──────────────────────────────────────────────────────────
+  const selectedGroupName =
+    selectedGroupId === "all"
+      ? "All Lab Groups"
+      : (labGroups.find((g) => String(g.id) === selectedGroupId)?.name ??
+        selectedGroupId);
+  const selectedLabName =
+    selectedLabId === "all" ? "All labs" : (selectedLab?.lab_name ?? "All labs");
+  const monthLabel = (iso: string) => (iso ? format(parseISO(iso), "MMM yyyy") : "");
+  const dateRangeLabel = customActive
+    ? `${monthLabel(startDate) || "Start"} to ${monthLabel(endDate) || "end"}`
+    : "Whole year";
+
+  /** Filter context stamped onto the printed page, mirroring the .xlsx cover. */
+  const printContext: [string, string][] = [
+    ["Generated", new Date().toLocaleString("en-SG")],
+    ["Generated by", `${user?.fullName ?? user?.email ?? ""} (${ROLE_LABELS[user?.role ?? ""] ?? ""})`],
+    ["Fiscal Year", selectedPeriod?.name ?? "All time"],
+    ["Date Range", dateRangeLabel],
+    ["Lab Group", selectedGroupName],
+    ["Lab", selectedLabName],
+  ];
+
+  // The browser's own print pipeline renders the PDF: the charts are inline
+  // SVG so they stay vector, text stays selectable, and nothing has to be
+  // rasterised by a canvas library (which would also choke on the oklch()
+  // colours in theme.css).
+  const handleExportPdf = () => {
+    // Let the dropdown unmount before the print dialog snapshots the page.
+    setTimeout(() => window.print(), 80);
+  };
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const filename = await exportDashboard({
+        startDate: effStart,
+        endDate: effEnd,
+        dateRange: "all",
+        periodId: selectedFYPeriodId,
+        labGroupId: selectedGroupId === "all" ? null : Number(selectedGroupId),
+        labId: selectedLabId === "all" ? null : Number(selectedLabId),
+        customStart: startDate,
+        customEnd: endDate,
+      });
+      toast.success("Export complete", {
+        description: `${filename} saved to your downloads folder.`,
+      });
+    } catch (err) {
+      toast.error("Export failed", {
+        description:
+          err instanceof Error ? err.message : "Could not generate the report.",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       {/* Filters */}
+      <div className="no-print">
       <FilterBar
         searchPlaceholder="Search dashboard..."
+        showExport
+        exportDisabled={exporting}
+        exportOptions={[
+          {
+            id: "pdf",
+            label: "Export as PDF",
+            description: "Visual snapshot — KPIs, charts and breakdown",
+          },
+          {
+            id: "excel",
+            label: "Export as Excel",
+            description: "KPIs, breakdown table and monthly trend",
+          },
+        ]}
+        onExportOption={(id) =>
+          id === "pdf" ? handleExportPdf() : void handleExportExcel()
+        }
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year")
-            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
+          if (filterId === "Fiscal Year") {
+            const id = value === "all" ? 0 : Number(value);
+            setSelectedFYPeriodId(id);
+            // Drop sub-window choices that don't fit the new year, rather than
+            // silently clamping them into an empty or partial window.
+            const next = periods.find((p) => p.id === id);
+            if (next) {
+              const inYear = (d: string) =>
+                !d || (next.start_date <= d && d <= next.end_date);
+              if (!inYear(startDate) || !inYear(endDate)) {
+                setStartDate("");
+                setEndDate("");
+              }
+            }
+          }
           if (filterId === "Lab Group") {
             setSelectedGroupId(value);
             // Lab list depends on the group, so reset the lab focus.
             setSelectedLabId("all");
           }
           if (filterId === "Lab") setSelectedLabId(value);
-          if (filterId === "Date Range") {
-            // Picking a preset clears any custom range so the preset applies.
-            setDateRange(value);
-            setStartDate("");
-            setEndDate("");
-          }
         }}
         filters={[
           {
@@ -1488,16 +1654,6 @@ export function DashboardPage() {
             options: [
               { value: "all", label: "All time" },
               ...periods.map((p) => ({ value: String(p.id), label: p.name })),
-            ],
-          },
-          {
-            label: "Date Range",
-            value: dateRange,
-            options: [
-              { value: "all", label: "Whole year" },
-              { value: "7d", label: "Last 7 days" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
             ],
           },
           // Lab IC is scoped to a single lab and has no group choice, so the
@@ -1519,47 +1675,60 @@ export function DashboardPage() {
         ]}
       />
 
-      {/* Custom date range — overrides the preset when set. */}
+      {/* Custom month range — narrows the spend window within the fiscal year. */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
         <span className="text-muted-foreground">Custom range:</span>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">From</span>
-          <DatePickerField
-            value={startDate}
-            maxDate={endDate || undefined}
-            onChange={setStartDate}
-          />
-        </label>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">To</span>
-          <DatePickerField
-            value={endDate}
-            minDate={startDate || undefined}
-            onChange={setEndDate}
-          />
-        </label>
-        {customActive && (
-          <>
-            <span className="text-xs text-blue-600">
-              Custom range active — preset ignored
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setStartDate("");
-                setEndDate("");
-              }}
-            >
-              Clear
-            </Button>
-          </>
+        <MonthRangePicker
+          periods={selectedPeriod ? [selectedPeriod] : periods}
+          startDate={startDate}
+          endDate={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
+        {selectedPeriod && (
+          <span className="text-xs text-muted-foreground">
+            Within {selectedPeriod.name}. For another year, change Fiscal Year
+            (or pick All time).
+          </span>
         )}
+        {customActive && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setStartDate("");
+              setEndDate("");
+            }}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
       </div>
 
       <div className="p-6 space-y-6">
+        {/* Printed cover block. Hidden on screen; replaces the filter bar and
+            role banner on paper so the PDF records what it is a snapshot of. */}
+        <div className="print-only print-keep mb-4">
+          <h1 className="text-xl font-bold text-[#1e3a8a]">
+            Lab Budget Monitoring System
+          </h1>
+          <p className="text-sm text-[#475569]">Dashboard Report</p>
+          <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1 text-xs text-[#475569]">
+            {printContext.map(([label, value]) => (
+              <div key={label} className="flex gap-2">
+                <dt className="font-semibold">{label}:</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <hr className="mt-3 border-[#e5e7eb]" />
+        </div>
+
         {/* Role Info */}
-        <RoleInfo />
+        <div className="no-print">
+          <RoleInfo />
+        </div>
 
         {loadError && (
           <Card className="p-4 bg-[#fef2f2] border-[#fecaca]">
@@ -1567,40 +1736,62 @@ export function DashboardPage() {
           </Card>
         )}
 
+        {/* Spend covers a shorter window than the budget it is compared with;
+            say so, or a 30-day slice reads as a low utilisation. */}
+        {windowNarrowed && (
+          <Card className="print-keep p-3 bg-[#eff6ff] border-[#bfdbfe]">
+            <p className="text-sm text-[#1e3a8a]">
+              Spend is for {effStart ? formatIsoDate(effStart) : "the start"} to{" "}
+              {effEnd ? formatIsoDate(effEnd) : "today"}. Total Budget is the{" "}
+              {selectedPeriod
+                ? `full ${selectedPeriod.name} budget`
+                : "total across all fiscal years"}
+              , so Utilisation and Available Balance compare this shorter
+              period's spend against the whole budget.
+            </p>
+          </Card>
+        )}
+
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6">
+        <div className="print-keep grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6">
           <KPICard
             title="Total Budget"
+            description={TERM_INFO.totalBudget}
             value={formatCurrency(totalBudget)}
             icon={DollarSign}
             status="info"
           />
           <KPICard
             title="Actual Spend"
+            description={TERM_INFO.actualSpend}
             value={formatCurrency(actualSpend)}
             icon={TrendingUp}
             status="info"
           />
           <KPICard
             title="Pending Amount"
+            description={TERM_INFO.pending}
             value={formatCurrency(pendingSpend)}
             icon={Clock}
             status="info"
           />
           <KPICard
             title="Available Balance"
+            description={TERM_INFO.available}
             value={formatCurrency(availableBalance)}
             icon={Wallet}
             status="info"
           />
           <KPICard
             title="Utilisation %"
+            description={TERM_INFO.utilisation}
             value={`${utilizationPct.toFixed(1)}%`}
             icon={Percent}
             status={utilizationPct >= 95 ? "error" : utilizationPct >= 80 ? "warning" : "info"}
           />
           <KPICard
             title="Projected Utilisation %"
+            description={TERM_INFO.projected}
             value={`${projectedUtilizationPct.toFixed(1)}%`}
             icon={Activity}
             status={
@@ -1634,8 +1825,18 @@ export function DashboardPage() {
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Actual Spend</th>
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Pending</th>
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Available</th>
-                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Util %</th>
-                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Proj %</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        Util %
+                        <InfoTip label="Utilisation %" text={TERM_INFO.utilisation} />
+                      </span>
+                    </th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        Proj %
+                        <InfoTip label="Projected Utilisation %" text={TERM_INFO.projected} />
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1755,4 +1956,9 @@ function pctColor(pct: number): string {
   if (pct >= 95) return "text-[#dc2626]";
   if (pct >= 80) return "text-[#d97706]";
   return "text-foreground";
+}
+
+/** "2026-04-01" → "1 Apr 2026" (same style as the Ask AI period label). */
+function formatIsoDate(iso: string): string {
+  return iso ? format(parseISO(iso), "d MMM yyyy") : "";
 }

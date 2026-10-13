@@ -108,8 +108,8 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
         elif model is User:
             # 1st call retrieves Team Lead (.first())
             query_mock.filter.return_value.first.return_value = fake_lead
-            # 2nd call retrieves Lab ICs using a Join (.all())
-            query_mock.join.return_value.filter.return_value.all.return_value = [
+            # 2nd call retrieves Lab ICs via lab_ic_assignments -> labs (.all())
+            query_mock.join.return_value.join.return_value.filter.return_value.all.return_value = [
                 fake_ic_1,
                 fake_ic_2,
             ]

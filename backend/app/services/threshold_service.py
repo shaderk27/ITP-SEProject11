@@ -2,7 +2,7 @@ import logging
 from datetime import date
 from sqlalchemy import func, or_, and_
 from app.database import SessionLocal
-from app.models.config import LabGroup, Lab, Budget, BudgetPeriod
+from app.models.config import LabGroup, Lab, LabIcAssignment, Budget, BudgetPeriod
 from app.models.staging import PurchaseRequestLine, PurchaseRequest
 from app.models.auth import User
 from app.services.email_service import send_threshold_alert
@@ -292,7 +292,8 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
         # 2. Alert ALL Lab ICs beneath this group
         lab_ics = (
             db.query(User)
-            .join(Lab, User.lab_id == Lab.lab_id)
+            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
+            .join(Lab, Lab.lab_id == LabIcAssignment.lab_id)
             .filter(Lab.lab_group_id == group.lab_group_id, User.role_id == 3)
             .all()
         )
