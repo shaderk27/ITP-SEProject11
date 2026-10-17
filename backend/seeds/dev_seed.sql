@@ -36,35 +36,6 @@ ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT fals
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
 
--- Randy (W17-02): Audit Log Table
-CREATE TABLE IF NOT EXISTS audit_logs (
-    audit_id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(user_id),
-    action_type VARCHAR(50) NOT NULL,
-    entity_name VARCHAR(100) NOT NULL,
-    record_id VARCHAR(100) NOT NULL,
-    old_value JSONB,
-    new_value JSONB,
-    ip_address VARCHAR(50),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-INSERT INTO budgets (period_id, lab_group_id, lab_id, category_id, budget_amount, created_at, updated_at)
-SELECT 
-    1,
-    lab_group_id, 
-    NULL, 
-    NULL, 
-    50000.0, 
-    now(), 
-    now()
-FROM lab_groups
-WHERE NOT EXISTS (
-    SELECT 1 FROM budgets b 
-    WHERE b.lab_group_id = lab_groups.lab_group_id 
-    AND b.lab_id IS NULL
-);
-
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
   ('admin'),

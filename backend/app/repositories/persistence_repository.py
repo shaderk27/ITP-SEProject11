@@ -18,8 +18,9 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.models.config import Lab, LabGroup, SpendingCategory, AuditLog
+from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import (
+    AuditLog,
     PurchaseRequest,
     PurchaseRequestLine,
     ReviewQueueItem,
