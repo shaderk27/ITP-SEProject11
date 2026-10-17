@@ -11,7 +11,7 @@ export const FEATURES = {
   /** AI Chatbot — ITP2 (W13+). Re-check route guards when enabling. */
   chatbot: false,
   /** Audit Log viewer — ITP2 (W17-02). Admin-only route. */
-  auditLog: false,
+  auditLog: true,
   /** Reports page — hidden for ITP1 demos. */
   reports: false,
   /** Header bell (top-right). Currently a stub with a hardcoded red dot. */
