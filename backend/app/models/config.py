@@ -9,12 +9,9 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Date,
-<<<<<<< HEAD
-=======
     UniqueConstraint,
     Index,
     text,
->>>>>>> e50b72f684ef66fe7c5d1d8c182b0a8f8f4c6644
     JSON,
 )
 from sqlalchemy.orm import relationship
