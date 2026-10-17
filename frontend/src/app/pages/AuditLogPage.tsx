@@ -15,6 +15,7 @@ const formatKeyName = (key: string) => {
 
 const RenderData = ({
   data,
+  compareData,
   type,
   categories,
   labs,
@@ -22,6 +23,7 @@ const RenderData = ({
   roles,
 }: {
   data: any;
+  compareData: any;
   type: "old" | "new";
   categories: Record<string, string>;
   labs: Record<string, string>;
@@ -36,34 +38,98 @@ const RenderData = ({
     );
   }
 
+  const hasComparison = compareData && Object.keys(compareData).length > 0;
+
   return (
-    <div className="p-4 space-y-4 flex-1 overflow-y-auto m-0">
+    <div className="p-4 space-y-3 flex-1 overflow-y-auto m-0">
       {Object.entries(data).map(([key, value]) => {
         // --- TRANSLATE RAW IDs TO HUMAN-READABLE NAMES ---
         let label = formatKeyName(key);
         let displayValue = String(value);
 
-        if (key === "assigned_lab_id" && value) {
-          label = "Assigned Lab";
+        if ((key === "assigned_lab_id" || key === "suggested_lab_id") && value) {
+          label = key === "assigned_lab_id" ? "Assigned Lab" : "Suggested Lab";
           displayValue = labs[String(value)] || `Lab ID: ${value}`;
-        } else if (key === "assigned_lab_group_id" && value) {
-          label = "Assigned Lab Group";
+        } else if (
+          (key === "assigned_lab_group_id" || key === "suggested_lab_group_id") &&
+          value
+        ) {
+          label =
+            key === "assigned_lab_group_id"
+              ? "Assigned Lab Group"
+              : "Suggested Lab Group";
           displayValue = labGroups[String(value)] || `Group ID: ${value}`;
+        } else if (key === "suggested_category_id" && value) {
+          label = "Suggested Category";
+          displayValue = categories[String(value)] || `Category ID: ${value}`;
         } else if (key === "role_id" && value) {
           label = "Role";
           displayValue = roles[String(value)] || `Role ID: ${value}`;
+        } else if (key === "budget" && typeof value === "number") {
+          displayValue = `$${Number(value).toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+          })}`;
         }
 
+        const isNestedObject = typeof value === "object" && value !== null;
+
+        // Determine if top-level field changed
+        const otherVal = hasComparison ? compareData[key] : undefined;
+        const isKeyMissingInOther = hasComparison && !(key in compareData);
+        const isScalarChanged =
+          !isNestedObject &&
+          hasComparison &&
+          (isKeyMissingInOther || String(value) !== String(otherVal));
+
+        const isNestedChanged =
+          isNestedObject &&
+          hasComparison &&
+          JSON.stringify(value) !== JSON.stringify(otherVal);
+
+        const isHighlighted = isScalarChanged || isNestedChanged;
+
+        // Styling for top-level container based on diff state
+        const containerClasses = isHighlighted
+          ? type === "old"
+            ? "bg-red-50/70 border border-red-200 border-l-4 border-l-red-500 rounded-md p-3"
+            : "bg-green-50/70 border border-green-200 border-l-4 border-l-green-500 rounded-md p-3"
+          : "border-b border-gray-100 pb-3 px-1 last:border-0 last:pb-0";
+
+        const badgeText = isKeyMissingInOther
+          ? type === "old"
+            ? "Removed"
+            : "Added"
+          : "Changed";
+
         return (
-          <div
-            key={key}
-            className="flex flex-col border-b border-gray-100 pb-3 last:border-0 last:pb-0"
-          >
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
-              {label}
-            </span>
+          <div key={key} className={`flex flex-col transition-colors ${containerClasses}`}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span
+                className={`text-[10px] font-bold uppercase tracking-wider ${
+                  isHighlighted
+                    ? type === "old"
+                      ? "text-red-700"
+                      : "text-green-700"
+                    : "text-gray-400"
+                }`}
+              >
+                {label}
+              </span>
+              {isHighlighted && (
+                <span
+                  className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                    type === "old"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-green-100 text-green-700"
+                  }`}
+                >
+                  {badgeText}
+                </span>
+              )}
+            </div>
+
             <div className="text-sm font-medium text-gray-800 break-words">
-              {typeof value === "object" && value !== null ? (
+              {isNestedObject ? (
                 <div className="flex flex-col gap-1.5 mt-1">
                   {Object.entries(value).map(([k, v]) => {
                     const isBudget =
@@ -78,15 +144,71 @@ const RenderData = ({
                         })}`
                       : String(v);
 
+                    // Compare nested item against the opposite side
+                    const otherNestedObj =
+                      hasComparison && typeof otherVal === "object" && otherVal !== null
+                        ? otherVal
+                        : null;
+                    const isInnerMissing =
+                      otherNestedObj !== null && !(k in otherNestedObj);
+                    const isInnerModified =
+                      otherNestedObj !== null &&
+                      !isInnerMissing &&
+                      String(v) !== String(otherNestedObj[k]);
+                    const isInnerChanged = isInnerMissing || isInnerModified;
+
+                    const innerBoxClasses = isInnerChanged
+                      ? type === "old"
+                        ? "bg-red-100/80 border-red-300 text-red-900 ring-1 ring-red-200"
+                        : "bg-green-100/80 border-green-300 text-green-900 ring-1 ring-green-200"
+                      : "bg-white border-gray-200 text-gray-700";
+
+                    const innerBadge = isInnerMissing
+                      ? type === "old"
+                        ? "Removed"
+                        : "New"
+                      : isInnerModified
+                      ? "Updated"
+                      : null;
+
                     return (
                       <div
                         key={k}
-                        className="flex justify-between items-center bg-white px-3 py-2 rounded-md border border-gray-200 shadow-sm"
+                        className={`flex justify-between items-center px-3 py-2 rounded-md border shadow-sm ${innerBoxClasses}`}
                       >
-                        <span className="text-xs text-gray-500 font-medium">
-                          {innerLabel}
-                        </span>
-                        <span className="text-xs text-gray-900 font-bold">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-xs font-medium ${
+                              isInnerChanged
+                                ? type === "old"
+                                  ? "text-red-800 font-semibold"
+                                  : "text-green-800 font-semibold"
+                                : "text-gray-500"
+                            }`}
+                          >
+                            {innerLabel}
+                          </span>
+                          {innerBadge && (
+                            <span
+                              className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                                type === "old"
+                                  ? "bg-red-200/80 text-red-800"
+                                  : "bg-green-200/80 text-green-800"
+                              }`}
+                            >
+                              {innerBadge}
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className={`text-xs font-bold ${
+                            isInnerChanged
+                              ? type === "old"
+                                ? "text-red-900 line-through decoration-red-400/70"
+                                : "text-green-900"
+                              : "text-gray-900"
+                          }`}
+                        >
                           {innerDisplayValue}
                         </span>
                       </div>
@@ -94,7 +216,17 @@ const RenderData = ({
                   })}
                 </div>
               ) : (
-                <span className="capitalize">{displayValue}</span>
+                <span
+                  className={`capitalize ${
+                    isScalarChanged
+                      ? type === "old"
+                        ? "text-red-900 font-bold line-through decoration-red-400/70"
+                        : "text-green-900 font-bold"
+                      : "text-gray-800"
+                  }`}
+                >
+                  {displayValue}
+                </span>
               )}
             </div>
           </div>
@@ -158,7 +290,6 @@ export function AuditLogPage() {
         if (userRes.ok) {
           const data = await userRes.json();
           const map: Record<string, string> = {};
-          // FIX: Accommodate both "user_id" (DB) and "id" (Schema)
           data.forEach((item: any) => {
             const uid = item.user_id || item.id;
             if (uid) {
@@ -184,19 +315,16 @@ export function AuditLogPage() {
 
   // --- SMART TARGET RESOLVER ---
   const getTargetName = (log: any) => {
-    // 1. Try to match against live system maps
     if (log.entity_name === "Lab" && labs[log.record_id]) return labs[log.record_id];
     if (log.entity_name === "LabGroup" && labGroups[log.record_id]) return labGroups[log.record_id];
     if (log.entity_name === "SpendingCategory" && categories[log.record_id]) return categories[log.record_id];
-    
-    // Catch Users, UserScope, UserPassword, and Authentication
+
     if (log.entity_name.includes("User") || log.entity_name === "Authentication") {
       if (users[log.record_id]) return users[log.record_id];
-      if (log.record_id.includes("@")) return log.record_id; // For create user, ID is already the email
+      if (log.record_id.includes("@")) return log.record_id;
     }
     if (log.entity_name === "FiscalYear") return log.new_value?.name || `ID: ${log.record_id}`;
 
-    // 2. If it was deleted, pull the name out of the old JSON payload
     const payload = log.new_value || log.old_value;
     if (payload) {
       if (payload.name) return payload.name;
@@ -206,7 +334,6 @@ export function AuditLogPage() {
       if (payload.email) return payload.email;
     }
 
-    // 3. Ultimate Fallback
     return `ID: ${log.record_id}`;
   };
 
@@ -356,6 +483,7 @@ export function AuditLogPage() {
                 </div>
                 <RenderData
                   data={selectedLog.old_value}
+                  compareData={selectedLog.new_value}
                   type="old"
                   categories={categories}
                   labs={labs}
@@ -371,6 +499,7 @@ export function AuditLogPage() {
                 </div>
                 <RenderData
                   data={selectedLog.new_value}
+                  compareData={selectedLog.old_value}
                   type="new"
                   categories={categories}
                   labs={labs}

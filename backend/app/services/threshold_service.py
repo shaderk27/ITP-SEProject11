@@ -106,23 +106,35 @@ def check_and_notify_lab_thresholds(lab_id: int):
         if not threshold_hit:
             return
 
-        # Gather recipients and send email
+        # Gather ALL active Lab ICs (Primary & Secondary) and Team Leads
         recipients = []
-        lab_ic = (
-            db.query(User).filter(User.lab_id == lab.lab_id, User.role_id == 3).first()
-        )
-
-        if lab_ic and lab_ic.email:
-            recipients.append(lab_ic.email)
-
-        team_lead = (
+        lab_ics = (
             db.query(User)
-            .filter(User.lab_group_id == lab.lab_group_id, User.role_id == 2)
-            .first()
+            .filter(
+                User.lab_id == lab.lab_id,
+                User.role_id == 3,
+                User.is_active.is_(True),
+            )
+            .all()
         )
+        for ic in lab_ics:
+            if ic.email:
+                recipients.append(ic.email)
 
-        if team_lead and team_lead.email:
-            recipients.append(team_lead.email)
+        team_leads = (
+            db.query(User)
+            .filter(
+                User.lab_group_id == lab.lab_group_id,
+                User.role_id == 2,
+                User.is_active.is_(True),
+            )
+            .all()
+        )
+        for lead in team_leads:
+            if lead.email:
+                recipients.append(lead.email)
+
+        recipients = list(set(recipients))
 
         if not recipients:
             return
@@ -281,20 +293,29 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
         # Gather recipients and send email
         recipients = []
 
-        # 1. Alert the Team Lead of the Lab Group
-        team_lead = (
+        # 1. Alert all active Team Leads of the Lab Group
+        team_leads = (
             db.query(User)
-            .filter(User.lab_group_id == group.lab_group_id, User.role_id == 2)
-            .first()
+            .filter(
+                User.lab_group_id == group.lab_group_id,
+                User.role_id == 2,
+                User.is_active.is_(True),
+            )
+            .all()
         )
-        if team_lead and team_lead.email:
-            recipients.append(team_lead.email)
+        for lead in team_leads:
+            if lead.email:
+                recipients.append(lead.email)
 
-        # 2. Alert ALL Lab ICs beneath this group
+        # 2. Alert ALL active Lab ICs beneath this group
         lab_ics = (
             db.query(User)
             .join(Lab, User.lab_id == Lab.lab_id)
-            .filter(Lab.lab_group_id == group.lab_group_id, User.role_id == 3)
+            .filter(
+                Lab.lab_group_id == group.lab_group_id,
+                User.role_id == 3,
+                User.is_active.is_(True),
+            )
             .all()
         )
         for ic in lab_ics:
