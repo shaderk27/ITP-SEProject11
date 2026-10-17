@@ -3,8 +3,7 @@
 -- second set of lab groups/labs with older WBS aliases.
 
 ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
--- Lab IC assignments live in lab_ic_assignments (many-to-many). Fresh DBs get it from
--- db_setup.sql; older DBs: run migrate_lab_ic_to_assignments.sql once.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS lab_id BIGINT REFERENCES labs(lab_id);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- Roles.
@@ -67,6 +66,7 @@ INSERT INTO users (
   staff_id,
   password_hash,
   lab_group_id,
+  lab_id,
   is_active
 )
 VALUES
@@ -77,6 +77,7 @@ VALUES
     'DEV-ADMIN',
     'placeholder_no_auth_yet',
     NULL,
+    NULL,
     TRUE
   ),
   (
@@ -86,6 +87,7 @@ VALUES
     'DEV-TL-FCB',
     'placeholder_no_auth_yet',
     (SELECT lab_group_id FROM lab_groups WHERE lab_group_name = 'FCB'),
+    NULL,
     TRUE
   ),
   (
@@ -95,6 +97,7 @@ VALUES
     'DEV-LIC-FCB',
     'placeholder_no_auth_yet',
     NULL,
+    (SELECT lab_id FROM labs WHERE lab_code = 'W3-01-021'),
     TRUE
   ),
   (
@@ -104,6 +107,7 @@ VALUES
     'DEV-LIC-ICT',
     'placeholder_no_auth_yet',
     NULL,
+    (SELECT lab_id FROM labs WHERE lab_code = 'E2-02-02'),
     TRUE
   ),
   (
@@ -112,6 +116,7 @@ VALUES
     'labic.non@example.com',
     'DEV-LIC-NON',
     'placeholder_no_auth_yet',
+    NULL,
     NULL,
     TRUE
   ),
@@ -122,6 +127,7 @@ VALUES
     'DEV-TL-NON',
     'placeholder_no_auth_yet',
     NULL,
+    NULL,
     TRUE
   )
 ON CONFLICT (email) DO UPDATE
@@ -131,25 +137,8 @@ SET
   staff_id = EXCLUDED.staff_id,
   password_hash = EXCLUDED.password_hash,
   lab_group_id = EXCLUDED.lab_group_id,
+  lab_id = EXCLUDED.lab_id,
   is_active = EXCLUDED.is_active;
-
--- Lab IC assignments (lab_ic_assignments). Idempotent: existing rows are left alone and a
--- demo IC becomes primary only if the lab has no primary yet. labic.non stays unassigned.
-INSERT INTO lab_ic_assignments (lab_id, user_id, is_primary)
-SELECT
-  l.lab_id,
-  u.user_id,
-  NOT EXISTS (
-    SELECT 1 FROM lab_ic_assignments a WHERE a.lab_id = l.lab_id AND a.is_primary
-  )
-FROM (VALUES
-  ('W3-01-021', 'labic.fcb@example.com'),
-  ('E2-02-02',  'labic.ict@example.com')
-) AS m(lab_code, email)
-JOIN labs  l ON l.lab_code = m.lab_code
-JOIN users u ON u.email = m.email
-ON CONFLICT (lab_id, user_id) DO NOTHING;
-
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true;
 SELECT setval(pg_get_serial_sequence('roles', 'role_id'), (SELECT MAX(role_id) FROM roles));
 SELECT setval(pg_get_serial_sequence('lab_groups', 'lab_group_id'), (SELECT MAX(lab_group_id) FROM lab_groups));

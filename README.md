@@ -57,38 +57,6 @@ python -m uvicorn app.main:app --reload --app-dir backend --port 8080
 
 The backend runs on `http://127.0.0.1:8080/`. The frontend dev server proxies `/api` requests to this backend.
 
-## Ask AI setup
-
-Ask AI is the floating button shown to every logged-in role. It answers questions about the budget and purchase data that user is allowed to see. The backend fetches and role-scopes the data first; the AI provider only turns those figures into a written answer and never queries the database.
-
-Set these in the root `.env`. They are backend only, so never prefix them with `VITE_`:
-
-| Variable | Required | What it does |
-|---|---|---|
-| `LLM_API_KEY` | For AI answers | The provider's API key. Leave blank to run Ask AI without an AI provider (see fallback below). |
-| `LLM_BASE_URL` | No | Any OpenAI-compatible chat completions endpoint. This is what chooses the provider. |
-| `LLM_MODEL` | No | The model name, spelled the way the provider spells it. |
-
-Example for OpenAI:
-
-```text
-LLM_API_KEY=<your key>
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
-```
-
-<!-- TODO(client-handover): remove the OpenRouter paragraph below before final submission to the client. -->
-OpenRouter is the interim provider during development: `LLM_BASE_URL=https://openrouter.ai/api/v1` with `LLM_MODEL=google/gemini-2.5-flash-lite`. These are also the current defaults when `LLM_BASE_URL` or `LLM_MODEL` is left blank, and the older `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` names are still read if the `LLM_*` ones are not set.
-
-Switching provider means changing these lines and restarting the backend. No code change is needed.
-
-**Fallback without AI.** If `LLM_API_KEY` is blank, the provider is unreachable, returns an error, or takes longer than 30 seconds, `POST /api/chatbot/ask` returns `503` and the widget answers with the built-in rule-based answers from `POST /api/chatbot/query-context` instead. Ask AI keeps working either way; the label under each answer shows which one was used:
-
-- `AI answer · <period> · from N budget lines in your scope`
-- `AI unavailable · basic rule-based answer`
-
-Models that reject a custom `temperature` (some OpenAI reasoning models) are retried automatically without it.
-
 ## Dependency notes
 
 - Run frontend npm commands from `frontend`, not the repo root.

@@ -1,7 +1,6 @@
 import { Card } from "../ui/card";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "../ui/utils";
-import { InfoTip } from "./InfoTip";
 
 interface KPICardProps {
   title: string;
@@ -12,8 +11,6 @@ interface KPICardProps {
     isPositive: boolean;
   };
   status?: "success" | "warning" | "error" | "info";
-  /** Optional explanation of the metric, shown via an info icon. */
-  description?: string;
 }
 
 const statusColors = {
@@ -23,15 +20,12 @@ const statusColors = {
   info: "bg-[#3b82f6]/10 text-[#2563eb]",
 };
 
-export function KPICard({ title, value, icon: Icon, trend, status, description }: KPICardProps) {
+export function KPICard({ title, value, icon: Icon, trend, status }: KPICardProps) {
   return (
     <Card className="p-6 bg-white border-border">
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <p className="text-sm text-muted-foreground mb-2 flex items-center gap-1.5">
-            {title}
-            {description && <InfoTip label={title} text={description} />}
-          </p>
+          <p className="text-sm text-muted-foreground mb-2">{title}</p>
           <p className="text-3xl font-semibold text-foreground">{value}</p>
           {trend && (
             <p

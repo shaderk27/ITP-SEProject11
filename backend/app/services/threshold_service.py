@@ -2,7 +2,7 @@ import logging
 from datetime import date
 from sqlalchemy import func, or_, and_
 from app.database import SessionLocal
-from app.models.config import LabGroup, Lab, LabIcAssignment, Budget, BudgetPeriod
+from app.models.config import LabGroup, Lab, Budget, BudgetPeriod
 from app.models.staging import PurchaseRequestLine, PurchaseRequest
 from app.models.auth import User
 from app.services.email_service import send_threshold_alert
@@ -108,8 +108,18 @@ def check_and_notify_lab_thresholds(lab_id: int):
 
         # Gather recipients and send email
         recipients = []
-        # Lab IC link lives on labs.user_id (1-1), so read it off the lab itself.
-        lab_ic = lab.ic_user
+        lab_ics = (
+            db.query(User)
+            .filter(
+                User.lab_id == lab.lab_id,
+                User.role_id == 3,
+                User.is_active.is_(True),
+            )
+            .all()
+        )
+        for ic in lab_ics:
+            if ic.email:
+                recipients.append(ic.email)
 
         if lab_ic and lab_ic.email:
             recipients.append(lab_ic.email)
@@ -292,9 +302,12 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
         # 2. Alert ALL Lab ICs beneath this group
         lab_ics = (
             db.query(User)
-            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
-            .join(Lab, Lab.lab_id == LabIcAssignment.lab_id)
-            .filter(Lab.lab_group_id == group.lab_group_id, User.role_id == 3)
+            .join(Lab, User.lab_id == Lab.lab_id)
+            .filter(
+                Lab.lab_group_id == group.lab_group_id,
+                User.role_id == 3,
+                User.is_active.is_(True),
+            )
             .all()
         )
         for ic in lab_ics:

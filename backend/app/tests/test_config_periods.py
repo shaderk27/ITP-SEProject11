@@ -55,17 +55,6 @@ def test_update_lab_only_clears_the_selected_fiscal_year(db):
 
     fy_a = create_period(PeriodCreate(year=2050), db=db)["id"]
     fy_b = create_period(PeriodCreate(year=2051), db=db)["id"]
-    # Labs are funded from the group's envelope, so each FY needs one.
-    for fy in (fy_a, fy_b):
-        db.add(
-            Budget(
-                period_id=fy,
-                lab_group_id=group.lab_group_id,
-                budget_amount=Decimal("100000.00"),
-                updated_at=datetime.now(timezone.utc),
-            )
-        )
-    db.flush()
 
     lab = create_lab(
         lab_in=LabCreate(

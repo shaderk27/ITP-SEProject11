@@ -55,7 +55,6 @@ export interface LabGroupOption {
 
 export interface LabOption {
   lab_id: number;
-  lab_code: string | null;
   lab_name: string;
   lab_group_id: number;
   is_general: boolean;

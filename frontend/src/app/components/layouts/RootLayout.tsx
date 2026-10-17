@@ -21,7 +21,6 @@ import { useAuth } from "../../context/AuthContext";
 import type { UserRole } from "../../context/AuthContext";
 import { useSessionTimeout, WARNING_BEFORE_EXPIRY_MS } from "../../services/useSessionTimeout";
 import { FEATURES } from "../../config/features";
-import { AskAiWidget } from "../shared/AskAiWidget";
 
 interface NavItem {
   name: string;
@@ -589,10 +588,6 @@ export function RootLayout() {
           </div>
         </div>
       )}
-
-      {/* Floating AI assistant — fixed-position, so it sits outside the
-          page flow and appears on every authenticated route. */}
-      {FEATURES.askAi && <AskAiWidget />}
     </div>
   );
 }

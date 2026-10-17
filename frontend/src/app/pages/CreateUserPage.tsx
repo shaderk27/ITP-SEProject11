@@ -127,12 +127,10 @@ export function CreateUserPage() {
     return Object.keys(errors).length === 0;
   };
 
-const handleSubmit = async () => {
+  const handleSubmit = async () => {
     setSuccessMessage(null);
     setServerError(null);
     if (!validate()) return;
-
-    const selectedLabId = form.lab_id ? Number(form.lab_id) : undefined;
 
     const payload = {
       role_id: Number(form.role_id),
@@ -140,11 +138,7 @@ const handleSubmit = async () => {
       email: form.email.trim(),
       password: form.password,
       ...(form.lab_group_id && { lab_group_id: Number(form.lab_group_id) }),
-      ...(selectedLabId && {
-        lab_id: selectedLabId,
-        lab_ids: [selectedLabId],
-        primary_lab_id: selectedLabId,
-      }),
+      ...(form.lab_id && { lab_id: Number(form.lab_id) }),
     };
 
     setIsSubmitting(true);

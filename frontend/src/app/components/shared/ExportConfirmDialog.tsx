@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -9,14 +9,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
-import { FileDown } from "lucide-react";
+import { FileDown, CheckCircle } from "lucide-react";
 
 interface ExportConfirmDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   recordCount: number;
-  /** Performs the download. Rejects on failure, which keeps the dialog open. */
-  onConfirm: () => void | Promise<void>;
+  onConfirm: () => void;
 }
 
 export function ExportConfirmDialog({
@@ -27,19 +26,15 @@ export function ExportConfirmDialog({
 }: ExportConfirmDialogProps) {
   const [exporting, setExporting] = useState(false);
 
-  // Radix closes the dialog on action-button click by default; block that so
-  // the spinner stays visible while the file is generated, and so a failed
-  // export leaves the dialog up for a retry. The caller closes it on success.
-  const handleExport = async (event: MouseEvent) => {
-    event.preventDefault();
+  const handleExport = () => {
     setExporting(true);
-    try {
-      await onConfirm();
-    } catch {
-      // The caller has already surfaced the error; just re-enable the button.
-    } finally {
+
+    // Simulate export process
+    setTimeout(() => {
+      onConfirm();
       setExporting(false);
-    }
+      onOpenChange(false);
+    }, 1500);
   };
 
   return (
@@ -52,23 +47,17 @@ export function ExportConfirmDialog({
           </AlertDialogTitle>
           <AlertDialogDescription className="space-y-3 pt-2">
             <p>
-              You are about to export{" "}
-              <span className="font-semibold text-foreground">
-                {recordCount} PR record{recordCount === 1 ? "" : "s"}
-              </span>{" "}
-              to an Excel file, matching the filters currently applied to this
-              page and your own access level.
+              You are about to export <span className="font-semibold text-foreground">{recordCount} PR records</span> to an Excel file.
             </p>
             <div className="bg-[#f0f9ff] border border-[#bfdbfe] rounded-lg p-3">
               <p className="text-sm text-[#1e40af]">
                 <span className="font-medium">Export will include:</span>
               </p>
               <ul className="text-sm text-[#1e3a8a] mt-2 space-y-1">
-                <li>• One row per PR line item</li>
-                <li>• PR Number, Date, Requestor, Purpose, WBS Code</li>
+                <li>• PR Number, Date, Requestor</li>
+                <li>• Purpose and WBS Code</li>
                 <li>• Lab Group, Lab, Category</li>
-                <li>• Qty, Unit Rate, Amount + GST, Status</li>
-                <li>• A Summary sheet with totals by group and category</li>
+                <li>• Amount and Status</li>
               </ul>
             </div>
             <p className="text-sm">

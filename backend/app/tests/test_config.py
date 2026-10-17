@@ -74,9 +74,6 @@ def test_get_labs_with_ledger_math(mock_period):
             b_mock.category_id = 2
             b_mock.budget_amount = 1000.0
             q.filter.return_value.all.return_value = [b_mock]
-        elif model_name == "LabIcAssignment":
-            # No primary Lab IC assigned
-            q.filter.return_value.first.return_value = None
         else:
             # This catches func.sum() math queries
             q.join.return_value.filter.return_value.scalar.return_value = 500.0

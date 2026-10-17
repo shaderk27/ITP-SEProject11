@@ -178,7 +178,7 @@ def _match_lab_by_text(labs: list, text: str):
 def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
     lab_by_id = {getattr(lab, "lab_id", None): lab for lab in labs}
 
-    lab_ics = db.query(User).filter(User.lab_assignments.any()).all()
+    lab_ics = db.query(User).filter(User.lab_id.isnot(None)).all()
     for ic in lab_ics:
         ic_name = (getattr(ic, "full_name", "") or "").strip().lower()
         if ic_name:
@@ -188,14 +188,9 @@ def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
                 or ic_name_clean in requestor_name
                 or requestor_name in ic_name_clean
             ):
-                # A Lab IC can run several labs: take the first one inside the
-                # PR's lab group, primary lab first.
-                for assignment in sorted(
-                    ic.lab_assignments, key=lambda a: not a.is_primary
-                ):
-                    matched_lab = lab_by_id.get(assignment.lab_id)
-                    if matched_lab:
-                        return matched_lab
+                matched_lab = lab_by_id.get(ic.lab_id)
+                if matched_lab:
+                    return matched_lab
 
     for mapping in db.query(RequesterLabMapping).all():
         db_name = (getattr(mapping, "requester_name", "") or "").strip().lower()
