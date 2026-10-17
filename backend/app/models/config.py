@@ -12,12 +12,12 @@ from sqlalchemy import (
     UniqueConstraint,
     Index,
     text,
-    JSON,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
 from pydantic import BaseModel
+
 # --- SQLALCHEMY DATABASE MODELS ---
 
 
@@ -259,16 +259,3 @@ class LabCreate(BaseModel):
     ic_name: str | None = None
     ic_email: str | None = None
     budgets: dict[str, float] = {}
-
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
-
-    audit_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
-    action_type = Column(String(50), nullable=False)
-    entity_name = Column(String(100), nullable=False)
-    record_id = Column(String(100), nullable=False)
-    old_value = Column(JSON, nullable=True)
-    new_value = Column(JSON, nullable=True)
-    ip_address = Column(String(50), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
