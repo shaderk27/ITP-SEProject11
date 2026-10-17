@@ -22,7 +22,7 @@ export function AlertsPage() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedType, setSelectedType] = useState("all");
-  const [selectedGroup, setSelectedGroup] = useState("all"); 
+  const [selectedGroup, setSelectedGroup] = useState("all");
 
   const [selectedLabDetails, setSelectedLabDetails] = useState<LabAlert | null>(null);
 
@@ -61,32 +61,31 @@ export function AlertsPage() {
 
     const groupsToProcess = labGroups.filter(g => {
         if (user?.role === "admin") return true;
-        if (user?.role === "teamlead") return g.id === user?.labGroupId; 
+        if (user?.role === "teamlead") return g.id === user?.labGroupId;
         if (user?.role === "labic") {
-            const myLab = labs.find(l => l.id === user?.labId);
-            return g.id === myLab?.group_id;
+            return labs.some(l => l.group_id === g.id && user.labIds.includes(l.id));
         }
         return false;
     });
 
     groupsToProcess.forEach(group => {
         const isLabIC = user?.role === "labic";
-        
+
         // Lab ICs do not calculate group utilization to keep the parent card neutral
         const groupUtil = (!isLabIC && group.budget > 0) ? (group.spent / group.budget) * 100 : 0;
         const groupSeverity = getSeverity(groupUtil);
-        
+
         let groupLabs = labs.filter(l => l.group_id === group.id && l.budget > 0);
-        
+
         if (isLabIC) {
-            groupLabs = groupLabs.filter(l => l.id === user?.labId);
+            groupLabs = groupLabs.filter(l => user?.labIds.includes(l.id));
         }
 
         const labAlerts: LabAlert[] = [];
         groupLabs.forEach(lab => {
             const util = (lab.spent / lab.budget) * 100;
             const severity = getSeverity(util);
-            
+
             if (severity.type !== "none" || groupSeverity.type !== "none") {
                 labAlerts.push({
                     id: `LAB-${lab.id}`,
@@ -105,7 +104,7 @@ export function AlertsPage() {
 
         if (groupSeverity.type !== "none" || labAlerts.length > 0) {
             labAlerts.sort((a, b) => b.utilization - a.utilization);
-            
+
             result.push({
                 groupId: group.id,
                 groupName: group.name,
@@ -163,7 +162,7 @@ export function AlertsPage() {
               <option value="alert">Alert (80%)</option>
               <option value="warning">Warning (50%)</option>
             </select>
-            
+
             {user?.role === "admin" && (
                 <select className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none" value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)}>
                 <option value="all">All Lab Groups</option>
@@ -188,7 +187,7 @@ export function AlertsPage() {
             ) : (
                 filteredGroups.map(group => {
                     const groupSev = getSeverity(group.groupUtilization);
-                    
+
                     return (
                         <Card key={group.groupId} className="bg-white border-gray-200 shadow-sm overflow-hidden">
                             <div className={`p-5 border-b-4 ${groupSev.type === 'none' ? 'border-b-gray-200 bg-gray-50' : groupSev.colors.split(' ')[1].replace('border-', 'border-b-')} ${groupSev.type === 'none' ? '' : groupSev.colors.split(' ')[0]}`}>
@@ -200,7 +199,7 @@ export function AlertsPage() {
                                         <div>
                                             <h3 className="text-lg font-black text-gray-900 tracking-tight flex items-center gap-2">
                                                 {group.groupName}
-                                                
+
                                                 {/* Lab ICs see a neutral 'Parent Group' tag instead of group health */}
                                                 {user?.role !== "labic" ? (
                                                     <span className={`px-2 py-0.5 text-xs rounded-full border bg-white ${groupSev.colors}`}>
@@ -215,7 +214,7 @@ export function AlertsPage() {
                                             <p className="text-sm font-medium text-gray-600 font-mono mt-0.5">{group.wbsCode}</p>
                                         </div>
                                     </div>
-                                    
+
                                     {/* HIDDEN FROM LAB ICS */}
                                     {user?.role !== "labic" && (
                                         <div className="text-right bg-white/60 p-2.5 rounded-lg border border-black/5">

@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Callable, Generator
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
@@ -95,6 +95,7 @@ def seed_refs(db: Session) -> dict:
                     period_id=period.period_id,
                     lab_group_id=group.lab_group_id,
                     budget_amount=Decimal("9999999.00"),
+                    updated_at=func.now(),
                 )
             )
             db.flush()

@@ -16,4 +16,9 @@ export const FEATURES = {
   reports: false,
   /** Header bell (top-right). Currently a stub with a hardcoded red dot. */
   headerNotifications: false,
+  /**
+   * Floating "Ask AI" launcher (AskAiWidget), shown on every authenticated
+   * page. UI only for now — no model is connected. Flip to false to hide it.
+   */
+  askAi: true,
 };

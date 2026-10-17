@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.models.config import Lab, LabGroup
+from app.models.config import Lab, LabGroup, LabIcAssignment  # noqa: F401 (registers mapper)
 
 
 class Role(Base):
@@ -56,9 +56,6 @@ class User(Base):
     lab_group_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("lab_groups.lab_group_id"), nullable=True
     )
-    lab_id: Mapped[Optional[int]] = mapped_column(
-        BigInteger, ForeignKey("labs.lab_id"), nullable=True
-    )
     reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )
@@ -67,7 +64,29 @@ class User(Base):
     # Relationships
     role: Mapped["Role"] = relationship("Role", back_populates="users")
     lab_group: Mapped[Optional["LabGroup"]] = relationship("LabGroup")
-    lab: Mapped[Optional["Lab"]] = relationship("Lab")
+    # Lab IC links live in lab_ic_assignments (many-to-many): a user can be IC of
+    # several labs, and a lab can have several ICs (at most one primary).
+    # Primary first, so lab_ids[0] is the IC's primary lab when they have one.
+    lab_assignments: Mapped[List["LabIcAssignment"]] = relationship(
+        "LabIcAssignment",
+        back_populates="user",
+        foreign_keys="LabIcAssignment.user_id",
+        cascade="all, delete-orphan",
+        order_by="(LabIcAssignment.is_primary.desc(), LabIcAssignment.assignment_id)",
+    )
+
+    @property
+    def lab_ids(self) -> List[int]:
+        """Read-only ids of every lab this user is Lab IC of. Use for scope checks.
+
+        Not usable in queries: join LabIcAssignment on user_id instead.
+        """
+        return [a.lab_id for a in self.lab_assignments]
+
+    @property
+    def labs(self) -> List["Lab"]:
+        """Read-only labs this user is Lab IC of."""
+        return [a.lab for a in self.lab_assignments]
 
     def __repr__(self) -> str:
         return f"<User(email={self.email!r}, full_name={self.full_name!r})>"

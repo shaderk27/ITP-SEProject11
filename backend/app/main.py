@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.chatbot import router as chatbot_router
 from app.api import config
 from app.api.dashboard import router as dashboard_router
 from app.api.records import router as records_router
@@ -43,6 +44,8 @@ app.include_router(review_router)
 app.include_router(records_router)
 app.include_router(auth_router)
 app.include_router(dashboard_router)
+app.include_router(chatbot_router)
+
 app.include_router(audit_router)
 
 @app.get("/health")

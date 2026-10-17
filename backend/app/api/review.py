@@ -99,6 +99,7 @@ class LabGroupOption(BaseModel):
 
 class LabOption(BaseModel):
     lab_id: int
+    lab_code: str | None
     lab_name: str
     lab_group_id: int | None
     is_general: bool
@@ -485,6 +486,7 @@ def get_queue_item(
         available_labs=[
             LabOption(
                 lab_id=lab.lab_id,
+                lab_code=lab.lab_code,
                 lab_name=lab.lab_name,
                 lab_group_id=lab.lab_group_id,
                 is_general=bool(lab.is_general),
