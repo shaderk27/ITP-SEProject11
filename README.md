@@ -10,10 +10,41 @@ Copy-Item .env.example .env
 The backend automatically reads `.env` from the repo root. Real `.env` files are ignored by Git.
 Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the frontend does not clear browser cookies.
 
-For local auth, upload, review queue, and records testing, seed the development data after your tables exist:
+### Which SQL file to run, and when
+
+`db_setup.sql` and `migrate_lab_ic_to_assignments.sql` live in `backend/migrations/`. `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`.
+
+| File | What it does | When to run it |
+|---|---|---|
+| `db_setup.sql` | **Destructive.** Drops and recreates every table with the current schema (including `lab_ic_assignments`, `users.is_active` and `password_reset_tokens`). Creates no data. | A brand-new database, or when you want to wipe everything and start over. **Never** on a database whose data you want to keep. |
+| `migrate_lab_ic_to_assignments.sql` | Non-destructive, safe to re-run. Converts the old Lab IC model (`users.lab_id` or `labs.user_id`) into `lab_ic_assignments`, keeping existing data. | Only on an **existing** database created before `lab_ic_assignments` existed. Not needed after a fresh `db_setup.sql`. Do not also run the older `migrate_lab_ic_to_labs.sql`. |
+| `dev_seed.sql` | Safe to re-run. Adds schema columns the app needs that `db_setup.sql` does not create (`pr_status` on purchase requests and lines, the alert-notification flags on `labs` and `lab_groups`, and nullable `labs.lab_group_id`). Also seeds roles, the FY2026 budget period, spending categories, lab groups, labs and three test users. | After `db_setup.sql` or the migration, on every database you set up, including fresh ones. Despite the name, it contains schema changes, so skipping it leaves the app with missing columns. |
+| `w7_auth_seed.sql` | Safe to re-run. Adds demo users with Lab IC assignments for testing Lab IC scoping. Reuses the same lab groups and labs as `dev_seed.sql`. | Optional, after `dev_seed.sql`, and only once `lab_ic_assignments` exists. |
+
+**New database**
+
+1. Create the empty database (once):
+   ```powershell
+   psql "postgresql://postgres:<PASSWORD>@localhost:5432/postgres" -c "CREATE DATABASE budget_system;"
+   ```
+2. Run `db_setup.sql`, connected to `budget_system`.
+3. Run `dev_seed.sql`.
+4. Optionally run `w7_auth_seed.sql`.
+
+**Existing database with data you want to keep**
+
+1. Back up first (for example `pg_dump`).
+2. Run `migrate_lab_ic_to_assignments.sql` once. Skip this if the database already has a `lab_ic_assignments` table.
+3. Run `dev_seed.sql`.
+4. Optionally run `w7_auth_seed.sql`.
+
+Do not run `db_setup.sql` on an existing database unless you intend to erase it.
+
+Run each file the same way, changing only its path (for example `backend/migrations/migrate_lab_ic_to_assignments.sql` or `backend/seeds/w7_auth_seed.sql`):
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
+psql "$env:DATABASE_URL" -f backend/migrations/db_setup.sql
 psql "$env:DATABASE_URL" -f backend/seeds/dev_seed.sql
 ```
 
@@ -24,9 +55,13 @@ $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system
 & "C:\Program Files\PostgreSQL\18\bin\psql.exe" "$env:DATABASE_URL" -f backend/seeds/dev_seed.sql
 ```
 
-You can also run the SQL manually in pgAdmin Query Tool by opening `backend/seeds/dev_seed.sql`.
+You can also open any of these files in pgAdmin's Query Tool and run them there. Make sure the Query Tool is connected to `budget_system` first.
 
-Seeded local login accounts use placeholder passwords when `ALLOW_PLACEHOLDER_PASSWORDS=true`:
+### Seeded login accounts
+
+Seeded local login accounts use placeholder passwords when `ALLOW_PLACEHOLDER_PASSWORDS=true`. Use any non-empty password for them in local development.
+
+From `dev_seed.sql`:
 
 ```text
 admin@test.com
@@ -34,7 +69,18 @@ teamlead.fcb@test.com
 labic@test.com
 ```
 
-Use any non-empty password for these seeded users in local development.
+`labic@test.com` has no lab assignment. To test Lab IC scoping, also run `w7_auth_seed.sql`, which adds:
+
+```text
+admin@example.com          admin
+teamlead.fcb@example.com   team lead, FCB group
+teamlead.non@example.com   team lead, no group
+labic.fcb@example.com      Lab IC, lab W3-01-021 (primary)
+labic.ict@example.com      Lab IC, lab E2-02-02 (primary)
+labic.non@example.com      Lab IC, no labs assigned
+```
+
+Re-running `w7_auth_seed.sql` resets these accounts' role, group and password hash back to the seed values.
 
 ## Frontend setup
 
