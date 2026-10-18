@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, and_
@@ -23,6 +23,7 @@ from app.models.config import (
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
+from app.services.audit_service import log_audit_action
 
 from app.services.threshold_service import (
     check_and_notify_lab_thresholds,
@@ -90,7 +91,12 @@ def list_periods(db: Session = Depends(get_db)):
 
 
 @router.post("/periods")
-def create_period(payload: PeriodCreate, db: Session = Depends(get_db)):
+def create_period(
+    payload: PeriodCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     year = payload.year
     if year < 2000 or year > 2100:
         raise HTTPException(
@@ -109,6 +115,17 @@ def create_period(payload: PeriodCreate, db: Session = Depends(get_db)):
     db.add(period)
     db.commit()
     db.refresh(period)
+
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="CREATE",
+        entity_name="FiscalYear",
+        record_id=str(period.period_id),
+        new_value={"name": period.period_name, "year": period.year_no},
+        request=request,
+    )
+
     return _period_out(period)
 
 
@@ -132,7 +149,6 @@ def get_lab_groups(
             return []
         query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
     elif role_name == "labic":
-        # Multi-lab resolution via user assignments
         user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
         if not user_lab_ids:
             return []
@@ -219,7 +235,11 @@ def get_lab_groups(
 
 @router.post("/labgroups", response_model=LabGroupOut)
 def create_lab_group(
-    group: LabGroupCreate, period_id: int | None = None, db: Session = Depends(get_db)
+    group: LabGroupCreate,
+    request: Request,
+    period_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
@@ -269,6 +289,20 @@ def create_lab_group(
     db.commit()
     db.refresh(new_group)
 
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="CREATE",
+        entity_name="LabGroup",
+        record_id=str(new_group.lab_group_id),
+        new_value={
+            "name": new_group.lab_group_name,
+            "wbs_code": new_group.wbs_code,
+            "budget": float(group.budget),
+        },
+        request=request,
+    )
+
     return {
         "id": new_group.lab_group_id,
         "name": new_group.lab_group_name,
@@ -287,8 +321,10 @@ def update_lab_group(
     group_id: int,
     group: LabGroupCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
     period_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     db_group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not db_group:
@@ -310,10 +346,6 @@ def update_lab_group(
             detail=f"Cannot update Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
         )
 
-    db_group.lab_group_name = group.name
-    db_group.wbs_code = group.wbs_code
-    db_group.description = group.description
-
     envelope = (
         db.query(Budget)
         .filter(
@@ -323,6 +355,16 @@ def update_lab_group(
         )
         .first()
     )
+    old_budget = float(envelope.budget_amount) if envelope else 0.0
+    old_snapshot = {
+        "name": db_group.lab_group_name,
+        "wbs_code": db_group.wbs_code,
+        "budget": old_budget,
+    }
+
+    db_group.lab_group_name = group.name
+    db_group.wbs_code = group.wbs_code
+    db_group.description = group.description
 
     if envelope:
         envelope.budget_amount = group.budget
@@ -352,6 +394,21 @@ def update_lab_group(
 
     db.commit()
 
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="UPDATE",
+        entity_name="LabGroup",
+        record_id=str(group_id),
+        old_value=old_snapshot,
+        new_value={
+            "name": db_group.lab_group_name,
+            "wbs_code": db_group.wbs_code,
+            "budget": float(group.budget),
+        },
+        request=request,
+    )
+
     background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
 
     allocated = float(
@@ -379,10 +436,20 @@ def update_lab_group(
 
 
 @router.delete("/labgroups/{group_id}")
-def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
+def delete_lab_group(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Lab Group not found")
+
+    old_snapshot = {
+        "name": group.lab_group_name,
+        "wbs_code": group.wbs_code,
+    }
 
     try:
         budgets = db.query(Budget).filter(Budget.lab_group_id == group_id).all()
@@ -395,6 +462,17 @@ def delete_lab_group(group_id: int, db: Session = Depends(get_db)):
 
         db.delete(group)
         db.commit()
+
+        log_audit_action(
+            db=db,
+            user_id=current_user.user_id,
+            action_type="DELETE",
+            entity_name="LabGroup",
+            record_id=str(group_id),
+            old_value=old_snapshot,
+            request=request,
+        )
+
         return {
             "success": True,
             "message": "Lab group deleted and all associated labs unassigned.",
@@ -424,7 +502,12 @@ def get_categories(db: Session = Depends(get_db)):
 
 
 @router.post("/categories", response_model=CategoryOut)
-def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
+def create_category(
+    cat_in: CategoryCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     existing_cat = (
         db.query(SpendingCategory)
         .filter(func.lower(SpendingCategory.category_name) == cat_in.name.lower())
@@ -442,6 +525,17 @@ def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
     db.add(new_cat)
     db.commit()
     db.refresh(new_cat)
+
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="CREATE",
+        entity_name="SpendingCategory",
+        record_id=str(new_cat.category_id),
+        new_value={"name": new_cat.category_name, "description": new_cat.description},
+        request=request,
+    )
+
     return {
         "id": new_cat.category_id,
         "name": new_cat.category_name,
@@ -450,7 +544,13 @@ def create_category(cat_in: CategoryCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/categories/{cat_id}", response_model=CategoryOut)
-def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(get_db)):
+def update_category(
+    cat_id: int,
+    cat_in: CategoryCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     db_cat = (
         db.query(SpendingCategory)
         .filter(SpendingCategory.category_id == cat_id)
@@ -473,9 +573,26 @@ def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(g
             detail=f"Cannot update category: The name '{cat_in.name}' is already in use.",
         )
 
+    old_snapshot = {
+        "name": db_cat.category_name,
+        "description": db_cat.description,
+    }
+
     db_cat.category_name = cat_in.name
     db_cat.description = cat_in.description
     db.commit()
+
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="UPDATE",
+        entity_name="SpendingCategory",
+        record_id=str(cat_id),
+        old_value=old_snapshot,
+        new_value={"name": db_cat.category_name, "description": db_cat.description},
+        request=request,
+    )
+
     return {
         "id": db_cat.category_id,
         "name": db_cat.category_name,
@@ -484,7 +601,12 @@ def update_category(cat_id: int, cat_in: CategoryCreate, db: Session = Depends(g
 
 
 @router.delete("/categories/{cat_id}")
-def delete_category(cat_id: int, db: Session = Depends(get_db)):
+def delete_category(
+    cat_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     cat = (
         db.query(SpendingCategory)
         .filter(SpendingCategory.category_id == cat_id)
@@ -492,9 +614,23 @@ def delete_category(cat_id: int, db: Session = Depends(get_db)):
     )
     if not cat:
         raise HTTPException(status_code=404, detail="Category not found.")
+
+    old_snapshot = {"name": cat.category_name, "description": cat.description}
+
     try:
         db.delete(cat)
         db.commit()
+
+        log_audit_action(
+            db=db,
+            user_id=current_user.user_id,
+            action_type="DELETE",
+            entity_name="SpendingCategory",
+            record_id=str(cat_id),
+            old_value=old_snapshot,
+            request=request,
+        )
+
         return {"success": True}
     except IntegrityError:
         db.rollback()
@@ -554,7 +690,6 @@ def get_labs(
         total_budget = sum(float(b.budget_amount) for b in budgets) if budgets else 0.0
         budget_map = {str(b.category_id): float(b.budget_amount) for b in budgets}
 
-        # Dynamically resolve Primary Lab IC details
         primary_ic_assignment = (
             db.query(LabIcAssignment)
             .filter(
@@ -646,8 +781,10 @@ def get_labs(
 @router.post("/labs", response_model=LabOut)
 def create_lab(
     lab_in: LabCreate,
+    request: Request,
     period_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
@@ -719,6 +856,21 @@ def create_lab(
     db.commit()
     db.refresh(new_lab)
 
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="CREATE",
+        entity_name="Lab",
+        record_id=str(new_lab.lab_id),
+        new_value={
+            "code": new_lab.lab_code,
+            "name": new_lab.lab_name,
+            "venue": new_lab.venue,
+            "budgets": lab_in.budgets,
+        },
+        request=request,
+    )
+
     return {
         "id": new_lab.lab_id,
         "code": new_lab.lab_code or "",
@@ -739,8 +891,10 @@ def update_lab(
     lab_id: int,
     lab_in: LabCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
     period_id: int | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab:
@@ -794,6 +948,19 @@ def update_lab(
             detail=f"Budget Exceeded: You requested ${requested_total:,.2f}, but the Lab Group only has ${remaining:,.2f} of unallocated funds remaining.",
         )
 
+    old_budgets_rows = (
+        db.query(Budget).filter(Budget.lab_id == lab_id, Budget.period_id == pid).all()
+    )
+    old_budgets_map = {
+        str(b.category_id): float(b.budget_amount) for b in old_budgets_rows
+    }
+    old_snapshot = {
+        "code": db_lab.lab_code,
+        "name": db_lab.lab_name,
+        "venue": db_lab.venue,
+        "budgets": old_budgets_map,
+    }
+
     db_lab.lab_code = lab_in.lab_code
     db_lab.lab_name = lab_in.lab_name
     db_lab.lab_group_id = lab_in.lab_group_id
@@ -817,6 +984,22 @@ def update_lab(
 
     db.commit()
     db.refresh(db_lab)
+
+    log_audit_action(
+        db=db,
+        user_id=current_user.user_id,
+        action_type="UPDATE",
+        entity_name="Lab",
+        record_id=str(db_lab.lab_id),
+        old_value=old_snapshot,
+        new_value={
+            "code": db_lab.lab_code,
+            "name": db_lab.lab_name,
+            "venue": db_lab.venue,
+            "budgets": lab_in.budgets,
+        },
+        request=request,
+    )
 
     background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
     background_tasks.add_task(
@@ -862,15 +1045,37 @@ def update_lab(
 
 
 @router.delete("/labs/{lab_id}")
-def delete_lab(lab_id: int, db: Session = Depends(get_db)):
+def delete_lab(
+    lab_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
+
+    old_snapshot = {
+        "code": lab.lab_code,
+        "name": lab.lab_name,
+        "venue": lab.venue,
+    }
 
     try:
         db.query(Budget).filter(Budget.lab_id == lab_id).delete()
         db.delete(lab)
         db.commit()
+
+        log_audit_action(
+            db=db,
+            user_id=current_user.user_id,
+            action_type="DELETE",
+            entity_name="Lab",
+            record_id=str(lab_id),
+            old_value=old_snapshot,
+            request=request,
+        )
+
         return {"success": True}
     except IntegrityError:
         db.rollback()
