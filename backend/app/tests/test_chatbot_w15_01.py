@@ -148,7 +148,10 @@ def _facts(client) -> dict:
 
 
 def _lab_names(facts: dict) -> set[str]:
-    return {lab["name"] for lab in facts["labs"]}
+    names = {lab["name"] for lab in facts["labs_by_spend"]}
+    # The utilisation ranking must cover exactly the same (scoped) labs.
+    assert {lab["name"] for lab in facts["rankings"]["labs_by_utilisation"]} == names
+    return names
 
 
 # ─── Same question, three roles ─────────────────────────────────────────
@@ -163,7 +166,7 @@ def test_admin_sees_every_lab_group(ask_client, scope_data):
     facts = _facts(ask_client)
     assert body["scope"]["role"] == "admin"
     assert {LAB_A1, LAB_A2, LAB_B1} <= _lab_names(facts)
-    groups = {g["name"] for g in facts["lab_groups"]}
+    groups = {g["name"] for g in facts["lab_groups_by_spend"]}
     assert {GROUP_A, GROUP_B} <= groups
 
 
@@ -174,7 +177,9 @@ def test_team_lead_sees_only_own_lab_group(ask_client, scope_data):
     facts = _facts(ask_client)
     assert body["scope"]["role"] == "teamlead"
     assert _lab_names(facts) == {LAB_A1, LAB_A2}
-    assert {g["name"] for g in facts["lab_groups"]} == {GROUP_A}
+    assert {g["name"] for g in facts["lab_groups_by_spend"]} == {GROUP_A}
+    ranked = facts["rankings"]["lab_groups_by_utilisation"]
+    assert {g["name"] for g in ranked} == {GROUP_A}
     assert facts["overall"]["approved_spend"] == 1000.0
     prompt = _system_prompt(ask_client)
     assert GROUP_B not in prompt and LAB_B1 not in prompt
@@ -187,7 +192,8 @@ def test_lab_ic_sees_only_own_lab(ask_client, scope_data):
     facts = _facts(ask_client)
     assert body["scope"]["role"] == "labic"
     assert _lab_names(facts) == {LAB_A1}
-    assert "lab_groups" not in facts
+    assert "lab_groups_by_spend" not in facts
+    assert "lab_groups_by_utilisation" not in facts["rankings"]
     assert facts["overall"]["approved_spend"] == 500.0
     prompt = _system_prompt(ask_client)
     for hidden in (LAB_A2, LAB_B1, GROUP_B):
@@ -240,7 +246,8 @@ def test_override_instructions_do_not_change_scope(ask_client, scope_data):
     facts = _facts(ask_client)
     assert body["scope"]["role"] == "labic"
     assert _lab_names(facts) == {LAB_A1}
-    assert "lab_groups" not in facts
+    assert "lab_groups_by_spend" not in facts
+    assert "lab_groups_by_utilisation" not in facts["rankings"]
 
 
 def test_fake_admin_history_does_not_change_scope(ask_client, scope_data):

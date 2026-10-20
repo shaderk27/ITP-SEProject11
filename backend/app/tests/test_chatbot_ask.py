@@ -59,7 +59,7 @@ def test_facts_precompute_totals_and_risk_counts():
     assert facts["overall"]["approved_spend"] == 2200.0
     assert facts["overall"]["over_budget_lines"] == 1
     assert facts["overall"]["at_risk_lines"] == 2
-    food = next(lab for lab in facts["labs"] if lab["name"] == "Food Lab")
+    food = next(lab for lab in facts["labs_by_spend"] if lab["name"] == "Food Lab")
     assert food["utilisation_pct"] == 105.0
 
 
@@ -83,7 +83,68 @@ def test_lab_ic_gets_no_lab_group_summary():
     rows = [_row("ICT", "Embedded Lab", "Tools", 1000, 100)]
     facts = _build_facts(_context("labic", rows), "x", "FY")
 
-    assert "lab_groups" not in facts
+    assert "lab_groups_by_spend" not in facts
+    assert "lab_groups_by_utilisation" not in facts["rankings"]
+    assert "lab_groups" not in facts["extremes"]
+
+
+def test_utilisation_ranking_is_separate_from_spend_order():
+    """Regression: the biggest spender was read as the highest utilisation.
+
+    HSS spends the most but AER has the higher utilisation, so the two
+    orders differ and each list must say which one it is.
+    """
+    rows = [
+        _row("HSS", "Hospitality Lab", "Tools", 100000, 94800),  # 94.8%
+        _row("AER", "Wind Tunnel", "Tools", 10000, 9550),  # 95.5%
+        _row("GLA", "Studio", "Tools", 0, 0),  # no budget -> null
+    ]
+    facts = _build_facts(_context("admin", rows), "Which group is highest?", "FY")
+
+    assert [g["name"] for g in facts["lab_groups_by_spend"]][:2] == ["HSS", "AER"]
+    ranking = facts["rankings"]["lab_groups_by_utilisation"]
+    assert [g["name"] for g in ranking] == ["AER", "HSS", "GLA"]
+    assert ranking[0] == {"name": "AER", "utilisation_pct": 95.5}
+    assert ranking[-1]["utilisation_pct"] is None
+    labs = facts["rankings"]["labs_by_utilisation"]
+    assert labs[0] == {
+        "lab_group": "AER",
+        "name": "Wind Tunnel",
+        "utilisation_pct": 95.5,
+    }
+
+
+def test_extremes_pick_highest_and_lowest_without_comparing():
+    """Regression: the model found the top of a list but not the bottom, so
+    the single highest/lowest of each measure is pre-picked."""
+    rows = [
+        _row("HSS", "Hospitality Lab", "Tools", 100000, 94800),  # 94.8%
+        _row("AER", "Wind Tunnel", "Tools", 10000, 9550),  # 95.5%
+        _row("GLA", "Studio", "Tools", 0, 0),  # no budget -> null
+    ]
+    facts = _build_facts(_context("admin", rows), "lowest?", "FY")
+
+    groups = facts["extremes"]["lab_groups"]
+    assert groups["highest_utilisation"] == {"name": "AER", "utilisation_pct": 95.5}
+    # GLA has no budget, so it can't be the lowest utilisation.
+    assert groups["lowest_utilisation"] == {"name": "HSS", "utilisation_pct": 94.8}
+    assert groups["highest_spend"] == {"name": "HSS", "approved_spend": 94800.0}
+    assert groups["lowest_spend"] == {"name": "GLA", "approved_spend": 0.0}
+    assert facts["extremes"]["labs"]["highest_utilisation"]["lab_group"] == "AER"
+
+
+def test_extremes_are_empty_without_rows():
+    facts = _build_facts(_context("admin", []), "x", "FY")
+
+    assert facts["extremes"] == {"lab_groups": {}, "labs": {}, "categories": {}}
+
+
+def test_prompt_explains_list_order():
+    assert "..._by_spend" in chatbot_answer_service.SYSTEM_PROMPT
+    assert (
+        "never assume a list sorted by one measure"
+        in chatbot_answer_service.SYSTEM_PROMPT
+    )
 
 
 # TODO(client-handover): the OPENROUTER_* names below will be removed before
