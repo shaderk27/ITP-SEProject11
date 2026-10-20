@@ -12,6 +12,8 @@
 -- -----------------------------------------------------------------------------
 -- Drop all tables if they exist (reverse dependency order to avoid FK errors)
 -- -----------------------------------------------------------------------------
+DROP TABLE IF EXISTS knowledge_chunks               CASCADE;
+DROP TABLE IF EXISTS knowledge_documents            CASCADE;
 DROP TABLE IF EXISTS password_reset_tokens          CASCADE;
 DROP TABLE IF EXISTS chatbot_queries               CASCADE;
 DROP TABLE IF EXISTS audit_logs                    CASCADE;

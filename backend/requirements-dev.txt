@@ -6,3 +6,5 @@ ruff==0.15.22
 black
 mypy
 pandas-stubs
+# Free local embeddings for RAG during development (EMBEDDING_PROVIDER=local).
+fastembed
