@@ -481,10 +481,6 @@ CREATE TABLE schema_migrations (
     applied_at      timestamptz  NOT NULL DEFAULT now(),
     applied_by      text         NOT NULL DEFAULT current_user
 );
-INSERT INTO schema_migrations (migration_name) VALUES
-  ('add_schema_migrations'),
-  ('migrate_lab_ic_to_assignments'),
-  ('add_alert_state_columns');
 
 --missing columns added
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;

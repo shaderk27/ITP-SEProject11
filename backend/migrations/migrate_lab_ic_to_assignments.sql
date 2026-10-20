@@ -91,5 +91,7 @@ BEGIN
     RAISE NOTICE 'Migrated % assignment(s) from users.lab_id.', n_users;
   END IF;
 END $$;
-
+INSERT INTO schema_migrations (migration_name)
+VALUES ('migrate_lab_ic_to_assignments')
+ON CONFLICT (migration_name) DO NOTHING;
 COMMIT;

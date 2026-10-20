@@ -97,5 +97,7 @@ DROP TRIGGER IF EXISTS set_updated_at_knowledge_chunks ON knowledge_chunks;
 CREATE TRIGGER set_updated_at_knowledge_chunks
 BEFORE UPDATE ON knowledge_chunks
 FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
-
+INSERT INTO schema_migrations (migration_name)
+VALUES ('add_rag_knowledge')
+ON CONFLICT (migration_name) DO NOTHING;
 COMMIT;
