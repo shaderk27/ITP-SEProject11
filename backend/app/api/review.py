@@ -16,6 +16,7 @@ from app.services.threshold_service import (
     check_and_notify_lab_thresholds,
     check_and_notify_lab_group_thresholds,
 )
+from app.services.knowledge_service import index_pr_lines_in_background
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
@@ -889,6 +890,10 @@ def commit_batch(
 
     for group_id in affected_lab_group_ids:
         background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
+
+    # Refresh Ask AI's PR-line search cards (no-op when embeddings are off).
+    if pr_ids:
+        background_tasks.add_task(index_pr_lines_in_background, list(pr_ids))
 
     return CommitResponse(
         success=True,

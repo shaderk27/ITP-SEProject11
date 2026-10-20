@@ -73,12 +73,22 @@ export interface ChatTurn {
   content: string;
 }
 
+/** Evidence behind an AI answer (W13-03A). */
+export interface AnswerSource {
+  type: "sql_calculation" | "pr_line" | "document";
+  /** Citation label, e.g. "PR 4500012345 line 2". */
+  ref: string;
+  detail: string;
+}
+
 export interface AssistantReply {
   text: string;
   /** "ai" = LLM answer from /ask; "rules" = template fallback from /query-context. */
   source: "ai" | "rules";
   /** Short provenance line shown under the answer. */
   note: string;
+  /** Cited purchase lines / documents; the budget figures are covered by `note`. */
+  sources?: AnswerSource[];
 }
 
 /**
@@ -116,6 +126,7 @@ interface ChatbotAskResponse {
   record_counts: Record<string, number>;
   focus: string[];
   notes: string[];
+  sources?: AnswerSource[];
 }
 
 /**
@@ -149,10 +160,14 @@ export async function askAssistant(
 
   const data = (await response.json()) as ChatbotAskResponse;
   const lines = data.record_counts.budget_lines ?? 0;
+  const searchNote = data.notes.find((n) => n.startsWith("Purchase search"));
   return {
     text: data.answer,
     source: "ai",
-    note: `AI answer · ${data.period_label} · from ${lines} budget line${lines === 1 ? "" : "s"} in your scope`,
+    note:
+      `AI answer · ${data.period_label} · from ${lines} budget line${lines === 1 ? "" : "s"} in your scope` +
+      (searchNote ? ` · ${searchNote}` : ""),
+    sources: (data.sources ?? []).filter((s) => s.type !== "sql_calculation"),
   };
 }
 

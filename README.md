@@ -12,7 +12,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 
 ### Which SQL file to run, and when
 
-`db_setup.sql` and `migrate_lab_ic_to_assignments.sql` live in `backend/migrations/`. `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`.
+`db_setup.sql`, `migrate_lab_ic_to_assignments.sql` and `add_rag_knowledge.sql` live in `backend/migrations/`. `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`.
 
 | File | What it does | When to run it |
 |---|---|---|
@@ -20,6 +20,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 | `migrate_lab_ic_to_assignments.sql` | Non-destructive, safe to re-run. Converts the old Lab IC model (`users.lab_id` or `labs.user_id`) into `lab_ic_assignments`, keeping existing data. | Only on an **existing** database created before `lab_ic_assignments` existed. Not needed after a fresh `db_setup.sql`. Do not also run the older `migrate_lab_ic_to_labs.sql`. |
 | `dev_seed.sql` | Safe to re-run. Adds schema columns the app needs that `db_setup.sql` does not create (`pr_status` on purchase requests and lines, the alert-notification flags on `labs` and `lab_groups`, and nullable `labs.lab_group_id`). Also seeds roles, the FY2026 budget period, spending categories, lab groups, labs and three test users. | After `db_setup.sql` or the migration, on every database you set up, including fresh ones. Despite the name, it contains schema changes, so skipping it leaves the app with missing columns. |
 | `w7_auth_seed.sql` | Safe to re-run. Adds demo users with Lab IC assignments for testing Lab IC scoping. Reuses the same lab groups and labs as `dev_seed.sql`. | Optional, after `dev_seed.sql`, and only once `lab_ic_assignments` exists. |
+| `add_rag_knowledge.sql` | Non-destructive, safe to re-run. Turns on the `pgvector` extension and creates the empty `knowledge_documents` and `knowledge_chunks` tables used by Ask AI's purchase search. Touches no existing data. | Optional. Only if you want Ask AI's purchase search (see [Purchase search (RAG)](#purchase-search-rag)). Needs the pgvector **Postgres extension** installed on your Postgres server first. This is not the pip package. Re-run it after every `db_setup.sql`, because a reset drops these tables. |
 
 **New database**
 
@@ -37,6 +38,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 2. Run `migrate_lab_ic_to_assignments.sql` once. Skip this if the database already has a `lab_ic_assignments` table.
 3. Run `dev_seed.sql`.
 4. Optionally run `w7_auth_seed.sql`.
+5. Optionally run `add_rag_knowledge.sql` for Ask AI's purchase search.
 
 Do not run `db_setup.sql` on an existing database unless you intend to erase it.
 
@@ -134,6 +136,97 @@ Switching provider means changing these lines and restarting the backend. No cod
 - `AI unavailable · basic rule-based answer`
 
 Models that reject a custom `temperature` (some OpenAI reasoning models) are retried automatically without it.
+
+### Purchase search (RAG)
+
+**What it does.** On top of the budget figures, Ask AI can search committed purchase request (PR) lines by meaning, not just by matching words. A question like "did we buy anything for 3D printing?" can find a line described as "PLA filament spools", even though no words match. Relevant lines are passed to the AI as evidence. The answer cites them as `[PR 4500012345 line 2]`, and they're listed under **Sources** in the widget.
+
+How it works:
+
+- Each committed PR line gets a short text card (item, lab, category, purpose, date, amount, status) plus an *embedding*, which is a list of numbers that represents what the text means. Cards are stored in `knowledge_chunks` using the `pgvector` Postgres extension.
+- When someone asks a question, the question is embedded the same way, and the closest cards are found.
+- **Role scope is applied in SQL before the search ranks anything**, using the same rules as the rest of the chatbot. A Lab IC only ever gets lines from their assigned labs, and a Team Lead only gets their lab group. Assignment changes apply on the next question.
+- Only approved lines are searched, and lines that aren't close enough to the question are dropped. So an unrelated question gets "no matching purchases" rather than random lines.
+- Totals, rankings and utilisation **always** come from the SQL budget figures, never from the search.
+
+**It's off by default and optional.** With `EMBEDDING_PROVIDER` blank, nothing changes: Ask AI answers from the budget figures exactly as before, and batch commits skip indexing. You only need the steps below if you want to use or test purchase search.
+
+**Two different things are both called "pgvector":**
+
+| | pgvector **Python package** | pgvector **Postgres extension** |
+|---|---|---|
+| What it is | A small library that lets the backend code describe a `vector` column | An add-on installed into your Postgres database server that stores and searches vectors |
+| Install | `pip`, as part of `backend/requirements.txt`. It's pure Python, so it's the same on every OS with nothing to compile | `brew` on macOS, a Visual Studio build on Windows, or `apt` on Linux (step 1 below) |
+| Who needs it | **Everyone**, even with purchase search off | **Only** people turning purchase search on |
+
+**After pulling this change, everyone** must reinstall the backend requirements. That installs the pgvector **Python package**, which the backend needs just to start, because it loads the `knowledge_chunks` table definition at startup. You do **not** need the Postgres extension for this:
+
+```powershell
+python -m pip install -r backend/requirements.txt
+```
+
+The backend only touches the RAG tables when `EMBEDDING_PROVIDER` is set, so a database without the extension or the tables works fine while purchase search is off.
+
+**Turning purchase search on locally (on your own machine)**
+
+Recommended for anyone working on Ask AI, the review/commit flow or the PR-line tables. Without it, Ask AI skips purchase search, and the purchase-search database tests are skipped instead of run.
+
+1. Install the pgvector **Postgres extension** on your Postgres server (once per machine):
+   - macOS (Homebrew Postgres): `brew install pgvector`
+   - Windows: follow the Windows steps in the [pgvector README](https://github.com/pgvector/pgvector#windows). It's built with the Visual Studio C++ build tools, then copied into your PostgreSQL install folder.
+   - Linux: `sudo apt install postgresql-<major version>-pgvector`
+2. Create the RAG tables. This is non-destructive and safe on a database with data:
+   ```powershell
+   psql "$env:DATABASE_URL" -f backend/migrations/add_rag_knowledge.sql
+   ```
+   If it fails with `extension "vector" is not available`, step 1 didn't install into the Postgres server you're connecting to.
+3. Install the free local embedding model's package:
+   ```powershell
+   python -m pip install -r backend/requirements-dev.txt
+   ```
+4. Add these lines to the root `.env`:
+   ```text
+   EMBEDDING_PROVIDER=local
+   EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+   ```
+5. Restart the backend, then build cards for the PR lines already in your database. The first run downloads the model, about 70 MB, once. It takes about 15 seconds per ~1,700 lines:
+   ```powershell
+   $env:PYTHONPATH="backend"
+   python -m app.scripts.index_knowledge
+   ```
+   From then on, every batch commit indexes its own lines automatically in the background.
+
+**Embedding settings** (root `.env`, backend only)
+
+| Variable | Required | What it does |
+|---|---|---|
+| `EMBEDDING_PROVIDER` | To turn search on | `local` runs a free model inside the backend (needs `fastembed`, from `requirements-dev.txt`). `api` calls any OpenAI-compatible `/embeddings` API. Blank turns search off. |
+| `EMBEDDING_MODEL` | No | Defaults to `BAAI/bge-small-en-v1.5` for `local` and `text-embedding-3-small` for `api`. |
+| `EMBEDDING_API_KEY` | For `api` | The provider's key. Not used by `local`. |
+| `EMBEDDING_BASE_URL` | No | For `api` only. Defaults to OpenAI (`https://api.openai.com/v1`). |
+| `EMBEDDING_MAX_DISTANCE` | No | How close a line must be to count as relevant (cosine distance; lower is stricter). Defaults to `0.35` for `BAAI/bge-small-en-v1.5`. Other models have no default, so set it yourself when you switch (see below). |
+
+**When to re-run the indexing script** (`python -m app.scripts.index_knowledge`)
+
+It's safe to run any time, because unchanged lines are skipped.
+
+- After `db_setup.sql` + `add_rag_knowledge.sql` and loading data, since a reset drops the cards.
+- After changing `EMBEDDING_PROVIDER` or `EMBEDDING_MODEL`. Cards from different models can't be compared, so each model needs its own.
+- After renaming labs or categories, so the card text is up to date. Who can see which lines is always worked out live and doesn't need this.
+- If a commit happened while purchase search was off or the model failed to load. The backend log shows `PR-line indexing skipped` or `failed`.
+
+**Tuning the relevance cutoff.** The `0.35` default was measured on the synthetic test data. To check it against real data or a new model, compare distances for questions that should match and questions that shouldn't:
+
+```powershell
+$env:PYTHONPATH="backend"
+python -m app.scripts.probe_knowledge "calibration equipment" "glassware" "hello" "which lab spent the most?"
+```
+
+Set `EMBEDDING_MAX_DISTANCE` between the two groups' best distances.
+
+**If something goes wrong, Ask AI still answers.** If purchase search is on but fails (model can't load, provider down, or `add_rag_knowledge.sql` not run), Ask AI answers from the budget figures alone. The label under the answer then ends with `Purchase search is unavailable right now; this answer uses budget figures only.`
+
+**Deployment.** Every deploy needs `pip install -r backend/requirements.txt`, for the pgvector Python package. To turn purchase search on there as well, the server's Postgres also needs the pgvector **Postgres extension**, and `add_rag_knowledge.sql` run through the team's non-destructive schema-update path. Never get it by running `db_setup.sql` on Lightsail. Until then, leave `EMBEDDING_PROVIDER` blank there.
 
 ## Dependency notes
 

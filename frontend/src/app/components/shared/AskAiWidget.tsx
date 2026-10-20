@@ -35,7 +35,11 @@ import {
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
-import { askAssistant, type ChatTurn } from "../../services/chatbotService";
+import {
+  askAssistant,
+  type AnswerSource,
+  type ChatTurn,
+} from "../../services/chatbotService";
 
 const LAUNCHER_WIDTH = 116;
 const LAUNCHER_HEIGHT = 44;
@@ -62,6 +66,8 @@ interface ChatMessage {
   text: string;
   /** Provenance line under an assistant answer (AI vs fallback, period, counts). */
   note?: string;
+  /** Purchase lines the AI answer cited (W13-03A). */
+  sources?: AnswerSource[];
 }
 
 /** One saved thread. Persisted per browser; nothing leaves the device. */
@@ -478,6 +484,7 @@ export function AskAiWidget() {
         role: "assistant",
         text: reply.text,
         note: reply.note,
+        sources: reply.sources,
       });
     } catch (error) {
       appendMessage(id, {
@@ -778,6 +785,20 @@ export function AskAiWidget() {
                       >
                         {message.text}
                       </div>
+                      {message.sources && message.sources.length > 0 && (
+                        <div className="px-1 text-[10px] text-muted-foreground">
+                          <p className="font-medium">Sources</p>
+                          <ul className="space-y-0.5">
+                            {message.sources.map((source) => (
+                              <li key={source.ref}>
+                                <span className="font-medium">{source.ref}</span>
+                                {" · "}
+                                {source.detail}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       {message.note && (
                         <p className="px-1 text-[10px] text-muted-foreground">
                           {message.note}
