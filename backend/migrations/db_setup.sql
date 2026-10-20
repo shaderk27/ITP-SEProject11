@@ -12,6 +12,7 @@
 -- -----------------------------------------------------------------------------
 -- Drop all tables if they exist (reverse dependency order to avoid FK errors)
 -- -----------------------------------------------------------------------------
+DROP TABLE IF EXISTS password_reset_tokens          CASCADE;
 DROP TABLE IF EXISTS chatbot_queries               CASCADE;
 DROP TABLE IF EXISTS audit_logs                    CASCADE;
 DROP TABLE IF EXISTS budget_alerts                 CASCADE;
@@ -463,3 +464,20 @@ CREATE INDEX idx_al_entity_record     ON audit_logs (entity_name, record_id);
 
 -- chatbot_queries
 CREATE INDEX idx_cq_user_id           ON chatbot_queries (user_id);
+
+
+--Migrated add_password_reset_tokens
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_id        bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         bigint          NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    temp_password   text            NOT NULL,
+    expires_at      timestamptz     NOT NULL,
+    used            boolean         NOT NULL DEFAULT false,
+    created_at      timestamptz     NOT NULL DEFAULT now()
+);
+
+-- If the table already exists but may be missing columns (e.g. older local DBs):
+ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS temp_password  text        NOT NULL DEFAULT '';
+ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS expires_at     timestamptz NOT NULL DEFAULT now();
+ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS used           boolean     NOT NULL DEFAULT false;
+ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS created_at     timestamptz NOT NULL DEFAULT now();
