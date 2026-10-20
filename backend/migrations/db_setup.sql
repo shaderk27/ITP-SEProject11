@@ -484,8 +484,6 @@ CREATE TABLE schema_migrations (
 INSERT INTO schema_migrations (migration_name) VALUES
   ('add_schema_migrations'),
   ('migrate_lab_ic_to_assignments'),
-  ('add_password_reset_tokens'),
-  ('add_pr_status_columns'),
   ('add_alert_state_columns');
 
 --missing columns added
@@ -494,6 +492,8 @@ ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT fals
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
+ALTER TABLE lab_groups DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
+ALTER TABLE lab_groups ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
 
 ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_50 BOOLEAN DEFAULT FALSE;
 ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_80 BOOLEAN DEFAULT FALSE;
