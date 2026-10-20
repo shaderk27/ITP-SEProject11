@@ -122,6 +122,14 @@ class ChatbotAskRequest(BaseModel):
     end_date: date | None = None
 
 
+class ChatbotAnswerSource(BaseModel):
+    """Evidence behind an answer (W13-03A), shown under it in the widget."""
+
+    type: Literal["sql_calculation", "pr_line", "document"]
+    ref: str = Field(..., description='Citation label, e.g. "PR 4500012345 line 2".')
+    detail: str
+
+
 class ChatbotAskResponse(BaseModel):
     answer: str
     scope: ChatbotScope
@@ -130,3 +138,4 @@ class ChatbotAskResponse(BaseModel):
     record_counts: dict[str, int]
     focus: list[str]
     notes: list[str]
+    sources: list[ChatbotAnswerSource] = Field(default_factory=list)

@@ -62,6 +62,7 @@ class PRLineHit:
     lab_id: int
     lab_name: str
     lab_group_name: str
+    item_description: str
     pr_status: str | None
     request_date: date | None
 
@@ -280,6 +281,7 @@ def search_pr_lines(
             lab_id=int(lab.lab_id),
             lab_name=lab.lab_name,
             lab_group_name=group.lab_group_name,
+            item_description=line.item_description or "",
             pr_status=line.pr_status,
             request_date=pr.request_date,
         )

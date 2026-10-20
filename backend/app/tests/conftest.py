@@ -26,6 +26,13 @@ from app.models.staging import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _embeddings_off(monkeypatch):
+    """Tests never load a real embedding model or call a provider, whatever the
+    developer's .env says. Tests that need embeddings fake them explicitly."""
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "")
+
+
 @pytest.fixture
 def db() -> Generator[Session, None, None]:
     """
