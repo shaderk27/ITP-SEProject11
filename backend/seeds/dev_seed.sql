@@ -7,34 +7,7 @@
 -- ===========================================================
 
 
--- ----- 0. Schema tweaks (per Randy + Tim) -----
--- Randy: allow labs.lab_group_id to be NULL. Safe to re-run.
-ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
 
--- Lab IC scoping (W7-02) lives in lab_ic_assignments (many-to-many, optional primary).
--- Fresh DBs get it from db_setup.sql; older DBs: run migrate_lab_ic_to_assignments.sql once.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
-
--- Irfan (W9-02 follow-up): source-system PR Status surfaced on PR Records page.
-ALTER TABLE purchase_requests ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50);
--- Irfan (W11-03): per-line status (a PR can have lines in different states).
-ALTER TABLE purchase_request_lines ADD COLUMN IF NOT EXISTS pr_status VARCHAR(50);
-
--- Randy (W11-02): For flags on threshold to prevent repeated notifications/emails.
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_50 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_80 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_95 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_100 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
-ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
-ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
-
--- Randy (W13-04): Added notifications to lab_groups as well.
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
 
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES

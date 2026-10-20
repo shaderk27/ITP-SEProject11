@@ -9,6 +9,12 @@
 --           8. Alerts & Auditability  9. Chatbot Queries
 -- =============================================================================
 
+DO $$
+BEGIN
+  IF current_setting('app.allow_reset', true) IS DISTINCT FROM 'yes' THEN
+    RAISE EXCEPTION 'db_setup.sql is DESTRUCTIVE. Run SET app.allow_reset = ''yes''; first.';
+  END IF;
+END $$;
 -- -----------------------------------------------------------------------------
 -- Drop all tables if they exist (reverse dependency order to avoid FK errors)
 -- -----------------------------------------------------------------------------
@@ -38,7 +44,7 @@ DROP TABLE IF EXISTS labs                          CASCADE;
 DROP TABLE IF EXISTS users                         CASCADE;
 DROP TABLE IF EXISTS lab_groups                    CASCADE;
 DROP TABLE IF EXISTS roles                         CASCADE;
-
+DROP TABLE IF EXISTS schema_migrations CASCADE;
 -- -----------------------------------------------------------------------------
 -- Utility: auto-update updated_at columns
 -- -----------------------------------------------------------------------------
@@ -95,6 +101,11 @@ CREATE TABLE lab_groups (
     description     text,
     created_at      timestamptz     NOT NULL DEFAULT now()
 );
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
 
 -- Now that lab_groups exists, add the FK on users
 ALTER TABLE users
@@ -105,14 +116,21 @@ ALTER TABLE users
 
 CREATE TABLE labs (
     lab_id          bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    lab_group_id    bigint          NOT NULL REFERENCES lab_groups (lab_group_id),
+    lab_group_id    bigint          REFERENCES lab_groups (lab_group_id),
     lab_code        varchar(50)     NOT NULL UNIQUE,
     lab_name        varchar(150)    NOT NULL,
     venue           text,
     is_general      boolean         NOT NULL DEFAULT false,
     created_at      timestamptz     NOT NULL DEFAULT now()
-);
 
+);
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_50 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_80 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_95 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_100 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
+ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
+ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
 -- Lab IC assignments (many-to-many):
 --   * one user can be Lab IC of several labs
 --   * one lab can have several Lab ICs, at most one of them primary
@@ -468,18 +486,14 @@ CREATE INDEX idx_al_entity_record     ON audit_logs (entity_name, record_id);
 CREATE INDEX idx_cq_user_id           ON chatbot_queries (user_id);
 
 
---Migrated add_password_reset_tokens
-CREATE TABLE IF NOT EXISTS password_reset_tokens (
-    token_id        bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    user_id         bigint          NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
-    temp_password   text            NOT NULL,
-    expires_at      timestamptz     NOT NULL,
-    used            boolean         NOT NULL DEFAULT false,
-    created_at      timestamptz     NOT NULL DEFAULT now()
+CREATE TABLE schema_migrations (
+    migration_name  varchar(255) PRIMARY KEY,
+    applied_at      timestamptz  NOT NULL DEFAULT now(),
+    applied_by      text         NOT NULL DEFAULT current_user
 );
-
--- If the table already exists but may be missing columns (e.g. older local DBs):
-ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS temp_password  text        NOT NULL DEFAULT '';
-ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS expires_at     timestamptz NOT NULL DEFAULT now();
-ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS used           boolean     NOT NULL DEFAULT false;
-ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS created_at     timestamptz NOT NULL DEFAULT now();
+INSERT INTO schema_migrations (migration_name) VALUES
+  ('add_schema_migrations'),
+  ('migrate_lab_ic_to_assignments'),
+  ('add_password_reset_tokens'),
+  ('add_pr_status_columns'),
+  ('add_alert_state_columns');
