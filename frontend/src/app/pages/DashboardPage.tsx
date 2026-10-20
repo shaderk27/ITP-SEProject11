@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   DollarSign,
   TrendingUp,
@@ -19,6 +20,7 @@ import {
   Filter,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
 import { InfoTip } from "../components/shared/InfoTip";
@@ -389,14 +391,17 @@ function ChartScroll({
   bars,
   slotSize = 110,
   vertical = false,
+  exportMode = false,
   children,
 }: {
   bars: number;
   slotSize?: number;
   vertical?: boolean;
+  /** Single-chart export: never scroll, a page can't be scrolled. */
+  exportMode?: boolean;
   children: ReactNode;
 }) {
-  if (bars <= SCROLL_AFTER) return <>{children}</>;
+  if (bars <= SCROLL_AFTER || exportMode) return <>{children}</>;
   return (
     <>
       {vertical ? (
@@ -460,6 +465,9 @@ export function DashboardPage() {
       });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Chart being exported on its own (PDF). While set, an off-screen copy of
+  // that chart is rendered and the print stylesheet prints only that copy.
+  const [exportChartId, setExportChartId] = useState<string | null>(null);
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
@@ -1006,7 +1014,10 @@ export function DashboardPage() {
 
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
-  function renderChartBody(chartId: string): ReactNode {
+  // `exportMode` renders the copy used by the single-chart export: no scroll
+  // box, and no animation so the chart is fully drawn when it is printed.
+  function renderChartBody(chartId: string, exportMode = false): ReactNode {
+    const animate = !exportMode;
     switch (chartId) {
       case "utilisation":
         return (
@@ -1044,7 +1055,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <ChartScroll bars={utilVisible.length}>
+              <ChartScroll exportMode={exportMode} bars={utilVisible.length}>
               <AdaptiveBarChart height={300} bars={utilVisible.length}>
                 {(maxChars) => (
                   <BarChart data={utilVisible} barCategoryGap="25%" margin={{ top: 18 }}>
@@ -1076,7 +1087,12 @@ export function DashboardPage() {
                       strokeDasharray="4 4"
                       label={{ value: "95%", position: "right", fill: "#f87171", fontSize: 11 }}
                     />
-                    <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
+                    <Bar
+                      dataKey="util"
+                      name="Utilisation %"
+                      radius={[4, 4, 0, 0]}
+                      isAnimationActive={animate}
+                    >
                       {utilVisible.map((d, i) => (
                         <Cell key={i} fill={utilColor(d.util)} />
                       ))}
@@ -1129,7 +1145,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <ChartScroll bars={avbVisible.length} slotSize={130}>
+              <ChartScroll exportMode={exportMode} bars={avbVisible.length} slotSize={130}>
               <AdaptiveBarChart height={300} bars={avbVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1149,7 +1165,13 @@ export function DashboardPage() {
                     <YAxis stroke="#6b7280" />
                     <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
                     <Legend />
-                    <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]}>
+                    <Bar
+                      dataKey="budget"
+                      fill="#1e3a8a"
+                      name="Budget"
+                      radius={[4, 4, 0, 0]}
+                      isAnimationActive={animate}
+                    >
                       <LabelList
                         dataKey="budget"
                         position="top"
@@ -1158,7 +1180,13 @@ export function DashboardPage() {
                         fill="#374151"
                       />
                     </Bar>
-                    <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]}>
+                    <Bar
+                      dataKey="actual"
+                      fill="#3b82f6"
+                      name="Actual"
+                      radius={[4, 4, 0, 0]}
+                      isAnimationActive={animate}
+                    >
                       <LabelList
                         dataKey="actual"
                         position="top"
@@ -1194,7 +1222,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <ChartScroll bars={categoryVisible.length} vertical>
+              <ChartScroll exportMode={exportMode} bars={categoryVisible.length} vertical>
               <ResponsiveContainer
                 width="100%"
                 height={Math.max(300, categoryVisible.length * 22)}
@@ -1226,7 +1254,12 @@ export function DashboardPage() {
                     itemStyle={{ fontSize: 11 }}
                     labelStyle={{ fontSize: 11 }}
                   />
-                  <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
+                  <Bar
+                    dataKey="amount"
+                    fill="#0d9488"
+                    radius={[0, 4, 4, 0]}
+                    isAnimationActive={animate}
+                  >
                     <LabelList
                       dataKey="amount"
                       position="right"
@@ -1258,6 +1291,7 @@ export function DashboardPage() {
                 strokeWidth={2}
                 name="Actual spend"
                 dot
+                isAnimationActive={animate}
               >
                 <LabelList
                   dataKey="amount"
@@ -1337,7 +1371,7 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <ChartScroll bars={stackVisible.length}>
+              <ChartScroll exportMode={exportMode} bars={stackVisible.length}>
               <AdaptiveBarChart height={320} bars={stackVisible.length}>
                 {(maxChars) => (
                   <BarChart
@@ -1363,6 +1397,7 @@ export function DashboardPage() {
                         stackId="spend"
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         name={cat}
+                        isAnimationActive={animate}
                       >
                         {i === stackedCategory.categories.length - 1 && (
                           <LabelList
@@ -1446,6 +1481,7 @@ export function DashboardPage() {
               </div>
             ) : (
               <ChartScroll
+                exportMode={exportMode}
                 bars={yoyVisible.length}
                 slotSize={Math.max(110, yoySelectedYears.length * 36 + 40)}
               >
@@ -1476,6 +1512,7 @@ export function DashboardPage() {
                         name={yn}
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         radius={[4, 4, 0, 0]}
+                        isAnimationActive={animate}
                       >
                         <LabelList
                           dataKey={yn}
@@ -1513,7 +1550,7 @@ export function DashboardPage() {
     const current = SLOT_OPTIONS.find((o) => o.id === chartId);
     return (
       <Card key={index} className="p-6 bg-white border-border">
-        <div className="mb-2">
+        <div className="mb-2 flex items-start justify-between gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1530,6 +1567,30 @@ export function DashboardPage() {
                   {o.label}
                 </DropdownMenuItem>
               ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="no-print gap-2 shrink-0"
+                disabled={exportChartId !== null}
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() => setExportChartId(chartId)}
+                className="flex-col items-start gap-0.5 py-2"
+              >
+                <span className="text-sm font-medium">Export chart as PDF</span>
+                <span className="text-xs text-muted-foreground">
+                  This chart only, with the current filters
+                </span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -1560,6 +1621,51 @@ export function DashboardPage() {
     ["Lab Group", selectedGroupName],
     ["Lab", selectedLabName],
   ];
+
+  /** Chart-specific settings that only live in on-screen controls (hidden on paper). */
+  function chartExportNotes(chartId: string): [string, string][] {
+    const viewBy = (v: "group" | "lab"): [string, string][] =>
+      isLabIc ? [] : [["View", v === "lab" ? "By Lab" : "By Lab Group"]];
+    switch (chartId) {
+      case "utilisation":
+        return viewBy(utilViewBy);
+      case "actualVsBudget":
+        return viewBy(avbViewBy);
+      case "categoryMix":
+        return viewBy(stackViewBy);
+      case "yoy":
+        return [
+          ["Month", FISCAL_MONTHS.find((m) => m.value === yoyMonth)?.label ?? ""],
+          ["Years", yoySelectedYears.join(", ") || "None"],
+          ...viewBy(yoyViewBy),
+        ];
+      default:
+        return [];
+    }
+  }
+
+  const exportNotes = exportChartId ? chartExportNotes(exportChartId) : [];
+  const exportBody = exportChartId ? renderChartBody(exportChartId, true) : null;
+
+  // Single-chart PDF: once the off-screen copy has rendered, flag the body so
+  // print.css hides the app and prints only that copy, then clear it after the
+  // print dialog closes (afterprint fires on Cancel too).
+  useEffect(() => {
+    if (!exportChartId) return;
+    document.body.classList.add("print-single-chart");
+    const done = () => {
+      document.body.classList.remove("print-single-chart");
+      setExportChartId(null);
+    };
+    window.addEventListener("afterprint", done, { once: true });
+    // Give the dropdown time to close and ResponsiveContainer time to measure.
+    const timer = setTimeout(() => window.print(), 400);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("afterprint", done);
+      document.body.classList.remove("print-single-chart");
+    };
+  }, [exportChartId]);
 
   // The browser's own print pipeline renders the PDF: the charts are inline
   // SVG so they stay vector, text stays selectable, and nothing has to be
@@ -1925,6 +2031,37 @@ export function DashboardPage() {
         {renderSlot(4)}
         {renderSlot(5)}
       </div>
+
+      {/* Off-screen copy of the chart being exported on its own. Rendered
+          outside #root so print.css can hide the whole app and print just this. */}
+      {exportChartId &&
+        createPortal(
+          <div className="chart-export" aria-hidden="true">
+            <h1 className="text-xl font-bold text-[#1e3a8a]">
+              {SLOT_OPTIONS.find((o) => o.id === exportChartId)?.label ?? "Chart"}
+            </h1>
+            <p className="text-sm text-[#475569]">
+              Lab Budget Monitoring System · Dashboard chart
+            </p>
+            <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1 text-xs text-[#475569]">
+              {printContext.map(([label, value]) => (
+                <div key={label} className="flex gap-2">
+                  <dt className="font-semibold">{label}:</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+              {exportNotes.map(([label, value]) => (
+                <div key={label} className="flex gap-2">
+                  <dt className="font-semibold">{label}:</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <hr className="mt-3 mb-4 border-[#e5e7eb]" />
+            {exportBody}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

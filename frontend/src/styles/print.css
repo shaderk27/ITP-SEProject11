@@ -20,6 +20,26 @@
   display: none;
 }
 
+/*
+ * Single-chart export (Dashboard → a chart's Export button). The page renders
+ * a copy of that one chart into .chart-export, a direct child of <body>. On
+ * screen it sits off to the side at a fixed, page-like width so Recharts can
+ * measure it; it is never visible. Its on-screen controls are dropped.
+ */
+.chart-export {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 1040px;
+  padding: 16px;
+  background: #fff;
+  pointer-events: none;
+}
+
+.chart-export .no-print {
+  display: none !important;
+}
+
 @media print {
   /*
    * Landscape. The dashboard's charts are laid out for a ~1000px-wide column;
@@ -89,6 +109,21 @@
 
   .print-only {
     display: block !important;
+  }
+
+  /* Single-chart export: print only the off-screen chart copy, not the app. */
+  body.print-single-chart #root {
+    display: none !important;
+  }
+
+  body.print-single-chart .chart-export {
+    position: static !important;
+    width: auto !important;
+    padding: 0 !important;
+  }
+
+  body:not(.print-single-chart) .chart-export {
+    display: none !important;
   }
 
   /* --- Recharts ---
