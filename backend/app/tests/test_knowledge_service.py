@@ -55,6 +55,8 @@ def fake_embeddings(monkeypatch) -> FakeEmbedder:
     fake = FakeEmbedder()
     monkeypatch.setattr(embedding_client, "embedding_configured", lambda: True)
     monkeypatch.setattr(embedding_client, "embedding_model_id", lambda: FAKE_MODEL)
+    # Fake vectors have no calibrated cutoff; tests that want one set it.
+    monkeypatch.setattr(embedding_client, "embedding_max_distance", lambda: None)
     monkeypatch.setattr(embedding_client, "embed_documents", fake.embed_documents)
     monkeypatch.setattr(embedding_client, "embed_query", _fake_vector)
     return fake
@@ -344,3 +346,37 @@ def test_search_respects_date_bounds(db, world):
     )
 
     assert hits == []
+
+
+def test_only_approved_lines_by_default(db, world):
+    pending = _line(
+        db, world["labs"]["a"], "Oscilloscope 50MHz", status="Pending Approval"
+    )
+    index_pr_lines(db, world["pr_ids"] + [pending.pr_id])
+
+    default_ids = _hit_line_ids(search_pr_lines(db, world["admin"], "oscilloscope"))
+    all_ids = _hit_line_ids(
+        search_pr_lines(db, world["admin"], "oscilloscope", approved_only=False)
+    )
+
+    assert pending.pr_line_id not in default_ids
+    assert pending.pr_line_id in all_ids
+
+
+def test_distance_cutoff_drops_unrelated_lines(db, world, monkeypatch):
+    index_pr_lines(db, world["pr_ids"])
+    lines = world["lines"]
+
+    # No cutoff: the filament line still comes back as the "least bad" match.
+    assert lines["b"].pr_line_id in _hit_line_ids(
+        search_pr_lines(db, world["labic"], "oscilloscope")
+    )
+
+    explicit = search_pr_lines(db, world["labic"], "oscilloscope", max_distance=0.5)
+    assert _hit_line_ids(explicit) == [lines["a"].pr_line_id]
+
+    monkeypatch.setattr(embedding_client, "embedding_max_distance", lambda: 0.5)
+    from_config = search_pr_lines(db, world["labic"], "oscilloscope")
+    assert _hit_line_ids(from_config) == [lines["a"].pr_line_id]
+
+    assert search_pr_lines(db, world["labic"], "office chair") == []

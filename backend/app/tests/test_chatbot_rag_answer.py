@@ -220,12 +220,39 @@ def test_database_error_rolls_back_and_falls_back(ask):
     )
 
 
-def test_no_hits_means_no_matching_purchases_block(ask):
+def test_no_close_hits_tells_the_model_nothing_matched(ask):
     ask["hits"] = []
 
-    ask["run"]()
+    response = ask["run"]()
 
-    assert "matching_purchases" not in _facts(ask["system"])
+    block = _facts(ask["system"])["matching_purchases"]
+    assert block["lines"] == []
+    assert block["note"].startswith("No approved purchase lines")
+    assert [s.type for s in response.sources] == ["sql_calculation"]
+
+
+def test_line_1_citation_is_not_found_inside_line_10(ask):
+    line_1 = _hit("PR 4500012345 line 1", "Probe kit")
+    line_10 = _hit("PR 4500012345 line 10", "Oscilloscope")
+    ask["hits"] = [line_1, line_10]
+    ask["answer"] = "You bought one [PR 4500012345 line 10]."
+
+    response = ask["run"]()
+
+    assert [s.ref for s in response.sources if s.type == "pr_line"] == [
+        line_10.source_ref
+    ]
+
+
+def test_citation_must_be_the_whole_label(ask):
+    hit = _hit("PR 45 line 1", "Probe kit")
+    ask["hits"] = [hit]
+
+    ask["answer"] = "See [PR 4545 line 1] and XPR 45 line 1."
+    assert [s.type for s in ask["run"]().sources] == ["sql_calculation"]
+
+    ask["answer"] = "See [PR 45 line 1]."
+    assert [s.ref for s in ask["run"]().sources][1:] == ["PR 45 line 1"]
 
 
 def test_union_window_covers_every_period():

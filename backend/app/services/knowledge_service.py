@@ -234,8 +234,15 @@ def search_pr_lines(
     limit: int = DEFAULT_SEARCH_LIMIT,
     start: date | None = None,
     end: date | None = None,
+    approved_only: bool = True,
+    max_distance: float | None = None,
 ) -> list[PRLineHit]:
     """Most similar PR-line cards the user is allowed to see, closest first.
+
+    approved_only matches the fact sheet, whose spend only counts lines whose
+    status starts with "approved". Hits further than max_distance (default:
+    embedding_client.embedding_max_distance()) are dropped, so a question
+    unrelated to any purchase returns nothing rather than the "least bad" lines.
 
     Raises EmbeddingUnavailableError when embeddings are off or failing, so
     the caller can fall back to the SQL fact sheet alone.
@@ -246,7 +253,13 @@ def search_pr_lines(
         return []
 
     query_vector = embedding_client.embed_query(question)
-    distance = KnowledgeChunk.embedding.cosine_distance(query_vector).label("distance")
+    distance_expr = KnowledgeChunk.embedding.cosine_distance(query_vector)
+    distance = distance_expr.label("distance")
+    cutoff = (
+        max_distance
+        if max_distance is not None
+        else embedding_client.embedding_max_distance()
+    )
 
     query = (
         db.query(
@@ -269,6 +282,10 @@ def search_pr_lines(
         .filter(KnowledgeChunk.embedding_model == embedding_client.embedding_model_id())
         .filter(LabGroup.lab_group_name != "General")
     )
+    if approved_only:
+        query = query.filter(PurchaseRequestLine.pr_status.ilike("approved%"))
+    if cutoff is not None:
+        query = query.filter(distance_expr <= cutoff)
     query = _apply_date_bounds(query, start, end)
     query = _apply_role_scope(query, current_user)
 

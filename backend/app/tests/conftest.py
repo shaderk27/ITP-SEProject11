@@ -30,7 +30,14 @@ from app.models.staging import (
 def _embeddings_off(monkeypatch):
     """Tests never load a real embedding model or call a provider, whatever the
     developer's .env says. Tests that need embeddings fake them explicitly."""
-    monkeypatch.setenv("EMBEDDING_PROVIDER", "")
+    for name in (
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_MAX_DISTANCE",
+    ):
+        monkeypatch.setenv(name, "")
 
 
 @pytest.fixture

@@ -14,6 +14,11 @@ change, not a code one:
     EMBEDDING_API_KEY    "api" only; required.
     EMBEDDING_BASE_URL   "api" only; any OpenAI-compatible /embeddings API,
                          defaults to OpenAI.
+    EMBEDDING_MAX_DISTANCE  optional; cosine distance above which a search hit
+                         counts as unrelated. Defaults per model
+                         (DEFAULT_MAX_DISTANCES); with no default and no value
+                         there is no cutoff. Measure it for a new model or new
+                         data with: python -m app.scripts.probe_knowledge
 
     local:  runs in-process via fastembed (free, no key). The model downloads
             once from Hugging Face on first use. Install: pip install fastembed
@@ -46,6 +51,14 @@ DEFAULT_MODELS = {
     "api": "text-embedding-3-small",
 }
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
+# Each model spreads distances differently, so cutoffs are per model.
+# bge-small: measured on the maxedout20cat + SIT_PR_20GROUPS_v5 test data
+# (2026-10-20). Relevant questions' best hits were 0.21-0.36; unrelated ones
+# ("hello", "which lab spent the most?", "bitcoin price") were 0.36-0.49.
+# Re-measure on real client data before relying on it.
+DEFAULT_MAX_DISTANCES = {
+    "BAAI/bge-small-en-v1.5": 0.35,
+}
 TIMEOUT_SECONDS = 30.0
 API_BATCH_SIZE = 100
 
@@ -74,6 +87,17 @@ def embedding_model_id() -> str:
 
 def embedding_base_url() -> str:
     return (os.getenv("EMBEDDING_BASE_URL", "").strip() or DEFAULT_BASE_URL).rstrip("/")
+
+
+def embedding_max_distance() -> float | None:
+    """Cutoff for relevant search hits; None means no cutoff."""
+    raw = os.getenv("EMBEDDING_MAX_DISTANCE", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            logger.warning("Ignoring EMBEDDING_MAX_DISTANCE=%r: not a number.", raw)
+    return DEFAULT_MAX_DISTANCES.get(embedding_model())
 
 
 def embedding_configured() -> bool:

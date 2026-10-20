@@ -110,17 +110,24 @@ def answer_question(
     matches, search_note = _matching_purchases(
         db, current_user, request.question, windows
     )
-    if matches:
+    if matches is not None:
+        # Present even when empty, so "no similar purchases" is stated as a
+        # fact instead of the model guessing from the recent_purchases sample.
         facts["matching_purchases"] = {
             "note": (
-                f"The {len(matches)} purchase lines in the user's scope closest in "
-                "meaning to the question, closest first. Some may be unrelated."
+                f"The {len(matches)} approved purchase lines in the user's scope "
+                "closest in meaning to the question, closest first. Some may "
+                "still be unrelated."
+                if matches
+                else "No approved purchase lines in the user's scope for this "
+                "period are similar to the question."
             ),
             "lines": [
                 {"source": hit.source_ref, "details": _card_details(hit)}
                 for hit in matches
             ],
         }
+    matches = matches or []
 
     messages = [
         {
@@ -164,15 +171,16 @@ Window = tuple[date | None, date | None]
 
 def _matching_purchases(
     db: Session, current_user: User, question: str, windows: list[Window]
-) -> tuple[list[PRLineHit], str | None]:
+) -> tuple[list[PRLineHit] | None, str | None]:
     """PR lines similar to the question, in the fact sheet's date window.
 
-    Optional evidence: when embeddings are off this quietly returns nothing,
-    and when search fails it returns nothing plus a note, so the answer still
-    comes from the fact sheet instead of erroring.
+    Returns None (not searched) when embeddings are off, and None plus a note
+    when the search fails, so the answer still comes from the fact sheet
+    instead of erroring. An empty list means the search ran and nothing was
+    close enough.
     """
     if not embedding_client.embedding_configured():
-        return [], None
+        return None, None
     start, end = _union_window(windows)
     try:
         hits = knowledge_service.search_pr_lines(
@@ -192,7 +200,7 @@ def _matching_purchases(
         db.rollback()
         logger.exception("Purchase search failed")
     return (
-        [],
+        None,
         "Purchase search is unavailable right now; this answer uses budget figures only.",
     )
 
@@ -214,6 +222,12 @@ def _card_details(hit: PRLineHit) -> str:
     return "; ".join(hit.content.splitlines()[1:])
 
 
+def _cites(answer: str, source_ref: str) -> bool:
+    """Whole-label match, so "PR 45 line 1" is not found inside "PR 45 line 10"
+    or "XPR 45 line 1"."""
+    return re.search(rf"(?<!\w){re.escape(source_ref)}(?!\w)", answer) is not None
+
+
 def _answer_sources(
     answer: str, period_label: str, matches: list[PRLineHit]
 ) -> list[ChatbotAnswerSource]:
@@ -226,7 +240,7 @@ def _answer_sources(
         )
     ]
     for hit in matches:
-        if hit.source_ref in answer:
+        if _cites(answer, hit.source_ref):
             when = hit.request_date.isoformat() if hit.request_date else "no date"
             sources.append(
                 ChatbotAnswerSource(

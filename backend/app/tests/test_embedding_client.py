@@ -16,6 +16,7 @@ ENV_VARS = (
     "EMBEDDING_MODEL",
     "EMBEDDING_API_KEY",
     "EMBEDDING_BASE_URL",
+    "EMBEDDING_MAX_DISTANCE",
 )
 
 
@@ -186,3 +187,19 @@ def test_local_without_fastembed_is_unavailable(monkeypatch):
     monkeypatch.setitem(sys.modules, "fastembed", None)  # makes the import fail
     with pytest.raises(EmbeddingUnavailableError, match="fastembed"):
         embedding_client.embed_query("x")
+
+
+def test_max_distance_defaults_per_model_and_env_overrides(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "local")
+    assert embedding_client.embedding_max_distance() == 0.35
+
+    monkeypatch.setenv("EMBEDDING_MAX_DISTANCE", "0.42")
+    assert embedding_client.embedding_max_distance() == 0.42
+
+    monkeypatch.setenv("EMBEDDING_MAX_DISTANCE", "not-a-number")
+    assert embedding_client.embedding_max_distance() == 0.35
+
+
+def test_max_distance_unknown_model_has_no_cutoff(monkeypatch):
+    _api_env(monkeypatch)
+    assert embedding_client.embedding_max_distance() is None
