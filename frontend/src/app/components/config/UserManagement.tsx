@@ -5,13 +5,6 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
 
-interface LabAssignment {
-  lab_id: number;
-  lab_name?: string;
-  lab_code?: string;
-  is_primary?: boolean;
-}
-
 interface UserData {
   id: number;
   full_name: string;
@@ -20,37 +13,51 @@ interface UserData {
   role: "admin" | "teamlead" | "labic";
   lab_group_name: string | null;
   lab_group_code: string | null;
-  lab_assignments?: LabAssignment[];
+  lab_assignments?: any[];
   is_active: boolean;
 }
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 interface UserManagementProps {
   onUsersChanged?: () => void;
+  labs?: any[];
 }
 
-export function UserManagement({ onUsersChanged }: UserManagementProps) {
+export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagementProps) {
   const navigate = useNavigate();
   const [users, setUsers] = useState<UserData[]>([]);
+  const [labs, setLabs] = useState<any[]>(propLabs || []);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (propLabs) {
+      setLabs(propLabs);
+    }
+  }, [propLabs]);
+
   const loadUsers = useCallback(() => {
-    fetch(`${API}/auth/users`, { credentials: "include" })
-      .then((res) => {
+    Promise.all([
+      fetch(`${API}/auth/users`, { credentials: "include" }).then((res) => {
         if (!res.ok) throw new Error("Failed to load users.");
         return res.json();
-      })
-      .then((data) => {
+      }),
+      propLabs ? Promise.resolve(propLabs) : fetch(`${API_BASE_URL}/api/config/labs`, { credentials: "include" }).then((res) => res.json()).catch(() => [])
+    ])
+      .then(([userData, labsData]) => {
         setError(null);
-        setUsers(data);
+        setUsers(userData);
+        if (!propLabs && Array.isArray(labsData)) {
+          setLabs(labsData);
+        }
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Failed to load users.");
       })
       .finally(() => setIsLoading(false));
-  }, []);
+  }, [propLabs]);
 
   useEffect(() => {
     loadUsers();
@@ -65,23 +72,47 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     if (user.role === "labic") {
       if (user.lab_assignments && user.lab_assignments.length > 0) {
         return (
-          <div className="flex flex-col gap-1">
-            {user.lab_assignments.map((assignment) => (
-              <div key={assignment.lab_id} className="flex items-center gap-1.5 text-xs">
-                <span className="font-medium text-foreground">
-                  {assignment.lab_name} {assignment.lab_code ? `(${assignment.lab_code})` : ""}
-                </span>
-                <span
-                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${
-                    assignment.is_primary
-                      ? "bg-blue-100 text-blue-800"
-                      : "bg-gray-100 text-gray-700"
-                  }`}
+          <div className="flex flex-col gap-1.5">
+            {user.lab_assignments.map((assignment: any, index: number) => {
+              const labId = assignment.lab_id ?? assignment.id;
+              const matchingLab = labs.find((l) => l.id === labId);
+
+              const labName =
+                matchingLab?.name ||
+                matchingLab?.lab_name ||
+                assignment.lab_name ||
+                assignment.name ||
+                "Lab";
+
+              const labCode =
+                matchingLab?.code ||
+                matchingLab?.lab_code ||
+                assignment.lab_code ||
+                assignment.code ||
+                "";
+
+              const isPrimary = assignment.is_primary ?? false;
+
+              return (
+                <div
+                  key={labId ?? index}
+                  className="flex items-center gap-2 text-sm text-muted-foreground"
                 >
-                  {assignment.is_primary ? "Primary" : "Secondary"}
-                </span>
-              </div>
-            ))}
+                  <span>
+                    {labName} {labCode ? `(${labCode})` : ""}
+                  </span>
+                  <span
+                    className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${
+                      isPrimary
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {isPrimary ? "Primary" : "Secondary"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         );
       }
@@ -105,8 +136,12 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
 
   const hasScope = (user: UserData) => {
     if (user.role === "teamlead") return Boolean(user.lab_group_name);
-    if (user.role === "labic") return Boolean(user.lab_assignments && user.lab_assignments.length > 0);
-    return Boolean(user.lab_group_name || (user.lab_assignments && user.lab_assignments.length > 0));
+    if (user.role === "labic")
+      return Boolean(user.lab_assignments && user.lab_assignments.length > 0);
+    return Boolean(
+      user.lab_group_name ||
+        (user.lab_assignments && user.lab_assignments.length > 0),
+    );
   };
 
   const readErrorDetail = async (res: Response, fallback: string) => {
@@ -120,17 +155,16 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
 
   const handleUnassignScope = async (user: UserData) => {
     if (!hasScope(user)) return;
-    const confirmed = window.confirm(`Clear all assignments for ${user.full_name}?`);
+    const confirmed = window.confirm(
+      `Clear all assignments for ${user.full_name}?`,
+    );
     if (!confirmed) return;
 
     try {
-      const res = await fetch(
-        `${API}/auth/users/${user.id}/unassign-scope`,
-        {
-          method: "PUT",
-          credentials: "include",
-        },
-      );
+      const res = await fetch(`${API}/auth/users/${user.id}/unassign-scope`, {
+        method: "PUT",
+        credentials: "include",
+      });
       if (!res.ok) {
         alert(await readErrorDetail(res, "Failed to clear assignment."));
         return;
@@ -253,7 +287,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
       </div>
 
       {error && (
-        <div className="m-6 rounded-md border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="m-6 rounded-md border border-destructive/25 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
@@ -397,7 +431,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
           </tbody>
         </table>
       </div>
-      {/* RESET PASSWORD MODAL */}
+
       {resetTargetUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 backdrop-blur-sm px-4">
           <div className="bg-white w-full max-w-md rounded-xl shadow-xl overflow-hidden">
