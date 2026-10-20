@@ -5,6 +5,13 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
 
+interface LabAssignment {
+  lab_id: number;
+  lab_name?: string;
+  lab_code?: string;
+  is_primary?: boolean;
+}
+
 interface UserData {
   id: number;
   full_name: string;
@@ -13,8 +20,7 @@ interface UserData {
   role: "admin" | "teamlead" | "labic";
   lab_group_name: string | null;
   lab_group_code: string | null;
-  lab_name: string | null;
-  lab_code: string | null;
+  lab_assignments?: LabAssignment[];
   is_active: boolean;
 }
 
@@ -57,9 +63,29 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
         : "Unassigned lab group";
     }
     if (user.role === "labic") {
-      return user.lab_name
-        ? `${user.lab_name}${user.lab_code ? ` - ${user.lab_code}` : ""}`
-        : "Unassigned lab";
+      if (user.lab_assignments && user.lab_assignments.length > 0) {
+        return (
+          <div className="flex flex-col gap-1">
+            {user.lab_assignments.map((assignment) => (
+              <div key={assignment.lab_id} className="flex items-center gap-1.5 text-xs">
+                <span className="font-medium text-foreground">
+                  {assignment.lab_name} {assignment.lab_code ? `(${assignment.lab_code})` : ""}
+                </span>
+                <span
+                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${
+                    assignment.is_primary
+                      ? "bg-blue-100 text-blue-800"
+                      : "bg-gray-100 text-gray-700"
+                  }`}
+                >
+                  {assignment.is_primary ? "Primary" : "Secondary"}
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      }
+      return "Unassigned lab";
     }
     return "-";
   };
@@ -77,8 +103,11 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
     }
   };
 
-  const hasScope = (user: UserData) =>
-    Boolean(user.lab_group_name || user.lab_name);
+  const hasScope = (user: UserData) => {
+    if (user.role === "teamlead") return Boolean(user.lab_group_name);
+    if (user.role === "labic") return Boolean(user.lab_assignments && user.lab_assignments.length > 0);
+    return Boolean(user.lab_group_name || (user.lab_assignments && user.lab_assignments.length > 0));
+  };
 
   const readErrorDetail = async (res: Response, fallback: string) => {
     try {
@@ -91,7 +120,7 @@ export function UserManagement({ onUsersChanged }: UserManagementProps) {
 
   const handleUnassignScope = async (user: UserData) => {
     if (!hasScope(user)) return;
-    const confirmed = window.confirm(`Clear assignment for ${user.full_name}?`);
+    const confirmed = window.confirm(`Clear all assignments for ${user.full_name}?`);
     if (!confirmed) return;
 
     try {
