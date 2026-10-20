@@ -137,27 +137,23 @@ export function AlertsPage() {
     fetchData();
   }, [API_BASE_URL]);
 
-  // Fetch W17-01B PR line drilldown whenever a Lab's Breakdown modal is opened
+  // Fetch W17-01B PR line drilldown when a Lab's Breakdown modal is opened
   useEffect(() => {
-    if (!selectedLabDetails) {
-      setDrilldownCategories({});
-      setExpandedCategories({});
-      return;
-    }
+    if (!selectedLabDetails) return;
 
+    let isCancelled = false;
     const fetchDrilldown = async () => {
-      setIsDrilldownLoading(true);
       try {
         const res = await fetch(
           `${API_BASE_URL}/api/alerts/drilldown?lab_id=${selectedLabDetails.labId}`,
           { credentials: "include" }
         );
-        if (res.ok) {
+        if (res.ok && !isCancelled) {
           const data = await res.json();
           const catMap: Record<string, DrilldownCategory> = {};
           const firstGroup = data.lab_groups?.[0];
           const firstLab = firstGroup?.labs?.find(
-            (l: any) => l.lab_id === selectedLabDetails.labId
+            (lab: { lab_id: number }) => lab.lab_id === selectedLabDetails.labId
           );
           if (firstLab?.categories) {
             firstLab.categories.forEach((c: DrilldownCategory) => {
@@ -170,12 +166,31 @@ export function AlertsPage() {
       } catch (err) {
         console.error("Failed to load alert drill-down lines:", err);
       } finally {
-        setIsDrilldownLoading(false);
+        if (!isCancelled) {
+          setIsDrilldownLoading(false);
+        }
       }
     };
 
     fetchDrilldown();
+    return () => {
+      isCancelled = true;
+    };
   }, [API_BASE_URL, selectedLabDetails]);
+
+  const handleOpenBreakdown = (lab: LabAlert) => {
+    setDrilldownCategories({});
+    setExpandedCategories({});
+    setIsDrilldownLoading(true);
+    setSelectedLabDetails(lab);
+  };
+
+  const handleCloseBreakdown = () => {
+    setSelectedLabDetails(null);
+    setDrilldownCategories({});
+    setExpandedCategories({});
+    setIsDrilldownLoading(false);
+  };
 
   const toggleCategoryExpand = (catKey: string) => {
     setExpandedCategories((prev) => ({
@@ -238,7 +253,6 @@ export function AlertsPage() {
     groupsToProcess.forEach((group) => {
       const isLabIC = user?.role === "labic";
 
-      // Lab ICs do not calculate group utilization to keep the parent card neutral
       const groupUtil =
         !isLabIC && group.budget > 0 ? (group.spent / group.budget) * 100 : 0;
       const groupSeverity = getSeverity(groupUtil);
@@ -547,7 +561,7 @@ export function AlertsPage() {
                               variant="outline"
                               size="sm"
                               className="bg-white h-8 text-xs font-semibold shrink-0 ml-4"
-                              onClick={() => setSelectedLabDetails(lab)}
+                              onClick={() => handleOpenBreakdown(lab)}
                             >
                               <FileText className="h-3.5 w-3.5 mr-1.5" />{" "}
                               Breakdown
@@ -583,7 +597,7 @@ export function AlertsPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSelectedLabDetails(null)}
+                onClick={handleCloseBreakdown}
               >
                 <X className="h-4 w-4" />
               </Button>

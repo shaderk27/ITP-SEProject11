@@ -120,6 +120,41 @@ def _threshold_level(utilisation_pct: float) -> int | None:
     return None
 
 
+def _chronological_sort_key(
+    item: tuple[PurchaseRequestLine, PurchaseRequest],
+) -> tuple[date, int, int, int, int]:
+    pr_line, pr_header = item
+    return (
+        pr_header.request_date or date.min,
+        pr_header.latest_batch_id or 0,
+        pr_header.pr_id or 0,
+        pr_line.line_no or 0,
+        pr_line.pr_line_id or 0,
+    )
+
+
+def _find_threshold_crossing(
+    items: list[tuple[PurchaseRequestLine, PurchaseRequest]],
+    budget: Decimal,
+    threshold: int | None,
+) -> tuple[int | None, int | None]:
+    """
+    Process contributing PR lines chronologically and identify the exact batch
+    (and PR line) where cumulative committed spend first crossed `threshold`.
+    """
+    if threshold is None or budget <= 0 or not items:
+        return None, None
+
+    sorted_items = sorted(items, key=_chronological_sort_key)
+    running_spend = Decimal("0")
+    for pr_line, pr_header in sorted_items:
+        running_spend += _to_decimal(pr_line.amount_gst)
+        if _pct(running_spend, budget) >= threshold:
+            return pr_header.latest_batch_id, pr_line.pr_line_id
+
+    return None, None
+
+
 # ─── W17-01B Alert Traceability Drill-Down Endpoint ──────────────────────
 @router.get("/drilldown", response_model=AlertDrilldownResponse)
 def get_alert_drilldown(
@@ -237,7 +272,7 @@ def get_alert_drilldown(
     if role_name == "labic":
         labs_query = labs_query.filter(Lab.lab_id.in_(user_lab_ids))
     labs = labs_query.order_by(Lab.lab_id).all()
-    lab_ids = [l.lab_id for l in labs]
+    lab_ids = [lab.lab_id for lab in labs]
 
     category_names = {
         c.category_id: c.category_name for c in db.query(SpendingCategory).all()
@@ -271,8 +306,6 @@ def get_alert_drilldown(
     lines_by_lab_cat: dict[
         tuple[int, int | None], list[tuple[PurchaseRequestLine, PurchaseRequest]]
     ] = {}
-    latest_batch_by_lab: dict[int, int | None] = {}
-    latest_batch_by_group: dict[int, int | None] = {}
 
     if lab_ids:
         lines_q = (
@@ -299,7 +332,6 @@ def get_alert_drilldown(
         if category_id is not None:
             lines_q = lines_q.filter(PurchaseRequestLine.category_id == category_id)
 
-        lab_to_group_map = {l.lab_id: l.lab_group_id for l in labs}
         for pr_line, pr_header in lines_q.order_by(
             PurchaseRequest.request_date.desc(),
             PurchaseRequest.pr_id.desc(),
@@ -309,38 +341,26 @@ def get_alert_drilldown(
             cid = pr_line.category_id
             lines_by_lab_cat.setdefault((lid, cid), []).append((pr_line, pr_header))
 
-            batch_id = pr_header.latest_batch_id
-            if batch_id is not None:
-                if lid not in latest_batch_by_lab or batch_id > (
-                    latest_batch_by_lab[lid] or 0
-                ):
-                    latest_batch_by_lab[lid] = batch_id
-                gid = lab_to_group_map.get(lid)
-                if gid is not None and (
-                    gid not in latest_batch_by_group
-                    or batch_id > (latest_batch_by_group[gid] or 0)
-                ):
-                    latest_batch_by_group[gid] = batch_id
-
     # 6. Assemble 3-Level Traceability Hierarchy
     labs_by_group: dict[int, list[Lab]] = {}
-    for l in labs:
-        if l.lab_group_id is not None:
-            labs_by_group.setdefault(l.lab_group_id, []).append(l)
+    for lab in labs:
+        if lab.lab_group_id is not None:
+            labs_by_group.setdefault(lab.lab_group_id, []).append(lab)
 
     out_groups: list[DrilldownLabGroup] = []
     for g in groups:
         gid = g.lab_group_id
         group_labs = labs_by_group.get(gid, [])
         out_labs: list[DrilldownLab] = []
+        group_all_lines: list[tuple[PurchaseRequestLine, PurchaseRequest]] = []
 
         lg_allocated_budget = Decimal("0")
         lg_actual = Decimal("0")
         lg_pending = Decimal("0")
         lg_committed = Decimal("0")
 
-        for l in group_labs:
-            lid = l.lab_id
+        for lab in group_labs:
+            lid = lab.lab_id
             cat_keys = {
                 cid
                 for (k_lid, cid) in (
@@ -353,10 +373,14 @@ def get_alert_drilldown(
             lab_actual = Decimal("0")
             lab_pending = Decimal("0")
             lab_committed = Decimal("0")
+            lab_all_lines: list[tuple[PurchaseRequestLine, PurchaseRequest]] = []
 
             for cid in cat_keys:
                 lab_budget += budget_by_lab_cat.get((lid, cid), Decimal("0"))
-                for pr_line, _ in lines_by_lab_cat.get((lid, cid), []):
+                cat_items = lines_by_lab_cat.get((lid, cid), [])
+                lab_all_lines.extend(cat_items)
+                group_all_lines.extend(cat_items)
+                for pr_line, _ in cat_items:
                     amt = _to_decimal(pr_line.amount_gst)
                     status_lower = (pr_line.pr_status or "").lower()
                     if status_lower.startswith("approved"):
@@ -367,8 +391,8 @@ def get_alert_drilldown(
 
             lab_util_pct = _pct(lab_committed, lab_budget)
             lab_threshold = _threshold_level(lab_util_pct)
-            lab_trigger_batch = (
-                latest_batch_by_lab.get(lid) if lab_threshold is not None else None
+            lab_trigger_batch, lab_trigger_line_id = _find_threshold_crossing(
+                lab_all_lines, lab_budget, lab_threshold
             )
 
             out_cats: list[DrilldownCategory] = []
@@ -388,10 +412,13 @@ def get_alert_drilldown(
                         cat_pending += amt
                     cat_committed += amt
 
-                    is_triggering = bool(
-                        lab_trigger_batch is not None
-                        and pr_header.latest_batch_id == lab_trigger_batch
-                    )
+                    if lab_trigger_batch is not None:
+                        is_triggering = pr_header.latest_batch_id == lab_trigger_batch
+                    elif lab_trigger_line_id is not None:
+                        is_triggering = pr_line.pr_line_id == lab_trigger_line_id
+                    else:
+                        is_triggering = False
+
                     out_lines.append(
                         DrilldownPRLine(
                             pr_line_id=pr_line.pr_line_id,
@@ -434,8 +461,8 @@ def get_alert_drilldown(
             out_labs.append(
                 DrilldownLab(
                     lab_id=lid,
-                    lab_code=l.lab_code,
-                    lab_name=l.lab_name,
+                    lab_code=lab.lab_code,
+                    lab_name=lab.lab_name,
                     budget_sgd=str(lab_budget),
                     actual_spend_sgd=str(lab_actual),
                     pending_sgd=str(lab_pending),
@@ -456,16 +483,26 @@ def get_alert_drilldown(
         env_budget = envelope_by_group.get(gid, lg_allocated_budget)
         lg_util_pct = _pct(lg_committed, env_budget)
         lg_threshold = _threshold_level(lg_util_pct)
-        lg_trigger_batch = (
-            latest_batch_by_group.get(gid) if lg_threshold is not None else None
+        lg_trigger_batch, lg_trigger_line_id = _find_threshold_crossing(
+            group_all_lines, env_budget, lg_threshold
         )
 
-        if lg_trigger_batch is not None:
+        # If a lab itself is below 50% but is displayed because its parent group
+        # crossed a threshold, flag the group's triggering batch/line on that lab.
+        if lg_trigger_batch is not None or lg_trigger_line_id is not None:
             for d_lab in out_labs:
-                for d_cat in d_lab.categories:
-                    for d_line in d_cat.pr_lines:
-                        if d_line.latest_batch_id == lg_trigger_batch:
-                            d_line.is_triggering_line = True
+                if d_lab.threshold_reached is None:
+                    for d_cat in d_lab.categories:
+                        for d_line in d_cat.pr_lines:
+                            if (
+                                lg_trigger_batch is not None
+                                and d_line.latest_batch_id == lg_trigger_batch
+                            ) or (
+                                lg_trigger_batch is None
+                                and lg_trigger_line_id is not None
+                                and d_line.pr_line_id == lg_trigger_line_id
+                            ):
+                                d_line.is_triggering_line = True
 
         out_groups.append(
             DrilldownLabGroup(

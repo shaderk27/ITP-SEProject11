@@ -270,7 +270,10 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
     )
     db.flush()
 
-    # Create two upload batches so batch2 is the triggering batch that crosses 80%
+    # Create three batches:
+    # - batch1 ($500 on May 1 -> 50% cumulative)
+    # - batch2 ($350 on Jun 1 -> 85% cumulative: crosses 80% threshold!)
+    # - batch3 ($50  on Jul 1 -> 90% cumulative: post-crossing batch still in 80% bracket)
     batch1 = UploadBatch(
         uploaded_by=uploader.user_id,
         filename="batch1.xlsx",
@@ -283,7 +286,13 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         file_type="xlsx",
         upload_status="committed",
     )
-    db.add_all([batch1, batch2])
+    batch3 = UploadBatch(
+        uploaded_by=uploader.user_id,
+        filename="batch3.xlsx",
+        file_type="xlsx",
+        upload_status="committed",
+    )
+    db.add_all([batch1, batch2, batch3])
     db.flush()
 
     pr1 = PurchaseRequest(
@@ -304,7 +313,16 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         lab_group_id=group.lab_group_id,
         pr_status="Pending Approval",
     )
-    db.add_all([pr1, pr2])
+    pr3 = PurchaseRequest(
+        source_pr_number="PR-DD-3",
+        latest_batch_id=batch3.batch_id,
+        requestor_name="Charlie",
+        request_date=date(2099, 7, 1),
+        grand_total_sgd=Decimal("50.00"),
+        lab_group_id=group.lab_group_id,
+        pr_status="Approved",
+    )
+    db.add_all([pr1, pr2, pr3])
     db.flush()
 
     line1 = PurchaseRequestLine(
@@ -325,7 +343,16 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         category_id=cat.category_id,
         pr_status="Pending Approval",
     )
-    db.add_all([line1, line2])
+    line3 = PurchaseRequestLine(
+        pr_id=pr3.pr_id,
+        line_no=1,
+        item_description="Multimeter Leads",
+        amount_gst=Decimal("50.00"),
+        lab_id=lab.lab_id,
+        category_id=cat.category_id,
+        pr_status="Approved",
+    )
+    db.add_all([line1, line2, line3])
     db.flush()
 
     admin = User(
@@ -346,25 +373,27 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
 
     g_data = payload["lab_groups"][0]
     assert Decimal(g_data["envelope_budget_sgd"]) == Decimal("1000.00")
-    assert Decimal(g_data["actual_spend_sgd"]) == Decimal("500.00")
+    assert Decimal(g_data["actual_spend_sgd"]) == Decimal("550.00")
     assert Decimal(g_data["pending_sgd"]) == Decimal("350.00")
-    assert Decimal(g_data["committed_spend_sgd"]) == Decimal("850.00")
+    assert Decimal(g_data["committed_spend_sgd"]) == Decimal("900.00")
     assert g_data["threshold_reached"] == 80
     assert g_data["triggering_batch_id"] == batch2.batch_id
 
     l_data = g_data["labs"][0]
     assert l_data["lab_id"] == lab.lab_id
-    assert Decimal(l_data["committed_spend_sgd"]) == Decimal("850.00")
+    assert Decimal(l_data["committed_spend_sgd"]) == Decimal("900.00")
     assert l_data["threshold_reached"] == 80
     assert l_data["triggering_batch_id"] == batch2.batch_id
 
     c_data = l_data["categories"][0]
     assert c_data["category_id"] == cat.category_id
-    assert len(c_data["pr_lines"]) == 2
+    assert len(c_data["pr_lines"]) == 3
 
-    # Verify triggering line flag: PR-DD-2 (batch2) triggered the 80% threshold
+    # Verify chronological crossing: PR-DD-2 (batch2) crossed 80%, while
+    # PR-DD-1 (before 80%) and PR-DD-3 (after 80% was already crossed) are False
     lines_by_pr_num = {line["source_pr_number"]: line for line in c_data["pr_lines"]}
-    assert lines_by_pr_num["PR-DD-2"]["is_triggering_line"] is True
     assert lines_by_pr_num["PR-DD-1"]["is_triggering_line"] is False
+    assert lines_by_pr_num["PR-DD-2"]["is_triggering_line"] is True
+    assert lines_by_pr_num["PR-DD-3"]["is_triggering_line"] is False
 
     app.dependency_overrides.clear()
