@@ -419,7 +419,7 @@ function ChartScroll<T>({
     const chunks: T[][] = [];
     for (let i = 0; i < bars; i += size) chunks.push(rows.slice(i, i + size));
     return (
-      <>
+      <div className="chart-rows">
         {chunks.map((chunk, i) => (
           <div key={i} className="print-keep mb-6">
             <p className="mb-1 text-xs font-medium text-[#475569]">
@@ -428,7 +428,7 @@ function ChartScroll<T>({
             {children(chunk)}
           </div>
         ))}
-      </>
+      </div>
     );
   }
   if (bars <= SCROLL_AFTER) return <>{children(rows)}</>;
@@ -532,6 +532,10 @@ export function DashboardPage() {
   // Chart being exported on its own (PDF). While set, an off-screen copy of
   // that chart is rendered and the print stylesheet prints only that copy.
   const [exportChartId, setExportChartId] = useState<string | null>(null);
+  // Whole-dashboard PDF in progress: the chart slots switch to their export
+  // layout (long charts split into rows) until the print dialog closes.
+  const [printingDashboard, setPrintingDashboard] = useState(false);
+  const printBusy = exportChartId !== null || printingDashboard;
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
@@ -1683,7 +1687,7 @@ export function DashboardPage() {
                 variant="outline"
                 size="sm"
                 className="no-print gap-2 shrink-0"
-                disabled={exportChartId !== null}
+                disabled={printBusy}
               >
                 <Download className="h-4 w-4" />
                 Export
@@ -1702,7 +1706,7 @@ export function DashboardPage() {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        {renderChartBody(chartId)}
+        {renderChartBody(chartId, printingDashboard)}
       </Card>
     );
   }
@@ -1779,10 +1783,23 @@ export function DashboardPage() {
   // SVG so they stay vector, text stays selectable, and nothing has to be
   // rasterised by a canvas library (which would also choke on the oklch()
   // colours in theme.css).
-  const handleExportPdf = () => {
-    // Let the dropdown unmount before the print dialog snapshots the page.
-    setTimeout(() => window.print(), 80);
-  };
+  //
+  // A scrolling chart would print only the slice in view, so the slots are
+  // first re-rendered in their export layout (see ChartScroll), then printed,
+  // then switched back once the dialog closes (afterprint fires on Cancel too).
+  const handleExportPdf = () => setPrintingDashboard(true);
+
+  useEffect(() => {
+    if (!printingDashboard) return;
+    const done = () => setPrintingDashboard(false);
+    window.addEventListener("afterprint", done, { once: true });
+    // Let the dropdown close and the re-laid-out charts measure and draw.
+    const timer = setTimeout(() => window.print(), 400);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("afterprint", done);
+    };
+  }, [printingDashboard]);
 
   const handleExportExcel = async () => {
     setExporting(true);
@@ -1817,7 +1834,7 @@ export function DashboardPage() {
       <FilterBar
         searchPlaceholder="Search dashboard..."
         showExport
-        exportDisabled={exporting}
+        exportDisabled={exporting || printBusy}
         exportOptions={[
           {
             id: "pdf",

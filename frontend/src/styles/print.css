@@ -210,6 +210,13 @@
     page-break-inside: auto;
   }
 
+  /* Same for a chart card holding a long chart split into rows: let the card
+     break between rows (each row itself is .print-keep). */
+  [data-slot="card"]:has(.chart-rows) {
+    break-inside: auto;
+    page-break-inside: auto;
+  }
+
   /* Force backgrounds/colours to print (Chrome strips them otherwise). */
   * {
     -webkit-print-color-adjust: exact !important;
