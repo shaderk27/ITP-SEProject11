@@ -10,7 +10,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 
 ### Which SQL file to run, and when
 
-`db_setup.sql` and all `add_*.sql` / `migrate_*.sql` files live in `backend/migrations/`. `reference_seed.sql`, `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`. There is exactly one `db_setup.sql` in the repo (`backend/migrations/db_setup.sql`).
+`db_setup.sql` and all `add_*.sql` / `migrate_*.sql` files live in `backend/migrations/`. , `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`. There is exactly one `db_setup.sql` in the repo (`backend/migrations/db_setup.sql`).
 
 **Migrations** change the schema only. They never insert demo data, are non-destructive and safe to re-run, and each records itself in the `schema_migrations` table.
 
@@ -28,8 +28,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 
 | File | What it does | Safe on |
 |---|---|---|
-| `reference_seed.sql` | Insert-only data the app needs everywhere: roles, the `General` spending category, the `General` lab group and each group's `General` lab. Never updates existing rows. | Local, Lightsail, production |
-| `dev_seed.sql` | Demo data: FY2026 budget period, spending categories, FCB/ICT lab groups, demo labs and three test users (placeholder passwords). Includes everything in `reference_seed.sql`. | **Local only** |
+| `dev_seed.sql` | Demo data: FY2026 budget period, spending categories, FCB/ICT lab groups, demo labs and three test users (placeholder passwords). | **Local only** |
 | `w7_auth_seed.sql` | Demo users with Lab IC assignments for testing Lab IC scoping. Needs `dev_seed.sql` first. | **Local only** |
 
 Never run `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail or any shared/production database: they create users with placeholder passwords.
@@ -47,7 +46,6 @@ Never run `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail or any shared/produc
    ```
    In pgAdmin, run `SET app.allow_reset = 'yes';` first, then the file, in the same Query Tool tab.
 3. Local: run `dev_seed.sql`, then optionally `w7_auth_seed.sql`.
-   Non-local: run `reference_seed.sql` only.
 4. Optionally run `add_rag_knowledge.sql` for Ask AI's purchase search.
 
 ### Existing database with data you want to keep
@@ -63,7 +61,7 @@ Never run `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail or any shared/produc
    4. `add_pr_status_columns.sql`
    5. `add_alert_state_columns.sql`
    6. `add_rag_knowledge.sql` (optional, see the pgvector note above)
-3. Optionally run `reference_seed.sql`. Local only: `dev_seed.sql` / `w7_auth_seed.sql`.
+3. Optionally run `dev_seed.sql` / `w7_auth_seed.sql`.
 
 Migrations that find their change already in place do nothing except record themselves, so the same sequence is safe on any existing database, whatever its history. Do not run `db_setup.sql` on an existing database unless you intend to erase it.
 
