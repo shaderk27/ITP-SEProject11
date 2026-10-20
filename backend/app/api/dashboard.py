@@ -631,7 +631,9 @@ def export_dashboard(
     lab_groups = get_lab_groups(period_id, db, current_user)
 
     groups = _filter_breakdown(breakdown.lab_groups, lab_group_id, lab_id)
-    kpis = _dashboard_kpis(spending, lab_groups, groups, lab_group_id, lab_id)
+    kpis = _dashboard_kpis(
+        spending, lab_groups, groups, lab_group_id, lab_id, lab_ic=role_name == "labic"
+    )
 
     meta = DashboardMeta(
         generated_at=datetime.now(),
@@ -694,6 +696,8 @@ def _dashboard_kpis(
     groups: list[BreakdownLabGroup],
     lab_group_id: int | None,
     lab_id: int | None,
+    *,
+    lab_ic: bool = False,
 ) -> DashboardKpis:
     """
     Recreate the six KPI cards exactly as DashboardPage.tsx derives them.
@@ -701,6 +705,9 @@ def _dashboard_kpis(
     Total Budget comes from the System Config numbers (not the breakdown),
     while Actual and Pending come from the spending aggregate — except when a
     single lab is selected, where all three are read off that lab's row.
+
+    A Lab IC's Total Budget is the sum of their own labs' budgets, since the
+    Lab Groups their labs sit in also hold labs they don't run.
     """
     if lab_id is not None:
         lab = next(
@@ -726,6 +733,11 @@ def _dashboard_kpis(
             key = str(lab_group_id)
             actual = _to_decimal(spending.by_lab_group.get(key, "0"))
             pending = _to_decimal(spending.pending_by_lab_group.get(key, "0"))
+        if lab_ic:
+            budget = sum(
+                (_to_decimal(lab.budget_sgd) for g in groups for lab in g.labs),
+                Decimal("0"),
+            )
 
     available = budget - actual - pending
     return DashboardKpis(

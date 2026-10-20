@@ -772,14 +772,26 @@ export function DashboardPage() {
 
   // Total Budget = raw System Config number, scoped by the Lab Group dropdown.
   // Always shows the full configured budget (not adjusted for spend/pending).
+  // A Lab IC's labs sit in Lab Groups that also hold labs they don't run, so
+  // their Total Budget is the sum of their own labs, not the group budgets.
   const totalBudget = useMemo(() => {
     if (selectedLab) return Number(selectedLab.budget_sgd) || 0;
+    if (isLabIc) {
+      return (breakdown?.lab_groups ?? [])
+        .filter(
+          (g) =>
+            selectedGroupId === "all" ||
+            String(g.lab_group_id) === selectedGroupId,
+        )
+        .flatMap((g) => g.labs)
+        .reduce((sum, l) => sum + (Number(l.budget_sgd) || 0), 0);
+    }
     if (selectedGroupId === "all") {
       return labGroups.reduce((sum, g) => sum + g.budget, 0);
     }
     const match = labGroups.find((g) => String(g.id) === selectedGroupId);
     return match ? match.budget : 0;
-  }, [labGroups, selectedGroupId, selectedLab]);
+  }, [breakdown, isLabIc, labGroups, selectedGroupId, selectedLab]);
 
   // Actual Spend = sum of Approved lines only. Backend role-filters; Team
   // Lead only ever gets their own group's numbers.
