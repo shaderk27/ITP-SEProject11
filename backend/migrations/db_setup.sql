@@ -101,11 +101,7 @@ CREATE TABLE lab_groups (
     description     text,
     created_at      timestamptz     NOT NULL DEFAULT now()
 );
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
-ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
+
 
 -- Now that lab_groups exists, add the FK on users
 ALTER TABLE users
@@ -124,13 +120,7 @@ CREATE TABLE labs (
     created_at      timestamptz     NOT NULL DEFAULT now()
 
 );
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_50 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_80 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_95 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_100 BOOLEAN DEFAULT FALSE;
-ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
-ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
-ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
+
 -- Lab IC assignments (many-to-many):
 --   * one user can be Lab IC of several labs
 --   * one lab can have several Lab ICs, at most one of them primary
@@ -497,3 +487,18 @@ INSERT INTO schema_migrations (migration_name) VALUES
   ('add_password_reset_tokens'),
   ('add_pr_status_columns'),
   ('add_alert_state_columns');
+
+--missing columns added
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_100 boolean DEFAULT false;
+ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS alert_period_id bigint;
+
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_50 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_80 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_95 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_100 BOOLEAN DEFAULT FALSE;
+ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
+ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
+ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
