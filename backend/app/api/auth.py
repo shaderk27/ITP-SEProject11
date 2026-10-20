@@ -1,6 +1,15 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Query, Response, Cookie, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Query,
+    Response,
+    Cookie,
+    HTTPException,
+    status,
+    Request,
+)
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -21,6 +30,8 @@ from app.services.auth_service import (
     AuthService,
 )
 from app.repositories.auth_repository import AuthRepository
+from app.services.audit_service import log_audit_action
+from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -53,9 +64,35 @@ def get_current_user_allow_reset(
 async def login(
     payload: LoginRequest,
     response: Response,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
 ):
-    return service.login(payload.email, payload.password, response)
+    try:
+        res = service.login(payload.email, payload.password, response)
+        user = service.db.query(User).filter(User.email == payload.email).first()
+        if user:
+            log_audit_action(
+                db=service.db,
+                user_id=user.user_id,
+                action_type="LOGIN_SUCCESS",
+                entity_name="Authentication",
+                record_id=str(user.user_id),
+                request=request,
+            )
+        return res
+    except HTTPException as e:
+        user = service.db.query(User).filter(User.email == payload.email).first()
+        if user:
+            log_audit_action(
+                db=service.db,
+                user_id=user.user_id,
+                action_type="LOGIN_FAILED",
+                entity_name="Authentication",
+                record_id=str(user.user_id),
+                new_value={"reason": getattr(e, "detail", "Unknown")},
+                request=request,
+            )
+        raise e
 
 
 @router.get("/me")
@@ -102,10 +139,11 @@ async def logout(response: Response):
 @router.post("/users", status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: CreateUserRequest,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
-    return service.create_user(
+    res = service.create_user(
         full_name=payload.full_name,
         email=payload.email,
         password=payload.password,
@@ -116,6 +154,20 @@ async def create_user(
         primary_lab_id=payload.primary_lab_id,
         creator_admin_id=admin.get("id"),
     )
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="CREATE",
+        entity_name="User",
+        record_id=payload.email,
+        new_value={
+            "email": payload.email,
+            "role_id": payload.role_id,
+            "full_name": payload.full_name,
+        },
+        request=request,
+    )
+    return res
 
 
 @router.get("/roles", response_model=List[RoleResponse])
@@ -155,44 +207,92 @@ async def get_assignments(
 async def assign_lab_ic(
     user_id: int,
     payload: AssignLabSchema,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
-    return service.assign_lab_to_user(
+    res = service.assign_lab_to_user(
         user_id=user_id,
         lab_id=payload.lab_id,
         is_primary=payload.is_primary,
         assigned_by=admin.get("id"),
     )
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="UPDATE",
+        entity_name="UserScope",
+        record_id=str(user_id),
+        new_value={
+            "assigned_lab_id": payload.lab_id,
+            "is_primary": payload.is_primary,
+        },
+        request=request,
+    )
+    return res
 
 
 @router.put("/users/{user_id}/assign-labgroup")
 async def assign_team_lead(
     user_id: int,
     payload: AssignLabGroupSchema,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return service.assign_labgroup_to_user(user_id, payload.lab_group_id)
+    res = service.assign_labgroup_to_user(user_id, payload.lab_group_id)
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="UPDATE",
+        entity_name="UserScope",
+        record_id=str(user_id),
+        new_value={"assigned_lab_group_id": payload.lab_group_id},
+        request=request,
+    )
+    return res
 
 
 @router.put("/users/{user_id}/unassign-scope")
 async def unassign_user_scope(
     user_id: int,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return service.unassign_user_scope(user_id)
+    res = service.unassign_user_scope(user_id)
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="UPDATE",
+        entity_name="UserScope",
+        record_id=str(user_id),
+        new_value={"scope": "unassigned"},
+        request=request,
+    )
+    return res
 
 
 @router.delete("/users/{user_id}/labs/{lab_id}")
 async def unassign_lab_from_user(
     user_id: int,
     lab_id: int,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return service.unassign_lab_from_user(user_id, lab_id)
+    res = service.unassign_lab_from_user(user_id, lab_id)
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="UPDATE",
+        entity_name="UserScope",
+        record_id=str(user_id),
+        old_value={"assigned_lab_id": lab_id},
+        new_value={"scope": "unassigned"},
+        request=request,
+    )
+    return res
 
 
 @router.put("/users/{user_id}/deactivate")
@@ -201,6 +301,7 @@ async def deactivate_user(
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
+    # Canonical audit log is written inside auth_repository.set_user_activation_status
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
 
 
@@ -210,6 +311,7 @@ async def activate_user(
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
+    # Canonical audit log is written inside auth_repository.set_user_activation_status
     return service.activate_user(user_id, current_admin_id=admin.get("id"))
 
 
@@ -230,8 +332,9 @@ async def reset_password(
 @router.post("/users/{user_id}/send-reset")
 async def admin_send_reset(
     user_id: int,
+    request: Request,
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     user = service.repository.get_user_by_id(service.db, user_id)
     if not user:
@@ -241,10 +344,18 @@ async def admin_send_reset(
             status_code=403, detail="Admin passwords cannot be reset by another admin."
         )
     service.forgot_password(user.email)
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="UPDATE",
+        entity_name="UserPassword",
+        record_id=str(user_id),
+        new_value={"action": "admin_triggered_reset"},
+        request=request,
+    )
     return {"message": f"Temporary password sent to {user.email}."}
 
 
-# Updated session refresh payload to include lab_ids array
 @router.post("/refresh")
 async def refresh_session(
     response: Response,
@@ -259,7 +370,6 @@ async def refresh_session(
             detail="Password reset required before session can be extended.",
         )
 
-    # Resolve all lab assignments for the current user
     lab_ids = current_user.get("lab_ids", [])
 
     token_payload = {
@@ -267,7 +377,7 @@ async def refresh_session(
         "email": current_user["email"],
         "role": current_user["role"],
         "lab_group_id": current_user["lab_group_id"],
-        "lab_ids": lab_ids,  # Replaces scalar lab_id
+        "lab_ids": lab_ids,
         "must_reset_password": current_user["must_reset_password"],
     }
     token = service._create_access_token(data=token_payload)
