@@ -298,41 +298,21 @@ async def unassign_lab_from_user(
 @router.put("/users/{user_id}/deactivate")
 async def deactivate_user(
     user_id: int,
-    request: Request,
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
-    res = service.deactivate_user(user_id, current_admin_id=admin["id"])
-    log_audit_action(
-        db=service.db,
-        user_id=admin["id"],
-        action_type="DEACTIVATE",
-        entity_name="User",
-        record_id=str(user_id),
-        new_value={"status": "deactivated"},
-        request=request,
-    )
-    return res
+    # Canonical audit log is written inside auth_repository.set_user_activation_status
+    return service.deactivate_user(user_id, current_admin_id=admin["id"])
 
 
 @router.put("/users/{user_id}/activate")
 async def activate_user(
     user_id: int,
-    request: Request,
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
 ):
-    res = service.activate_user(user_id, current_admin_id=admin.get("id"))
-    log_audit_action(
-        db=service.db,
-        user_id=admin["id"],
-        action_type="ACTIVATE",
-        entity_name="User",
-        record_id=str(user_id),
-        new_value={"status": "active"},
-        request=request,
-    )
-    return res
+    # Canonical audit log is written inside auth_repository.set_user_activation_status
+    return service.activate_user(user_id, current_admin_id=admin.get("id"))
 
 
 @router.post("/reset-password")
@@ -376,7 +356,6 @@ async def admin_send_reset(
     return {"message": f"Temporary password sent to {user.email}."}
 
 
-# Updated session refresh payload to include lab_ids array
 @router.post("/refresh")
 async def refresh_session(
     response: Response,

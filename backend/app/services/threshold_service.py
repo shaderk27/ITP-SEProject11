@@ -106,9 +106,10 @@ def check_and_notify_lab_thresholds(lab_id: int):
         if not threshold_hit:
             return
 
-        # Gather ALL active Lab ICs (Primary & Secondary via LabIcAssignment) and Team Leads
+        # Gather recipients: all active Primary & Secondary Lab ICs + Team Leads
         recipients = []
-        assigned_ics = (
+
+        lab_ics = (
             db.query(User)
             .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
             .filter(
@@ -118,13 +119,9 @@ def check_and_notify_lab_thresholds(lab_id: int):
             )
             .all()
         )
-        for ic in assigned_ics:
+        for ic in lab_ics:
             if ic.email:
                 recipients.append(ic.email)
-
-        # Fallback if legacy 1-1 relationship is also populated
-        if getattr(lab, "ic_user", None) and lab.ic_user.email and getattr(lab.ic_user, "is_active", True):
-            recipients.append(lab.ic_user.email)
 
         team_leads = (
             db.query(User)

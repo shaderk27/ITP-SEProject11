@@ -68,6 +68,9 @@ const RenderData = ({
         } else if (key === "is_primary" && typeof value === "boolean") {
           label = "IC Assignment Type";
           displayValue = value ? "Primary Lab IC" : "Secondary Lab IC";
+        } else if (key === "is_active" && typeof value === "boolean") {
+          label = "Account Status";
+          displayValue = value ? "Active" : "Deactivated";
         } else if (key === "budget" && typeof value === "number") {
           displayValue = `$${Number(value).toLocaleString(undefined, {
             minimumFractionDigits: 2,
@@ -91,7 +94,6 @@ const RenderData = ({
 
         const isHighlighted = isScalarChanged || isNestedChanged;
 
-        // Styling for top-level container based on diff state
         const containerClasses = isHighlighted
           ? type === "old"
             ? "bg-red-50/70 border border-red-200 border-l-4 border-l-red-500 rounded-md p-3"
@@ -150,7 +152,6 @@ const RenderData = ({
                         })}`
                       : String(v);
 
-                    // Compare nested item against the opposite side
                     const otherNestedObj =
                       hasComparison &&
                       typeof otherVal === "object" &&
@@ -335,6 +336,7 @@ export function AuditLogPage() {
 
   // --- SMART TARGET RESOLVER ---
   const getTargetName = (log: any) => {
+    const entityLower = (log.entity_name || "").toLowerCase();
     if (log.entity_name === "Lab" && labs[log.record_id])
       return labs[log.record_id];
     if (log.entity_name === "LabGroup" && labGroups[log.record_id])
@@ -342,10 +344,7 @@ export function AuditLogPage() {
     if (log.entity_name === "SpendingCategory" && categories[log.record_id])
       return categories[log.record_id];
 
-    if (
-      log.entity_name.includes("User") ||
-      log.entity_name === "Authentication"
-    ) {
+    if (entityLower.includes("user") || log.entity_name === "Authentication") {
       if (users[log.record_id]) return users[log.record_id];
       if (log.record_id.includes("@")) return log.record_id;
     }
@@ -433,51 +432,54 @@ export function AuditLogPage() {
                     </td>
                   </tr>
                 ) : (
-                  filteredLogs.map((log) => (
-                    <tr key={log.audit_id} className="hover:bg-gray-50/50">
-                      <td className="p-4 text-gray-500 whitespace-nowrap">
-                        {new Date(log.created_at).toLocaleString()}
-                      </td>
-                      <td className="p-4 font-medium text-gray-900">
-                        {log.user_name}
-                      </td>
-                      <td className="p-4">
-                        <span
-                          className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
-                            log.action_type.includes("DELETE") ||
-                            log.action_type.includes("DEACTIVATE") ||
-                            log.action_type.includes("FAILED")
-                              ? "bg-red-50 text-red-600 border border-red-100"
-                              : log.action_type.includes("CREATE") ||
-                                log.action_type.includes("ACTIVATE") ||
-                                log.action_type.includes("SUCCESS")
-                              ? "bg-green-50 text-green-600 border border-green-100"
-                              : "bg-blue-50 text-blue-600 border border-blue-100"
-                          }`}
-                        >
-                          {log.action_type.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="p-4 text-gray-600 font-medium">
-                        {log.entity_name}
-                      </td>
-                      <td className="p-4 text-gray-900 font-medium">
-                        {getTargetName(log)}
-                      </td>
-                      <td className="p-4 text-center">
-                        {(log.old_value || log.new_value) && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedLog(log)}
-                            className="h-8 text-[#1e3a8a] hover:bg-blue-50"
+                  filteredLogs.map((log) => {
+                    const actionUpper = (log.action_type || "").toUpperCase();
+                    return (
+                      <tr key={log.audit_id} className="hover:bg-gray-50/50">
+                        <td className="p-4 text-gray-500 whitespace-nowrap">
+                          {new Date(log.created_at).toLocaleString()}
+                        </td>
+                        <td className="p-4 font-medium text-gray-900">
+                          {log.user_name}
+                        </td>
+                        <td className="p-4">
+                          <span
+                            className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${
+                              actionUpper.includes("DELETE") ||
+                              actionUpper.includes("DEACTIVATE") ||
+                              actionUpper.includes("FAILED")
+                                ? "bg-red-50 text-red-600 border border-red-100"
+                                : actionUpper.includes("CREATE") ||
+                                  actionUpper.includes("ACTIVATE") ||
+                                  actionUpper.includes("SUCCESS")
+                                ? "bg-green-50 text-green-600 border border-green-100"
+                                : "bg-blue-50 text-blue-600 border border-blue-100"
+                            }`}
                           >
-                            <Eye className="h-4 w-4 mr-1.5" /> View
-                          </Button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
+                            {log.action_type.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="p-4 text-gray-600 font-medium">
+                          {log.entity_name}
+                        </td>
+                        <td className="p-4 text-gray-900 font-medium">
+                          {getTargetName(log)}
+                        </td>
+                        <td className="p-4 text-center">
+                          {(log.old_value || log.new_value) && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedLog(log)}
+                              className="h-8 text-[#1e3a8a] hover:bg-blue-50"
+                            >
+                              <Eye className="h-4 w-4 mr-1.5" /> View
+                            </Button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -494,7 +496,7 @@ export function AuditLogPage() {
                   Change Details
                 </h3>
                 <p className="text-sm text-gray-500">
-                  {selectedLog.action_type.replace("_", " ")} on{" "}
+                  {selectedLog.action_type.replace(/_/g, " ")} on{" "}
                   {selectedLog.entity_name} ({getTargetName(selectedLog)})
                 </p>
               </div>
