@@ -729,7 +729,7 @@ export function AlertsPage() {
                                               {line.is_triggering_line && (
                                                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
                                                   <Zap className="h-2.5 w-2.5" />
-                                                  Triggering Batch
+                                                  Threshold Crossing Line
                                                 </span>
                                               )}
                                             </div>

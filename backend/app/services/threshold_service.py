@@ -292,10 +292,9 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
         if not threshold_hit:
             return
 
-        # Gather recipients and send email
+        # Lab Group alerts go only to the responsible active Team Leads.
         recipients = []
 
-        # 1. Alert all active Team Leads of the Lab Group
         team_leads = (
             db.query(User)
             .filter(
@@ -309,23 +308,6 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
             if lead.email:
                 recipients.append(lead.email)
 
-        # 2. Alert ALL active Lab ICs (Primary & Secondary) beneath this group
-        lab_ics = (
-            db.query(User)
-            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
-            .join(Lab, Lab.lab_id == LabIcAssignment.lab_id)
-            .filter(
-                Lab.lab_group_id == group.lab_group_id,
-                User.role_id == 3,
-                User.is_active.is_(True),
-            )
-            .all()
-        )
-        for ic in lab_ics:
-            if ic.email:
-                recipients.append(ic.email)
-
-        # Ensure unique emails
         recipients = list(set(recipients))
 
         if not recipients:

@@ -1,10 +1,11 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from sqlalchemy import func
 
 from app.main import app
+from app.api.alerts import _find_threshold_crossing
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.services.threshold_service import (
@@ -23,6 +24,59 @@ from app.models.staging import PurchaseRequest, PurchaseRequestLine, UploadBatch
 from app.models.auth import User, Role
 
 client = TestClient(app)
+
+
+def test_threshold_crossing_uses_commit_order_and_exact_line():
+    early_batch = UploadBatch(
+        batch_id=1,
+        uploaded_by=1,
+        filename="early.xlsx",
+        file_type="xlsx",
+        upload_status="committed",
+        processed_at=datetime(2099, 5, 1, 9, 0),
+    )
+    later_batch = UploadBatch(
+        batch_id=2,
+        uploaded_by=1,
+        filename="later.xlsx",
+        file_type="xlsx",
+        upload_status="committed",
+        processed_at=datetime(2099, 6, 1, 9, 0),
+    )
+    early_commit_pr = PurchaseRequest(
+        pr_id=1,
+        latest_batch_id=1,
+        source_pr_number="PR-LATER-DATE",
+        request_date=date(2099, 7, 1),
+    )
+    later_commit_pr = PurchaseRequest(
+        pr_id=2,
+        latest_batch_id=2,
+        source_pr_number="PR-EARLIER-DATE",
+        request_date=date(2099, 4, 1),
+    )
+    first_line = PurchaseRequestLine(
+        pr_line_id=1, pr_id=1, line_no=1, amount_gst=Decimal("500.00")
+    )
+    before_crossing = PurchaseRequestLine(
+        pr_line_id=2, pr_id=2, line_no=1, amount_gst=Decimal("200.00")
+    )
+    crossing_line = PurchaseRequestLine(
+        pr_line_id=3, pr_id=2, line_no=2, amount_gst=Decimal("150.00")
+    )
+
+    batch_id, line_id = _find_threshold_crossing(
+        [
+            (crossing_line, later_commit_pr, later_batch),
+            (first_line, early_commit_pr, early_batch),
+            (before_crossing, later_commit_pr, later_batch),
+        ],
+        Decimal("1000.00"),
+        80,
+    )
+
+    assert batch_id == later_batch.batch_id
+    assert line_id == crossing_line.pr_line_id
 
 
 @patch("app.services.threshold_service.SessionLocal")
@@ -99,7 +153,7 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
 ):
     """
     Tests that the Top-Down Lab Group Envelope triggers at 95% utilization
-    and gathers both the Team Leads and ALL underlying Lab IC emails.
+    and emails only the responsible active Team Leads.
     """
     mock_db = MagicMock()
     mock_session_local.return_value.__enter__.return_value = mock_db
@@ -120,9 +174,6 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
     )
 
     fake_lead = User(email="dept_lead@test.com", role_id=2, is_active=True)
-    fake_ic_1 = User(email="ic_lab1@test.com", role_id=3, is_active=True)
-    fake_ic_2 = User(email="ic_lab2@test.com", role_id=3, is_active=True)
-
     # Master Envelope is 100,000, Total Department Spent is 97,000 (97%)
     scalar_mock = MagicMock(side_effect=[100000, 97000])
 
@@ -134,13 +185,7 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
         elif model is BudgetPeriod:
             query_mock.filter.return_value.first.return_value = fake_period
         elif model is User:
-            # 1st call retrieves Team Leads (.all())
             query_mock.filter.return_value.all.return_value = [fake_lead]
-            # 2nd call retrieves Lab ICs via lab_ic_assignments -> labs (.all())
-            query_mock.join.return_value.join.return_value.filter.return_value.all.return_value = [
-                fake_ic_1,
-                fake_ic_2,
-            ]
         else:
             query_mock.filter.return_value.scalar = scalar_mock
             query_mock.join.return_value.join.return_value.filter.return_value.scalar = scalar_mock
@@ -158,10 +203,8 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
     args, _ = mock_send_email.call_args
 
     recipients = args[0]
-    assert len(recipients) == 3
+    assert recipients == ["dept_lead@test.com"]
     assert "dept_lead@test.com" in recipients
-    assert "ic_lab1@test.com" in recipients
-    assert "ic_lab2@test.com" in recipients
 
     assert "95%" in args[1]
     assert "CRITICAL" in args[1]
@@ -279,18 +322,21 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         filename="batch1.xlsx",
         file_type="xlsx",
         upload_status="committed",
+        processed_at=datetime(2099, 5, 1, 9, 0),
     )
     batch2 = UploadBatch(
         uploaded_by=uploader.user_id,
         filename="batch2.xlsx",
         file_type="xlsx",
         upload_status="committed",
+        processed_at=datetime(2099, 6, 1, 9, 0),
     )
     batch3 = UploadBatch(
         uploaded_by=uploader.user_id,
         filename="batch3.xlsx",
         file_type="xlsx",
         upload_status="committed",
+        processed_at=datetime(2099, 7, 1, 9, 0),
     )
     db.add_all([batch1, batch2, batch3])
     db.flush()
@@ -299,7 +345,8 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         source_pr_number="PR-DD-1",
         latest_batch_id=batch1.batch_id,
         requestor_name="Alice",
-        request_date=date(2099, 5, 1),
+        # Deliberately later than PR-DD-2: crossing must follow commit order.
+        request_date=date(2099, 7, 15),
         grand_total_sgd=Decimal("500.00"),
         lab_group_id=group.lab_group_id,
         pr_status="Approved",
@@ -308,7 +355,7 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         source_pr_number="PR-DD-2",
         latest_batch_id=batch2.batch_id,
         requestor_name="Bob",
-        request_date=date(2099, 6, 1),
+        request_date=date(2099, 4, 15),
         grand_total_sgd=Decimal("350.00"),
         lab_group_id=group.lab_group_id,
         pr_status="Pending Approval",
@@ -334,11 +381,20 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         category_id=cat.category_id,
         pr_status="Approved",
     )
-    line2 = PurchaseRequestLine(
+    line2a = PurchaseRequestLine(
         pr_id=pr2.pr_id,
         line_no=1,
         item_description="Power Supply",
-        amount_gst=Decimal("350.00"),
+        amount_gst=Decimal("200.00"),
+        lab_id=lab.lab_id,
+        category_id=cat.category_id,
+        pr_status="Pending Approval",
+    )
+    line2b = PurchaseRequestLine(
+        pr_id=pr2.pr_id,
+        line_no=2,
+        item_description="Power Supply Accessories",
+        amount_gst=Decimal("150.00"),
         lab_id=lab.lab_id,
         category_id=cat.category_id,
         pr_status="Pending Approval",
@@ -352,7 +408,7 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         category_id=cat.category_id,
         pr_status="Approved",
     )
-    db.add_all([line1, line2, line3])
+    db.add_all([line1, line2a, line2b, line3])
     db.flush()
 
     admin = User(
@@ -387,13 +443,16 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
 
     c_data = l_data["categories"][0]
     assert c_data["category_id"] == cat.category_id
-    assert len(c_data["pr_lines"]) == 3
+    assert len(c_data["pr_lines"]) == 4
 
     # Verify chronological crossing: PR-DD-2 (batch2) crossed 80%, while
     # PR-DD-1 (before 80%) and PR-DD-3 (after 80% was already crossed) are False
-    lines_by_pr_num = {line["source_pr_number"]: line for line in c_data["pr_lines"]}
-    assert lines_by_pr_num["PR-DD-1"]["is_triggering_line"] is False
-    assert lines_by_pr_num["PR-DD-2"]["is_triggering_line"] is True
-    assert lines_by_pr_num["PR-DD-3"]["is_triggering_line"] is False
+    lines_by_key = {
+        (line["source_pr_number"], line["line_no"]): line for line in c_data["pr_lines"]
+    }
+    assert lines_by_key[("PR-DD-1", 1)]["is_triggering_line"] is False
+    assert lines_by_key[("PR-DD-2", 1)]["is_triggering_line"] is False
+    assert lines_by_key[("PR-DD-2", 2)]["is_triggering_line"] is True
+    assert lines_by_key[("PR-DD-3", 1)]["is_triggering_line"] is False
 
     app.dependency_overrides.clear()
