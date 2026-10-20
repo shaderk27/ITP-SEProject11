@@ -162,6 +162,27 @@ def test_kpis_read_straight_off_the_row_when_a_lab_is_selected() -> None:
     assert kpis.actual_spend == pytest.approx(400.0)
 
 
+def test_lab_ic_budget_is_their_own_labs_not_the_group_budgets() -> None:
+    """
+    A Lab IC's labs can sit in Lab Groups that also hold labs they don't run,
+    so "All labs" must add up their own labs, not every group's budget.
+    """
+    lab_groups = [{"id": 1, "budget": 399000.0}, {"id": 2, "budget": 132000.0}]
+    groups = [
+        _group(1, "FCB", labs=[_lab(lab_id=22, budget="15000")]),
+        _group(
+            2,
+            "ICT",
+            labs=[_lab(lab_id=42, budget="20000"), _lab(lab_id=43, budget="10000")],
+        ),
+    ]
+    spending = _spending(total="39350")
+    kpis = _dashboard_kpis(spending, lab_groups, groups, None, None, lab_ic=True)
+    assert kpis.total_budget == pytest.approx(45000.0)
+    assert kpis.available_balance == pytest.approx(5650.0)
+    assert kpis.utilisation_pct == pytest.approx(87.4, abs=0.1)
+
+
 def test_zero_budget_does_not_divide_by_zero() -> None:
     kpis = _dashboard_kpis(
         _spending(total="500"), [{"id": 1, "budget": 0.0}], [], None, None
