@@ -20,7 +20,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 | `migrate_lab_ic_to_assignments.sql` | Non-destructive, safe to re-run. Converts the old Lab IC model (`users.lab_id` or `labs.user_id`) into `lab_ic_assignments`, keeping existing data. | Only on an **existing** database created before `lab_ic_assignments` existed. Not needed after a fresh `db_setup.sql`. Do not also run the older `migrate_lab_ic_to_labs.sql`. |
 | `dev_seed.sql` | Safe to re-run. Adds schema columns the app needs that `db_setup.sql` does not create (`pr_status` on purchase requests and lines, the alert-notification flags on `labs` and `lab_groups`, and nullable `labs.lab_group_id`). Also seeds roles, the FY2026 budget period, spending categories, lab groups, labs and three test users. | After `db_setup.sql` or the migration, on every database you set up, including fresh ones. Despite the name, it contains schema changes, so skipping it leaves the app with missing columns. |
 | `w7_auth_seed.sql` | Safe to re-run. Adds demo users with Lab IC assignments for testing Lab IC scoping. Reuses the same lab groups and labs as `dev_seed.sql`. | Optional, after `dev_seed.sql`, and only once `lab_ic_assignments` exists. |
-| `add_rag_knowledge.sql` | Non-destructive, safe to re-run. Turns on the `pgvector` extension and creates the empty `knowledge_documents` and `knowledge_chunks` tables used by Ask AI's purchase search. Touches no existing data. | Optional. Only if you want Ask AI's purchase search (see [Purchase search (RAG)](#purchase-search-rag)). Needs pgvector installed on your Postgres server first. Re-run it after every `db_setup.sql`, because a reset drops these tables. |
+| `add_rag_knowledge.sql` | Non-destructive, safe to re-run. Turns on the `pgvector` extension and creates the empty `knowledge_documents` and `knowledge_chunks` tables used by Ask AI's purchase search. Touches no existing data. | Optional. Only if you want Ask AI's purchase search (see [Purchase search (RAG)](#purchase-search-rag)). Needs the pgvector **Postgres extension** installed on your Postgres server first. This is not the pip package. Re-run it after every `db_setup.sql`, because a reset drops these tables. |
 
 **New database**
 
@@ -151,15 +151,27 @@ How it works:
 
 **It's off by default and optional.** With `EMBEDDING_PROVIDER` blank, nothing changes: Ask AI answers from the budget figures exactly as before, and batch commits skip indexing. You only need the steps below if you want to use or test purchase search.
 
-**After pulling this change, everyone** must reinstall the backend requirements, even with purchase search off. The backend now imports the `pgvector` Python package and won't start without it:
+**Two different things are both called "pgvector":**
+
+| | pgvector **Python package** | pgvector **Postgres extension** |
+|---|---|---|
+| What it is | A small library that lets the backend code describe a `vector` column | An add-on installed into your Postgres database server that stores and searches vectors |
+| Install | `pip`, as part of `backend/requirements.txt`. It's pure Python, so it's the same on every OS with nothing to compile | `brew` on macOS, a Visual Studio build on Windows, or `apt` on Linux (step 1 below) |
+| Who needs it | **Everyone**, even with purchase search off | **Only** people turning purchase search on |
+
+**After pulling this change, everyone** must reinstall the backend requirements. That installs the pgvector **Python package**, which the backend needs just to start, because it loads the `knowledge_chunks` table definition at startup. You do **not** need the Postgres extension for this:
 
 ```powershell
 python -m pip install -r backend/requirements.txt
 ```
 
-**Turning purchase search on locally**
+The backend only touches the RAG tables when `EMBEDDING_PROVIDER` is set, so a database without the extension or the tables works fine while purchase search is off.
 
-1. Install the pgvector extension on your Postgres server (once per machine):
+**Turning purchase search on locally (on your own machine)**
+
+Recommended for anyone working on Ask AI, the review/commit flow or the PR-line tables. Without it, Ask AI skips purchase search, and the purchase-search database tests are skipped instead of run.
+
+1. Install the pgvector **Postgres extension** on your Postgres server (once per machine):
    - macOS (Homebrew Postgres): `brew install pgvector`
    - Windows: follow the Windows steps in the [pgvector README](https://github.com/pgvector/pgvector#windows). It's built with the Visual Studio C++ build tools, then copied into your PostgreSQL install folder.
    - Linux: `sudo apt install postgresql-<major version>-pgvector`
@@ -214,7 +226,7 @@ Set `EMBEDDING_MAX_DISTANCE` between the two groups' best distances.
 
 **If something goes wrong, Ask AI still answers.** If purchase search is on but fails (model can't load, provider down, or `add_rag_knowledge.sql` not run), Ask AI answers from the budget figures alone. The label under the answer then ends with `Purchase search is unavailable right now; this answer uses budget figures only.`
 
-**Deployment.** The deployed server needs pgvector installed and `add_rag_knowledge.sql` run through the team's non-destructive schema-update path. Never get it by running `db_setup.sql` on Lightsail. Until then, leave `EMBEDDING_PROVIDER` blank there.
+**Deployment.** Every deploy needs `pip install -r backend/requirements.txt`, for the pgvector Python package. To turn purchase search on there as well, the server's Postgres also needs the pgvector **Postgres extension**, and `add_rag_knowledge.sql` run through the team's non-destructive schema-update path. Never get it by running `db_setup.sql` on Lightsail. Until then, leave `EMBEDDING_PROVIDER` blank there.
 
 ## Dependency notes
 
