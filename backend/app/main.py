@@ -49,6 +49,7 @@ app.include_router(chatbot_router)
 app.include_router(audit_router)
 app.include_router(alerts_router)
 
+
 @app.get("/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}

@@ -193,9 +193,7 @@ def get_alert_drilldown(
                 )
 
     # 2. Resolve Fiscal Period & Date Bounds
-    target_period_id = (
-        period_id if period_id is not None else _current_period_id(db)
-    )
+    target_period_id = period_id if period_id is not None else _current_period_id(db)
     active_period = (
         db.query(BudgetPeriod)
         .filter(BudgetPeriod.period_id == target_period_id)
@@ -313,9 +311,8 @@ def get_alert_drilldown(
 
             batch_id = pr_header.latest_batch_id
             if batch_id is not None:
-                if (
-                    lid not in latest_batch_by_lab
-                    or batch_id > (latest_batch_by_lab[lid] or 0)
+                if lid not in latest_batch_by_lab or batch_id > (
+                    latest_batch_by_lab[lid] or 0
                 ):
                     latest_batch_by_lab[lid] = batch_id
                 gid = lab_to_group_map.get(lid)
