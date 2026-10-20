@@ -6,6 +6,15 @@
 --   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
 --     -f backend/migrations/add_pr_status_columns.sql
 -- =============================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_schema = current_schema() AND table_name = 'purchase_requests'
+  ) THEN
+    RAISE EXCEPTION 'Prerequisite table purchase_requests does not exist. Run db_setup.sql first.';
+  END IF;
+END $$;
 
 BEGIN;
 

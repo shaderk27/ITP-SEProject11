@@ -9,6 +9,33 @@
 -- Aborts (and rolls back) if existing alert_period_id values point at a
 -- period that does not exist. Fix or NULL those rows, then re-run.
 -- =============================================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_schema = current_schema() AND table_name = 'labs'
+  ) THEN
+    RAISE EXCEPTION 'Prerequisite table labs does not exist. Run db_setup.sql first.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_schema = current_schema() AND table_name = 'lab_groups'
+  ) THEN
+    RAISE EXCEPTION 'Prerequisite table lab_groups does not exist. Run db_setup.sql first.';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+    -- 1. Ensure the schema_migrations table exists
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = current_schema() 
+          AND table_name = 'schema_migrations'
+    ) THEN
+        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
+    END IF;
+END $$;
 
 BEGIN;
 

@@ -10,6 +10,19 @@
 -- default (the backfill defaults below are dropped again), so fresh and
 -- migrated databases match.
 -- =============================================================================
+DO $$
+BEGIN
+    -- 1. Ensure the schema_migrations table exists
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = current_schema() 
+          AND table_name = 'schema_migrations'
+    ) THEN
+        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
+    END IF;
+
+END $$;
+
 
 BEGIN;
 

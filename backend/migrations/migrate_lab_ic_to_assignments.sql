@@ -20,7 +20,18 @@
 --   record_id   = target user's user_id (as text)
 --   old_value / new_value = {"is_active": <bool>}
 -- =============================================================================
+DO $$
+BEGIN
+    -- 1. Ensure the schema_migrations table exists
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = current_schema() 
+          AND table_name = 'schema_migrations'
+    ) THEN
+        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
+    END IF;
 
+END $$;
 BEGIN;
 
 -- 1. users.is_active (some DBs only got it from the seed scripts).

@@ -89,6 +89,15 @@ CREATE TRIGGER set_users_updated_at
 BEFORE UPDATE ON users
 FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
+CREATE TABLE password_reset_tokens (
+    token_id        bigint          GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id         bigint          NOT NULL REFERENCES users (user_id) ON DELETE CASCADE,
+    temp_password   text            NOT NULL,
+    expires_at      timestamptz     NOT NULL,
+    used            boolean         NOT NULL DEFAULT false,
+    created_at      timestamptz     NOT NULL DEFAULT now()
+);
+
 
 -- =============================================================================
 -- 2. LAB HIERARCHY & MAPPING
@@ -409,6 +418,8 @@ CREATE TABLE chatbot_queries (
 CREATE INDEX idx_users_role_id        ON users (role_id);
 CREATE INDEX idx_users_lab_group_id   ON users (lab_group_id);
 
+--password
+CREATE INDEX idx_prt_user_id ON password_reset_tokens (user_id);
 -- labs
 CREATE INDEX idx_labs_lab_group_id    ON labs (lab_group_id);
 
@@ -481,7 +492,13 @@ CREATE TABLE schema_migrations (
     applied_at      timestamptz  NOT NULL DEFAULT now(),
     applied_by      text         NOT NULL DEFAULT current_user
 );
-
+INSERT INTO schema_migrations (migration_name) VALUES 
+  ('add_schema_migrations'),
+  ('migrate_lab_ic_to_assignments'),
+  ('add_password_reset_tokens'),
+  ('add_pr_status_columns'),
+  ('add_alert_state_columns')
+ON CONFLICT (migration_name) DO NOTHING;
 --missing columns added
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
@@ -498,3 +515,6 @@ ALTER TABLE labs ADD COLUMN IF NOT EXISTS notified_100 BOOLEAN DEFAULT FALSE;
 ALTER TABLE labs ADD COLUMN IF NOT EXISTS alert_period_id BIGINT;
 ALTER TABLE labs DROP CONSTRAINT IF EXISTS fk_labs_alert_period;
 ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_id) REFERENCES budget_periods(period_id);
+
+ALTER TABLE purchase_requests      ADD COLUMN IF NOT EXISTS pr_status varchar(50);
+ALTER TABLE purchase_request_lines ADD COLUMN IF NOT EXISTS pr_status varchar(50);

@@ -30,7 +30,18 @@
 --   * Deleting a document or PR line cascades to its chunks. is_active lets
 --     a chunk be retired without deleting it (e.g. a superseded doc version).
 -- =============================================================================
+DO $$
+BEGIN
+    -- 1. Ensure the schema_migrations table exists
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.tables 
+        WHERE table_schema = current_schema() 
+          AND table_name = 'schema_migrations'
+    ) THEN
+        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
+    END IF;
 
+END $$;
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS vector;
