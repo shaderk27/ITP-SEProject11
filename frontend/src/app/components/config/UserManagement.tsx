@@ -5,6 +5,16 @@ import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
 
+interface LabAssignment {
+  lab_id?: number;
+  id?: number;
+  lab_name?: string;
+  name?: string;
+  lab_code?: string;
+  code?: string;
+  is_primary?: boolean;
+}
+
 interface UserData {
   id: number;
   full_name: string;
@@ -13,8 +23,16 @@ interface UserData {
   role: "admin" | "teamlead" | "labic";
   lab_group_name: string | null;
   lab_group_code: string | null;
-  lab_assignments?: any[];
+  lab_assignments?: LabAssignment[];
   is_active: boolean;
+}
+
+interface LabItem {
+  id: number;
+  name?: string;
+  lab_name?: string;
+  code?: string;
+  lab_code?: string;
 }
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
@@ -22,21 +40,18 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 interface UserManagementProps {
   onUsersChanged?: () => void;
-  labs?: any[];
+  labs?: LabItem[];
 }
 
 export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagementProps) {
   const navigate = useNavigate();
   const [users, setUsers] = useState<UserData[]>([]);
-  const [labs, setLabs] = useState<any[]>(propLabs || []);
+  const [fetchedLabs, setFetchedLabs] = useState<LabItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (propLabs) {
-      setLabs(propLabs);
-    }
-  }, [propLabs]);
+  // Use props if provided, otherwise fallback to fetched labs
+  const activeLabs = propLabs ?? fetchedLabs;
 
   const loadUsers = useCallback(() => {
     Promise.all([
@@ -44,13 +59,17 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
         if (!res.ok) throw new Error("Failed to load users.");
         return res.json();
       }),
-      propLabs ? Promise.resolve(propLabs) : fetch(`${API_BASE_URL}/api/config/labs`, { credentials: "include" }).then((res) => res.json()).catch(() => [])
+      propLabs
+        ? Promise.resolve(propLabs)
+        : fetch(`${API_BASE_URL}/api/config/labs`, { credentials: "include" })
+            .then((res) => res.json())
+            .catch(() => []),
     ])
       .then(([userData, labsData]) => {
         setError(null);
         setUsers(userData);
         if (!propLabs && Array.isArray(labsData)) {
-          setLabs(labsData);
+          setFetchedLabs(labsData);
         }
       })
       .catch((err: unknown) => {
@@ -73,9 +92,9 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
       if (user.lab_assignments && user.lab_assignments.length > 0) {
         return (
           <div className="flex flex-col gap-1.5">
-            {user.lab_assignments.map((assignment: any, index: number) => {
+            {user.lab_assignments.map((assignment, index) => {
               const labId = assignment.lab_id ?? assignment.id;
-              const matchingLab = labs.find((l) => l.id === labId);
+              const matchingLab = activeLabs.find((l) => l.id === labId);
 
               const labName =
                 matchingLab?.name ||
