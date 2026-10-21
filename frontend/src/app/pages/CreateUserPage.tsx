@@ -35,6 +35,15 @@ const ROLES: Role[] = [
   { role_id: 3, role_name: "labic" },
 ];
 
+async function fetchLabicUsers(): Promise<any[]> {
+  try {
+    const r = await fetch(`${API}/auth/users?role=labic`, { credentials: "include" });
+    return r.ok ? await r.json() : [];
+  } catch {
+    return [];
+  }
+}
+
 export function CreateUserPage() {
   const navigate = useNavigate();
   const [roles, setRoles] = useState<Role[]>(ROLES);
@@ -72,10 +81,7 @@ export function CreateUserPage() {
       .then(setLabs)
       .catch(() => setLabs([]));
 
-    fetch(`${API}/auth/users?role=labic`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setLabicUsers)
-      .catch(() => setLabicUsers([]));
+    fetchLabicUsers().then(setLabicUsers);
   }, []);
 
   const handleChange = (
@@ -188,10 +194,27 @@ export function CreateUserPage() {
         }
       }
 
+      // Refresh existing Lab ICs so the next create sees the new assignment
+      // (otherwise a second IC for the same lab would also be treated as primary).
+      if (selectedRoleName === "labic") {
+        setLabicUsers(await fetchLabicUsers());
+      }
+
+      let roleLabel: string;
+      if (selectedRoleName === "labic") {
+        roleLabel = `${isPrimaryAssignment ? "Primary" : "Secondary"} Lab IC`;
+      } else if (selectedRoleName === "teamlead") {
+        roleLabel = "Team Lead";
+      } else if (selectedRoleName === "admin") {
+        roleLabel = "Admin";
+      } else {
+        roleLabel = selectedRole?.role_name ?? "user";
+      }
+
       setSuccessMessage(
         `User "${data.full_name ?? form.full_name}" created successfully as ${
-          isPrimaryAssignment ? "Primary" : "Secondary"
-        } Lab IC.`
+          selectedRoleName === "admin" ? "an" : "a"
+        } ${roleLabel}.`
       );
       setForm({
         full_name: "",
