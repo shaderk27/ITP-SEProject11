@@ -8,6 +8,11 @@ from app.main import app
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.api.alerts import _find_threshold_crossing
+from app.repositories.persistence_repository import (
+    _build_lab_matcher_patterns,
+    _detect_labs_in_line,
+    _split_amount_equally,
+)
 from app.services.threshold_service import (
     check_and_notify_lab_thresholds,
     check_and_notify_lab_group_thresholds,
@@ -21,6 +26,7 @@ from app.models.config import (
     SpendingCategory,
 )
 from app.models.staging import PurchaseRequest, PurchaseRequestLine, UploadBatch
+from app.models.upload import PRLineItem
 from app.models.auth import User, Role
 
 client = TestClient(app)
@@ -449,3 +455,68 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
     assert lines_by_id[line3.pr_line_id]["is_triggering_line"] is False
 
     app.dependency_overrides.clear()
+
+
+# ─── Automated Multi-Lab Spending Distribution Tests ─────────────────────
+def test_multi_lab_detection_and_equal_spending_distribution():
+    lab1 = Lab(
+        lab_id=101,
+        lab_group_id=10,
+        lab_code="E2-02-01",
+        lab_name="Embedded Systems Lab",
+        venue="E2L2R01, Embedded Systems",
+        is_general=False,
+    )
+    lab2 = Lab(
+        lab_id=102,
+        lab_group_id=10,
+        lab_code="E2-02-02",
+        lab_name="Robotics Lab",
+        venue="E2L2R02, Robotics",
+        is_general=False,
+    )
+    lab3 = Lab(
+        lab_id=103,
+        lab_group_id=10,
+        lab_code="E2-02-03",
+        lab_name="Cyber Security Lab",
+        venue="E2L2R03, Cyber Security",
+        is_general=False,
+    )
+    patterns = _build_lab_matcher_patterns([lab1, lab2, lab3])
+
+    # 1. Single-lab DivPRReport format (like TL Alert PR 1L.xlsx) stays 1 lab
+    single_item = PRLineItem(
+        row_number=1,
+        pr_number="PR2500001251",
+        req_type="Maintenance",
+        purpose="E2-02-02",
+        item_details="Price Schedule G Desktop Workstation (High End) Latest Gen Intel Core i9 processor",
+        amount_gst=Decimal("5000.00"),
+        quantity=Decimal("1"),
+        unit_rate=Decimal("5000.00"),
+    )
+    single_detected = _detect_labs_in_line(single_item, patterns)
+    assert [lab.lab_id for lab in single_detected] == [102]
+
+    # 2. Multi-lab collective purchase splits equally across all 3 detected labs
+    multi_item = PRLineItem(
+        row_number=1,
+        pr_number="PR-MULTI-001",
+        req_type="Consumables",
+        purpose="E2-02-01/02/03",
+        item_details="Collective purchase of glass flasks for E2-02-01, Robotics Lab, and Cyber Security",
+        amount_gst=Decimal("300.00"),
+        quantity=Decimal("30"),
+        unit_rate=Decimal("10.00"),
+    )
+    detected = _detect_labs_in_line(multi_item, patterns)
+    assert [lab.lab_id for lab in detected] == [101, 102, 103]
+
+    shares_even = _split_amount_equally(multi_item.amount_gst, len(detected))
+    assert shares_even == [Decimal("100.00"), Decimal("100.00"), Decimal("100.00")]
+    assert sum(shares_even) == Decimal("300.00")
+
+    shares_odd = _split_amount_equally(Decimal("100.00"), len(detected))
+    assert shares_odd == [Decimal("33.34"), Decimal("33.33"), Decimal("33.33")]
+    assert sum(shares_odd) == Decimal("100.00")
