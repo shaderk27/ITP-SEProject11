@@ -60,6 +60,7 @@ export interface UploadProcessResult {
     reupload_updated: number;
     needs_review: number;
     rejected: number;
+    status_regressions_skipped?: number;
   };
   validation_errors: UploadValidationError[];
   records: {

@@ -52,6 +52,7 @@ export function ProcessingSummaryPage() {
         rejected: result.counts.rejected,
       }
     : uploadResult;
+  const statusRegressions = result?.counts.status_regressions_skipped ?? 0;
   const acceptedRows = result
     ? result.records.inserted.map((record) => [
         record.line.pr_number,
@@ -139,6 +140,14 @@ export function ProcessingSummaryPage() {
           title="File Processing Complete"
           message="Uploaded rows were parsed as PR line items. Lines with unresolved Lab Group, Lab, or Category values are held for review."
         />
+
+        {statusRegressions > 0 && (
+          <SystemNotification
+            type="warning"
+            title={`${statusRegressions} status regression${statusRegressions === 1 ? "" : "s"} will be skipped`}
+            message="These lines are already Approved in the final records but say Pending in this file. They stay Approved when the batch is committed; every other line is processed normally."
+          />
+        )}
 
         <DuplicateWarning count={displayCounts.duplicateSkipped + displayCounts.reuploadUpdated} />
 

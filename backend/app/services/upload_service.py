@@ -264,6 +264,9 @@ class UploadService:
                 "reupload_updated": len(records["updated"]),
                 "needs_review": needs_review_count,
                 "rejected": 0,
+                "status_regressions_skipped": persistence_counts.get(
+                    "status_regressions_flagged", 0
+                ),
             },
             "validation_errors": [],
             "records": records,
@@ -282,6 +285,7 @@ class UploadService:
                 "reupload_updated": 0,
                 "needs_review": 0,
                 "rejected": len(errors),
+                "status_regressions_skipped": 0,
             },
             "validation_errors": errors,
             "records": {"inserted": [], "updated": [], "duplicate": []},

@@ -17,6 +17,7 @@ from app.services.threshold_service import (
     check_and_notify_lab_group_thresholds,
 )
 from app.services.knowledge_service import index_pr_lines_in_background
+from app.services.duplicate_service import is_status_regression
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
@@ -188,6 +189,7 @@ class CommitResponse(BaseModel):
     prs_updated: int
     lines_created: int
     pr_ids: list[int]
+    status_regressions_skipped: int = 0
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────
@@ -684,6 +686,7 @@ def commit_batch(
     prs_updated_count = 0
     lines_created = 0
     lines_updated = 0
+    status_regressions_skipped = 0
 
     # Keep track of unique labs and lab groups affected by this commit
     affected_lab_ids = set()
@@ -697,8 +700,6 @@ def commit_batch(
             .all()
         )
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
-        if pr_lab_group_id:
-            affected_lab_group_ids.add(pr_lab_group_id)
 
         pr_status_value = _raw_line_value(lines[0], "pr_status") if lines else ""
         pr_status_value = pr_status_value or None
@@ -765,19 +766,39 @@ def commit_batch(
             pr = existing_pr
             prs_updated_count += 1
 
-        pr_ids.append(pr.pr_id)
-
         existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
         status_updates: list[dict] = []
+        regressions_skipped: list[dict] = []
 
         for line in lines:
+            line_identity_key = _raw_line_value(line, "line_identity_key")
+            existing_line = existing_lines_by_identity.get(line_identity_key)
+
+            # W17: a committed Approved line never goes back to Pending by upload.
+            incoming_status = _raw_line_value(line, "pr_status")
+            if existing_line and is_status_regression(
+                existing_line.pr_status, incoming_status
+            ):
+                line.duplicate_status = "status_regression"
+                regressions_skipped.append(
+                    {
+                        "line_identity_key": line_identity_key,
+                        "line_no": line.source_line_no,
+                        "staging_line_id": line.staging_line_id,
+                        "accepted_status": existing_line.pr_status,
+                        "attempted_status": incoming_status,
+                    }
+                )
+                if line is lines[0]:
+                    # Header status follows the first line; keep it accepted.
+                    pr.pr_status = existing_line.pr_status
+                continue
+
             if line.suggested_lab_id:
                 affected_lab_ids.add(line.suggested_lab_id)
             if line.suggested_lab_group_id:
                 affected_lab_group_ids.add(line.suggested_lab_group_id)
 
-            line_identity_key = _raw_line_value(line, "line_identity_key")
-            existing_line = existing_lines_by_identity.get(line_identity_key)
             if existing_line:
                 old_staging_line = _staging_line_for_committed_line(db, existing_line)
                 old_status = _source_status_snapshot(old_staging_line)
@@ -838,6 +859,15 @@ def commit_batch(
             if old_data is None:
                 old_data = {}
             old_data["status_updates"] = [u["old_status"] for u in status_updates]
+        if regressions_skipped:
+            new_data["status_regressions_skipped"] = regressions_skipped
+            status_regressions_skipped += len(regressions_skipped)
+
+        # Skipped lines trigger no threshold or vector refresh work.
+        if len(regressions_skipped) < len(lines):
+            pr_ids.append(pr.pr_id)
+            if pr_lab_group_id:
+                affected_lab_group_ids.add(pr_lab_group_id)
 
         db.add(
             PRVersion(
@@ -878,6 +908,7 @@ def commit_batch(
                 "prs_updated": prs_updated_count,
                 "lines_created": lines_created,
                 "lines_updated": lines_updated,
+                "status_regressions_skipped": status_regressions_skipped,
             },
         )
     )
@@ -903,6 +934,7 @@ def commit_batch(
         prs_updated=prs_updated_count,
         lines_created=lines_created,
         pr_ids=pr_ids,
+        status_regressions_skipped=status_regressions_skipped,
     )
 
 
