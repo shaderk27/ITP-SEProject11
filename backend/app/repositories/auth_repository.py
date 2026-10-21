@@ -51,6 +51,7 @@ class AuthRepository:
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
         creator_admin_id: Optional[int] = None,
+        commit: bool = True
     ) -> User:
         """Create and persist a new user in the system with lab assignments."""
         db_user = User(
@@ -80,8 +81,11 @@ class AuthRepository:
             )
             db.add(assignment)
 
-        db.commit()
-        db.refresh(db_user)
+        if commit:
+            db.commit()
+            db.refresh(db_user)
+        else:
+            db.flush()
         return db_user
 
     def set_user_activation_status(
@@ -416,3 +420,8 @@ class AuthRepository:
         db.execute(stmt)
         if commit:
             db.commit()
+    def lock_lab(self, db: Session, lab_id: int) -> Optional[Lab]:
+        """SELECT ... FOR UPDATE on the lab. Held until commit/rollback, so two
+        concurrent creates for one lab can't both pass the 'no primary yet' check.
+        Returns None if the lab doesn't exist."""
+        return db.get(Lab, lab_id, with_for_update=True)

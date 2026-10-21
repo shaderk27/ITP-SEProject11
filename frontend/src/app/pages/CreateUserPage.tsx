@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
@@ -79,7 +85,7 @@ export function CreateUserPage() {
   }, []);
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value } = e.target;
     setForm((prev) => ({
@@ -108,10 +114,7 @@ export function CreateUserPage() {
     if (form.password !== form.confirm_password)
       errors.confirm_password = "Passwords do not match.";
     if (!form.role_id) errors.role_id = "Role is required.";
-    if (
-      selectedRoleName === "teamlead" &&
-      !form.lab_group_id
-    ) {
+    if (selectedRoleName === "teamlead" && !form.lab_group_id) {
       errors.lab_group_id = "Lab group is required for Team Lead.";
     }
     if (selectedRoleName === "labic" && !form.lab_id) {
@@ -121,6 +124,12 @@ export function CreateUserPage() {
     return Object.keys(errors).length === 0;
   };
 
+  const refreshLabicUsers = () =>
+    fetch(`${API}/auth/users?role=labic`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setLabicUsers)
+      .catch(() => {});
+
   const handleSubmit = async () => {
     setSuccessMessage(null);
     setServerError(null);
@@ -129,26 +138,33 @@ export function CreateUserPage() {
     const selectedLabId = form.lab_id ? Number(form.lab_id) : undefined;
     const selectedRole = roles.find((r) => r.role_id === Number(form.role_id));
     const selectedRoleName = selectedRole?.role_name.toLowerCase();
+    const isLabIC = selectedRoleName === "labic";
 
-    // Check if a primary Lab IC already exists for this lab
-    const hasPrimaryForLab = selectedLabId
-      ? labicUsers.some((u) =>
-          u.lab_assignments?.some(
-            (a: any) => a.lab_id === selectedLabId && a.is_primary
+    // Client-side guess, used only as a fallback for the success message.
+    // The backend decides primary/secondary inside the creation transaction,
+    // so two ICs created at the same time can't both end up as primary.
+    const predictedPrimary =
+      isLabIC && selectedLabId
+        ? !labicUsers.some((u) =>
+            u.lab_assignments?.some(
+              (a: any) => a.lab_id === selectedLabId && a.is_primary,
+            ),
           )
-        )
-      : false;
+        : false;
 
-    // True only if no primary IC exists; otherwise false (secondary)
-    const isPrimaryAssignment = !hasPrimaryForLab;
-
-    // Step 1: Create user payload without direct lab bindings to prevent backend overriding primary status
-    const userPayload = {
+    // Single request: the user and (for Lab ICs) the lab assignment are
+    // created together, so a failure leaves nothing behind.
+    const payload = {
       role_id: Number(form.role_id),
       full_name: form.full_name.trim(),
       email: form.email.trim(),
       password: form.password,
       ...(form.lab_group_id && { lab_group_id: Number(form.lab_group_id) }),
+      // lab_ids is the field the route already forwards to the service.
+      // auto_primary asks the backend to pick primary/secondary per lab
+      // inside the creation transaction (existing callers don't send it).
+      ...(isLabIC &&
+        selectedLabId && { lab_ids: [selectedLabId], auto_primary: true }),
     };
 
     setIsSubmitting(true);
@@ -157,41 +173,33 @@ export function CreateUserPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(userPayload),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setServerError(data?.detail ?? "Failed to create user. Please try again.");
-        setIsSubmitting(false);
+        setServerError(
+          data?.detail ?? "Failed to create user. Please try again.",
+        );
         return;
       }
 
-      const newUserId = data.id ?? data.user_id;
+      // Prefer what the backend actually assigned over our prediction.
+      const isPrimary: boolean =
+        data.lab_assignments?.find((a: any) => a.lab_id === selectedLabId)
+          ?.is_primary ?? predictedPrimary;
 
-      // Step 2: If user is a labic and a lab was selected, explicitly assign the lab with the correct primary/secondary status
-      if (selectedRoleName === "labic" && selectedLabId && newUserId) {
-        const assignRes = await fetch(`${API}/auth/users/${newUserId}/assign-lab`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            lab_id: selectedLabId,
-            is_primary: isPrimaryAssignment,
-          }),
-        });
-
-        if (!assignRes.ok) {
-          const assignErr = await assignRes.json().catch(() => ({}));
-          setServerError(assignErr.detail || "User created, but failed to assign lab role properly.");
-          setIsSubmitting(false);
-          return;
-        }
-      }
+      const roleLabels: Record<string, string> = {
+        admin: "Admin",
+        teamlead: "Team Lead",
+        labic: isPrimary ? "Primary Lab IC" : "Secondary Lab IC",
+      };
+      const roleLabel =
+        roleLabels[selectedRoleName ?? ""] ?? selectedRole?.role_name ?? "user";
 
       setSuccessMessage(
         `User "${data.full_name ?? form.full_name}" created successfully as ${
-          isPrimaryAssignment ? "Primary" : "Secondary"
-        } Lab IC.`
+          selectedRoleName === "admin" ? "an" : "a"
+        } ${roleLabel}.`,
       );
       setForm({
         full_name: "",
@@ -202,6 +210,8 @@ export function CreateUserPage() {
         lab_group_id: "",
         lab_id: "",
       });
+      // Keep the "Primary IC exists" hints in the lab dropdown current.
+      if (isLabIC) refreshLabicUsers();
     } catch {
       setServerError("Network error. Check your connection and try again.");
     } finally {
@@ -216,9 +226,7 @@ export function CreateUserPage() {
 
   const getLabAssignmentStatusText = (labId: number) => {
     const hasPrimary = labicUsers.some((u) =>
-      u.lab_assignments?.some(
-        (a: any) => a.lab_id === labId && a.is_primary
-      )
+      u.lab_assignments?.some((a: any) => a.lab_id === labId && a.is_primary),
     );
     return hasPrimary
       ? " (Primary IC exists → will be assigned as Secondary)"
@@ -268,7 +276,9 @@ export function CreateUserPage() {
               className={fieldErrors.full_name ? "border-destructive" : ""}
             />
             {fieldErrors.full_name && (
-              <p className="text-xs text-destructive">{fieldErrors.full_name}</p>
+              <p className="text-xs text-destructive">
+                {fieldErrors.full_name}
+              </p>
             )}
           </div>
 
@@ -305,7 +315,9 @@ export function CreateUserPage() {
                 className={fieldErrors.password ? "border-destructive" : ""}
               />
               {fieldErrors.password && (
-                <p className="text-xs text-destructive">{fieldErrors.password}</p>
+                <p className="text-xs text-destructive">
+                  {fieldErrors.password}
+                </p>
               )}
             </div>
 
@@ -320,10 +332,14 @@ export function CreateUserPage() {
                 value={form.confirm_password}
                 onChange={handleChange}
                 placeholder="Re-enter password"
-                className={fieldErrors.confirm_password ? "border-destructive" : ""}
+                className={
+                  fieldErrors.confirm_password ? "border-destructive" : ""
+                }
               />
               {fieldErrors.confirm_password && (
-                <p className="text-xs text-destructive">{fieldErrors.confirm_password}</p>
+                <p className="text-xs text-destructive">
+                  {fieldErrors.confirm_password}
+                </p>
               )}
             </div>
           </div>
@@ -356,14 +372,18 @@ export function CreateUserPage() {
           {showLabGroup && (
             <div className="space-y-1.5">
               <Label htmlFor="lab_group_id">Lab Group</Label>
-              <p className="text-xs text-muted-foreground">Required for Team Leads</p>
+              <p className="text-xs text-muted-foreground">
+                Required for Team Leads
+              </p>
               <select
                 id="lab_group_id"
                 name="lab_group_id"
                 value={form.lab_group_id}
                 onChange={handleChange}
                 className={`flex h-9 w-full rounded-md border bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
-                  fieldErrors.lab_group_id ? "border-destructive" : "border-input"
+                  fieldErrors.lab_group_id
+                    ? "border-destructive"
+                    : "border-input"
                 }`}
               >
                 <option value="">Select a lab group...</option>
@@ -374,7 +394,9 @@ export function CreateUserPage() {
                 ))}
               </select>
               {fieldErrors.lab_group_id && (
-                <p className="text-xs text-destructive">{fieldErrors.lab_group_id}</p>
+                <p className="text-xs text-destructive">
+                  {fieldErrors.lab_group_id}
+                </p>
               )}
             </div>
           )}
@@ -382,7 +404,9 @@ export function CreateUserPage() {
           {showLab && (
             <div className="space-y-1.5">
               <Label htmlFor="lab_id">Lab</Label>
-              <p className="text-xs text-muted-foreground">Required for Lab ICs (Multiple ICs supported)</p>
+              <p className="text-xs text-muted-foreground">
+                Required for Lab ICs (Multiple ICs supported)
+              </p>
               <select
                 id="lab_id"
                 name="lab_id"
