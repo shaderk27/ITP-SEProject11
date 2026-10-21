@@ -136,25 +136,16 @@ export function CreateUserPage() {
     const selectedRole = roles.find((r) => r.role_id === Number(form.role_id));
     const selectedRoleName = selectedRole?.role_name.toLowerCase();
 
-    // Check if a primary Lab IC already exists for this lab
-    const hasPrimaryForLab = selectedLabId
-      ? labicUsers.some((u) =>
-          u.lab_assignments?.some(
-            (a: any) => a.lab_id === selectedLabId && a.is_primary
-          )
-        )
-      : false;
-
-    // True only if no primary IC exists; otherwise false (secondary)
-    const isPrimaryAssignment = !hasPrimaryForLab;
-
-    // Step 1: Create user payload without direct lab bindings to prevent backend overriding primary status
+    // One request: the backend creates the user and assigns the lab in a single
+    // transaction and decides Primary/Secondary itself (no client-side guessing).
     const userPayload = {
       role_id: Number(form.role_id),
       full_name: form.full_name.trim(),
       email: form.email.trim(),
       password: form.password,
       ...(form.lab_group_id && { lab_group_id: Number(form.lab_group_id) }),
+      ...(selectedRoleName === "labic" &&
+        selectedLabId && { lab_ids: [selectedLabId] }),
     };
 
     setIsSubmitting(true);
@@ -172,37 +163,20 @@ export function CreateUserPage() {
         return;
       }
 
-      const newUserId = data.id ?? data.user_id;
-
-      // Step 2: If user is a labic and a lab was selected, explicitly assign the lab with the correct primary/secondary status
-      if (selectedRoleName === "labic" && selectedLabId && newUserId) {
-        const assignRes = await fetch(`${API}/auth/users/${newUserId}/assign-lab`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            lab_id: selectedLabId,
-            is_primary: isPrimaryAssignment,
-          }),
-        });
-
-        if (!assignRes.ok) {
-          const assignErr = await assignRes.json().catch(() => ({}));
-          setServerError(assignErr.detail || "User created, but failed to assign lab role properly.");
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      // Refresh existing Lab ICs so the next create sees the new assignment
-      // (otherwise a second IC for the same lab would also be treated as primary).
+      // Refresh existing Lab ICs so the lab dropdown hints stay accurate.
       if (selectedRoleName === "labic") {
         setLabicUsers(await fetchLabicUsers());
       }
 
       let roleLabel: string;
       if (selectedRoleName === "labic") {
-        roleLabel = `${isPrimaryAssignment ? "Primary" : "Secondary"} Lab IC`;
+        // Primary/Secondary comes from the backend's decision, not the browser's.
+        const assignedLab = (data.lab_assignments ?? []).find(
+          (a: any) => a.lab_id === selectedLabId
+        );
+        roleLabel = assignedLab
+          ? `${assignedLab.is_primary ? "Primary" : "Secondary"} Lab IC`
+          : "Lab IC";
       } else if (selectedRoleName === "teamlead") {
         roleLabel = "Team Lead";
       } else if (selectedRoleName === "admin") {
