@@ -10,7 +10,7 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 
 ### Which SQL file to run, and when
 
-`db_setup.sql` and all `add_*.sql` / `migrate_*.sql` files live in `backend/migrations/`. , `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`. There is exactly one `db_setup.sql` in the repo (`backend/migrations/db_setup.sql`).
+`db_setup.sql` and all `add_*.sql` / `migrate_*.sql` files live in `backend/migrations/`. `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`. There is exactly one `db_setup.sql` in the repo (`backend/migrations/db_setup.sql`).
 
 **Migrations** change the schema only. They never insert demo data, are non-destructive and safe to re-run, and each records itself in the `schema_migrations` table.
 
@@ -37,12 +37,12 @@ Never run `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail or any shared/produc
 
 1. Create the empty database (once):
    ```powershell
-   psql "postgresql://postgres:<PASSWORD>@localhost:5432/postgres" -c "CREATE DATABASE budget_system;"
+   psql -v ON_ERROR_STOP=1 "postgresql://postgres:<PASSWORD>@localhost:5432/postgres" -c "CREATE DATABASE budget_system;"
    ```
 2. Run `db_setup.sql`, connected to `budget_system`, with the reset confirmation set in the same session:
    ```powershell
    $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-   psql "$env:DATABASE_URL" -c "SET app.allow_reset = 'yes'" -f backend/migrations/db_setup.sql
+   psql -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -c "SET app.allow_reset = 'yes'" -f backend/migrations/db_setup.sql
    ```
    In pgAdmin, run `SET app.allow_reset = 'yes';` first, then the file, in the same Query Tool tab.
 3. Local: run `dev_seed.sql`, then optionally `w7_auth_seed.sql`.
@@ -54,7 +54,7 @@ Never run `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail or any shared/produc
    ```powershell
    pg_dump -Fc "$env:DATABASE_URL" -f budget_system_backup.dump
    ```
-2. Run the migrations in this order:
+2. Run the migrations in this order, using the `-v ON_ERROR_STOP=1` command from [Running a file](#running-a-file) and stopping at the first failure:
    1. `add_schema_migrations.sql`
    2. `migrate_lab_ic_to_assignments.sql`
    3. `add_password_reset_tokens.sql`
@@ -73,18 +73,20 @@ SELECT * FROM schema_migrations ORDER BY applied_at;
 
 ### Running a file
 
-Run each file the same way, changing only its path:
+Run each file the same way, changing only its path. Always include `-v ON_ERROR_STOP=1`: without it, `psql` carries on after an error and can finish with a success exit code even though part of the file failed.
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-psql "$env:DATABASE_URL" -f backend/migrations/add_pr_status_columns.sql
+psql -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -f backend/migrations/add_pr_status_columns.sql
 ```
+
+If a file fails, stop. Fix the cause and re-run that file before running any later one. Do not continue down the migration list after an error. If you run files in pgAdmin instead, stop at the first error message.
 
 If PowerShell says `psql` is not recognized, use the full PostgreSQL path:
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-& "C:\Program Files\PostgreSQL\18\bin\psql.exe" "$env:DATABASE_URL" -f backend/migrations/add_pr_status_columns.sql
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -f backend/migrations/add_pr_status_columns.sql
 ```
 
 You can also open any of these files in pgAdmin's Query Tool and run them there. Make sure the Query Tool is connected to `budget_system` first.
@@ -146,7 +148,7 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 
 ## Backend setup
 
-```bash
+```powershell
 python -m pip install -r backend/requirements.txt
 python -m pip install -r backend/requirements-dev.txt
 $env:PYTHONPATH="backend"
@@ -227,7 +229,7 @@ Recommended for anyone working on Ask AI, the review/commit flow or the PR-line 
    - Linux: `sudo apt install postgresql-<major version>-pgvector`
 2. Create the RAG tables. This is non-destructive and safe on a database with data:
    ```powershell
-   psql "$env:DATABASE_URL" -f backend/migrations/add_rag_knowledge.sql
+   psql -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -f backend/migrations/add_rag_knowledge.sql
    ```
    If it fails with `extension "vector" is not available`, step 1 didn't install into the Postgres server you're connecting to.
 3. Install the free local embedding model's package:
@@ -294,7 +296,7 @@ npm --prefix frontend run type-check
 npm --prefix frontend run build
 ```
 
-```bash
+```powershell
 $env:PYTHONPATH="backend"
 python -m pytest backend/app/tests
 ```
