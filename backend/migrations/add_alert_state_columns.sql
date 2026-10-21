@@ -3,38 +3,32 @@
 -- labs.lab_group_id nullable (Randy). Non-destructive, idempotent, no data.
 -- Needs budget_periods and add_schema_migrations.sql.
 --
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f backend/migrations/add_alert_state_columns.sql
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/migrations/add_alert_state_columns.sql
 --
 -- Aborts (and rolls back) if existing alert_period_id values point at a
 -- period that does not exist. Fix or NULL those rows, then re-run.
 -- =============================================================================
 DO $$
+DECLARE
+  t text;
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables 
-    WHERE table_schema = current_schema() AND table_name = 'labs'
-  ) THEN
-    RAISE EXCEPTION 'Prerequisite table labs does not exist. Run db_setup.sql first.';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables 
-    WHERE table_schema = current_schema() AND table_name = 'lab_groups'
-  ) THEN
-    RAISE EXCEPTION 'Prerequisite table lab_groups does not exist. Run db_setup.sql first.';
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-    -- 1. Ensure the schema_migrations table exists
+  FOREACH t IN ARRAY ARRAY['labs', 'lab_groups', 'budget_periods']
+  LOOP
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.tables 
-        WHERE table_schema = current_schema() 
-          AND table_name = 'schema_migrations'
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = t
     ) THEN
-        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
+      RAISE EXCEPTION 'Prerequisite table % does not exist. Run db_setup.sql first.', t;
     END IF;
+  END LOOP;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+  ) THEN
+    RAISE EXCEPTION 'schema_migrations table does not exist. Run add_schema_migrations.sql first.';
+  END IF;
 END $$;
 
 BEGIN;
@@ -90,6 +84,7 @@ BEGIN
   END IF;
 END $$;
 
+-- Record the migration last, after every schema change above has succeeded.
 INSERT INTO schema_migrations (migration_name)
 VALUES ('add_alert_state_columns')
 ON CONFLICT (migration_name) DO NOTHING;

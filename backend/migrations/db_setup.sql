@@ -2,6 +2,10 @@
 -- STEP 2 OF 2 — Run this second, connected to the 'budget_system' database
 --               (switch to it in pgAdmin's connection dropdown, then run this)
 --
+-- Run (stops at the first error; the whole reset is one transaction):
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -c "SET app.allow_reset = 'yes'" -f backend/db_setup.sql
+--
 -- Sections: 1. Access Control  2. Lab Hierarchy & Mapping
 --           3. Categories & Budgeting  4. Upload & Staging
 --           5. Review Workflow  6. Finalized Transaction Storage
@@ -15,6 +19,8 @@ BEGIN
     RAISE EXCEPTION 'db_setup.sql is DESTRUCTIVE. Run SET app.allow_reset = ''yes''; first.';
   END IF;
 END $$;
+
+BEGIN;
 -- -----------------------------------------------------------------------------
 -- Drop all tables if they exist (reverse dependency order to avoid FK errors)
 -- -----------------------------------------------------------------------------
@@ -492,14 +498,9 @@ CREATE TABLE schema_migrations (
     applied_at      timestamptz  NOT NULL DEFAULT now(),
     applied_by      text         NOT NULL DEFAULT current_user
 );
-INSERT INTO schema_migrations (migration_name) VALUES 
-  ('add_schema_migrations'),
-  ('migrate_lab_ic_to_assignments'),
-  ('add_password_reset_tokens'),
-  ('add_pr_status_columns'),
-  ('add_alert_state_columns')
-ON CONFLICT (migration_name) DO NOTHING;
---missing columns added
+
+-- Columns added after the original tables (same as add_alert_state_columns.sql
+-- and add_pr_status_columns.sql).
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_50 boolean DEFAULT false;
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_80 boolean DEFAULT false;
 ALTER TABLE lab_groups ADD COLUMN IF NOT EXISTS notified_95 boolean DEFAULT false;
@@ -518,3 +519,14 @@ ALTER TABLE labs ADD CONSTRAINT fk_labs_alert_period FOREIGN KEY (alert_period_i
 
 ALTER TABLE purchase_requests      ADD COLUMN IF NOT EXISTS pr_status varchar(50);
 ALTER TABLE purchase_request_lines ADD COLUMN IF NOT EXISTS pr_status varchar(50);
+
+-- Record applied migrations last, after every schema change above succeeded.
+INSERT INTO schema_migrations (migration_name) VALUES
+  ('add_schema_migrations'),
+  ('migrate_lab_ic_to_assignments'),
+  ('add_password_reset_tokens'),
+  ('add_pr_status_columns'),
+  ('add_alert_state_columns')
+ON CONFLICT (migration_name) DO NOTHING;
+
+COMMIT;

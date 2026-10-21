@@ -2,9 +2,10 @@
 -- Lab IC assignments: many-to-many (replaces users.lab_id AND labs.user_id).
 -- Run once on existing DBs (fresh DBs built from db_setup.sql already have it).
 -- Safe to re-run. Replaces migrate_lab_ic_to_labs.sql -- do NOT run both.
+-- Needs add_schema_migrations.sql to have been run.
 --
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f migrate_lab_ic_to_assignments.sql
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/migrations/migrate_lab_ic_to_assignments.sql
 --
 -- Works from either starting point:
 --   (a) old model:  users.lab_id        (several users could share a lab)
@@ -21,17 +22,27 @@
 --   old_value / new_value = {"is_active": <bool>}
 -- =============================================================================
 DO $$
+DECLARE
+  t text;
 BEGIN
-    -- 1. Ensure the schema_migrations table exists
+  FOREACH t IN ARRAY ARRAY['users', 'labs', 'audit_logs']
+  LOOP
     IF NOT EXISTS (
-        SELECT 1 FROM information_schema.tables 
-        WHERE table_schema = current_schema() 
-          AND table_name = 'schema_migrations'
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = t
     ) THEN
-        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
+      RAISE EXCEPTION 'Prerequisite table % does not exist. Run db_setup.sql first.', t;
     END IF;
+  END LOOP;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+  ) THEN
+    RAISE EXCEPTION 'schema_migrations table does not exist. Run add_schema_migrations.sql first.';
+  END IF;
 END $$;
+
 BEGIN;
 
 -- 1. users.is_active (some DBs only got it from the seed scripts).
@@ -102,7 +113,10 @@ BEGIN
     RAISE NOTICE 'Migrated % assignment(s) from users.lab_id.', n_users;
   END IF;
 END $$;
+
+-- Record the migration last, after the backfill and column drops succeeded.
 INSERT INTO schema_migrations (migration_name)
 VALUES ('migrate_lab_ic_to_assignments')
 ON CONFLICT (migration_name) DO NOTHING;
+
 COMMIT;

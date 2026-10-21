@@ -3,16 +3,28 @@
 -- Non-destructive, idempotent, inserts no data. Needs
 -- add_schema_migrations.sql to have been run.
 --
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f backend/migrations/add_pr_status_columns.sql
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/migrations/add_pr_status_columns.sql
 -- =============================================================================
 DO $$
+DECLARE
+  t text;
 BEGIN
+  FOREACH t IN ARRAY ARRAY['purchase_requests', 'purchase_request_lines']
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = t
+    ) THEN
+      RAISE EXCEPTION 'Prerequisite table % does not exist. Run db_setup.sql first.', t;
+    END IF;
+  END LOOP;
+
   IF NOT EXISTS (
-    SELECT 1 FROM information_schema.tables 
-    WHERE table_schema = current_schema() AND table_name = 'purchase_requests'
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
   ) THEN
-    RAISE EXCEPTION 'Prerequisite table purchase_requests does not exist. Run db_setup.sql first.';
+    RAISE EXCEPTION 'schema_migrations table does not exist. Run add_schema_migrations.sql first.';
   END IF;
 END $$;
 

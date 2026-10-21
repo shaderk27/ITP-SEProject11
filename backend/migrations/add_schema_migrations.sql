@@ -3,16 +3,16 @@
 -- Non-destructive, idempotent, inserts no demo data. Safe to re-run.
 -- Run this FIRST on any existing database.
 --
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f backend/migrations/add_schema_migrations.sql
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/migrations/add_schema_migrations.sql
 --   (or paste into pgAdmin's Query Tool on budget_system)
 --
 -- Show what a database has applied:
 --   SELECT * FROM schema_migrations ORDER BY applied_at;
 --
 -- Convention: migration_name = the file name without ".sql". Every migration
--- file ends by recording itself inside its own transaction, so a failed
--- migration is never recorded.
+-- file ends by recording itself inside its own transaction, as its very last
+-- statement before COMMIT, so a failed migration is never recorded.
 -- =============================================================================
 
 BEGIN;

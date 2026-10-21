@@ -1,13 +1,33 @@
--- ===========================================================
+-- =============================================================================
 -- Dev seed for Lab Budget Monitoring System
 -- Safe to re-run: every insert checks for existence first.
+-- All-or-nothing: runs in one transaction, and stops at the first error.
+-- Needs db_setup.sql (or the migrations) to have been run first.
+--
 -- Run from project root:
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f backend/seeds/dev_seed.sql
--- ===========================================================
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/seeds/dev_seed.sql
+-- =============================================================================
 
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'roles', 'budget_periods', 'spending_categories',
+    'lab_groups', 'labs', 'users'
+  ]
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = t
+    ) THEN
+      RAISE EXCEPTION 'Prerequisite table % does not exist. Run db_setup.sql first.', t;
+    END IF;
+  END LOOP;
+END $$;
 
-
+BEGIN;
 
 -- ----- 1. Roles -----
 INSERT INTO roles (role_name) VALUES
@@ -125,3 +145,5 @@ SELECT
   'placeholder_no_auth_yet',
   NULL
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'labic@test.com');
+
+COMMIT;

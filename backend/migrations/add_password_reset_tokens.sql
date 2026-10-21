@@ -3,8 +3,8 @@
 -- Non-destructive, idempotent, inserts no data. Needs users to exist and
 -- add_schema_migrations.sql to have been run.
 --
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f backend/migrations/add_password_reset_tokens.sql
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/migrations/add_password_reset_tokens.sql
 --
 -- Ends in the same shape as db_setup.sql: temp_password and expires_at have NO
 -- default (the backfill defaults below are dropped again), so fresh and
@@ -12,17 +12,20 @@
 -- =============================================================================
 DO $$
 BEGIN
-    -- 1. Ensure the schema_migrations table exists
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.tables 
-        WHERE table_schema = current_schema() 
-          AND table_name = 'schema_migrations'
-    ) THEN
-        RAISE NOTICE 'schema_migrations table does not exist yet. Please run add_schema_migrations.sql first.';
-    END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'users'
+  ) THEN
+    RAISE EXCEPTION 'Prerequisite table users does not exist. Run db_setup.sql first.';
+  END IF;
 
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+  ) THEN
+    RAISE EXCEPTION 'schema_migrations table does not exist. Run add_schema_migrations.sql first.';
+  END IF;
 END $$;
-
 
 BEGIN;
 
