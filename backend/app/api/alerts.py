@@ -12,7 +12,13 @@ from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
 from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
-from app.models.staging import PurchaseRequest, PurchaseRequestLine, UploadBatch
+from app.models.staging import (
+    PurchaseRequest,
+    PurchaseRequestLine,
+    StagingPRHeader,
+    StagingPRLine,
+    UploadBatch,
+)
 from app.utils.date_range import date_range_bounds
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
@@ -359,8 +365,17 @@ def get_alert_drilldown(
                 PurchaseRequest.pr_id == PurchaseRequestLine.pr_id,
             )
             .outerjoin(
+                StagingPRLine,
+                StagingPRLine.staging_line_id
+                == PurchaseRequestLine.source_staging_line_id,
+            )
+            .outerjoin(
+                StagingPRHeader,
+                StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+            )
+            .outerjoin(
                 UploadBatch,
-                UploadBatch.batch_id == PurchaseRequest.latest_batch_id,
+                UploadBatch.batch_id == StagingPRHeader.batch_id,
             )
             .filter(
                 PurchaseRequestLine.lab_id.in_(lab_ids),
@@ -457,7 +472,7 @@ def get_alert_drilldown(
                 cat_committed = Decimal("0")
                 out_lines: list[DrilldownPRLine] = []
 
-                for pr_line, pr_header, _ in lines_by_lab_cat.get((lid, cid), []):
+                for pr_line, pr_header, batch in lines_by_lab_cat.get((lid, cid), []):
                     amt = _to_decimal(pr_line.amount_gst)
                     status_lower = (pr_line.pr_status or "").lower()
                     if status_lower.startswith("approved"):
@@ -487,7 +502,11 @@ def get_alert_drilldown(
                             ),
                             amount_gst=str(amt),
                             pr_status=pr_line.pr_status,
-                            latest_batch_id=pr_header.latest_batch_id,
+                            latest_batch_id=(
+                                batch.batch_id
+                                if batch is not None
+                                else pr_header.latest_batch_id
+                            ),
                             is_triggering_line=is_triggering,
                         )
                     )

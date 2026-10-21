@@ -100,7 +100,7 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
 ):
     """
     Tests that the Top-Down Lab Group Envelope triggers at 95% utilization
-    and gathers both the Team Leads and ALL underlying Lab IC emails.
+    and emails only the responsible active Team Leads.
     """
     mock_db = MagicMock()
     mock_session_local.return_value.__enter__.return_value = mock_db
@@ -121,9 +121,6 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
     )
 
     fake_lead = User(email="dept_lead@test.com", role_id=2, is_active=True)
-    fake_ic_1 = User(email="ic_lab1@test.com", role_id=3, is_active=True)
-    fake_ic_2 = User(email="ic_lab2@test.com", role_id=3, is_active=True)
-
     # Master Envelope is 100,000, Total Department Spent is 97,000 (97%)
     scalar_mock = MagicMock(side_effect=[100000, 97000])
 
@@ -135,13 +132,7 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
         elif model is BudgetPeriod:
             query_mock.filter.return_value.first.return_value = fake_period
         elif model is User:
-            # 1st call retrieves Team Leads (.all())
             query_mock.filter.return_value.all.return_value = [fake_lead]
-            # 2nd call retrieves Lab ICs via lab_ic_assignments -> labs (.all())
-            query_mock.join.return_value.join.return_value.filter.return_value.all.return_value = [
-                fake_ic_1,
-                fake_ic_2,
-            ]
         else:
             query_mock.filter.return_value.scalar = scalar_mock
             query_mock.join.return_value.join.return_value.filter.return_value.scalar = scalar_mock
@@ -159,10 +150,7 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
     args, _ = mock_send_email.call_args
 
     recipients = args[0]
-    assert len(recipients) == 3
-    assert "dept_lead@test.com" in recipients
-    assert "ic_lab1@test.com" in recipients
-    assert "ic_lab2@test.com" in recipients
+    assert recipients == ["dept_lead@test.com"]
 
     assert "95%" in args[1]
     assert "CRITICAL" in args[1]
