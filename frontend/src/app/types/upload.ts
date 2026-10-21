@@ -29,7 +29,7 @@ export interface UploadLineItem {
 }
 
 export interface UploadRecordResult {
-  status: "inserted" | "updated" | "duplicate";
+  status: "inserted" | "updated" | "duplicate" | "status_regression";
   reason: string;
   line: UploadLineItem;
   previous_batch_id: string | null;
@@ -60,11 +60,13 @@ export interface UploadProcessResult {
     reupload_updated: number;
     needs_review: number;
     rejected: number;
+    status_regressions_skipped?: number;
   };
   validation_errors: UploadValidationError[];
   records: {
     inserted: UploadRecordResult[];
     updated: UploadRecordResult[];
     duplicate: UploadRecordResult[];
+    status_regression?: UploadRecordResult[];
   };
 }

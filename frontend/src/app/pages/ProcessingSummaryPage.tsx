@@ -52,6 +52,7 @@ export function ProcessingSummaryPage() {
         rejected: result.counts.rejected,
       }
     : uploadResult;
+  const statusRegressions = result?.counts.status_regressions_skipped ?? 0;
   const acceptedRows = result
     ? result.records.inserted.map((record) => [
         record.line.pr_number,
@@ -94,6 +95,14 @@ export function ProcessingSummaryPage() {
         record.previous_batch_id ?? "Previous upload",
       ])
     : sampleLines.duplicates.map((line) => [line.pr, "-", line.line, line.identity, line.uploadedBefore]);
+  const regressionRows = (result?.records.status_regression ?? []).map((record) => [
+    record.line.pr_number,
+    record.line.pr_status || "-",
+    `Row ${record.line.row_number}`,
+    record.line.item_details,
+    record.reason,
+    record.line.amount_gst,
+  ]);
   const reviewRows = result
     ? [...result.records.inserted, ...result.records.updated]
         .filter((record) => {
@@ -139,6 +148,14 @@ export function ProcessingSummaryPage() {
           title="File Processing Complete"
           message="Uploaded rows were parsed as PR line items. Lines with unresolved Lab Group, Lab, or Category values are held for review."
         />
+
+        {statusRegressions > 0 && (
+          <SystemNotification
+            type="warning"
+            title={`Approved status protected on ${statusRegressions} line${statusRegressions === 1 ? "" : "s"}`}
+            message="These lines are already Approved in the final records. Approved status is final, so the different status in this file (for example Pending, Rejected, Cancelled or blank) will be skipped when the batch is committed. Every other line is processed normally."
+          />
+        )}
 
         <DuplicateWarning count={displayCounts.duplicateSkipped + displayCounts.reuploadUpdated} />
 
@@ -188,6 +205,11 @@ export function ProcessingSummaryPage() {
                 <TabsTrigger value="duplicates" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
                   Duplicate Skips ({displayCounts.duplicateSkipped})
                 </TabsTrigger>
+                {statusRegressions > 0 && (
+                  <TabsTrigger value="regressions" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
+                    Approved Protected ({statusRegressions})
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="review" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
                   Needs Review ({displayCounts.needsReview})
                 </TabsTrigger>
@@ -215,6 +237,13 @@ export function ProcessingSummaryPage() {
               <SummaryTable
                 columns={["PR", "PR Status", "Line", "Reason", "Previously Uploaded"]}
                 rows={duplicateRows}
+              />
+            </TabsContent>
+
+            <TabsContent value="regressions" className="p-6">
+              <SummaryTable
+                columns={["PR", "Incoming Status", "Line", "Item", "Reason", "Amount"]}
+                rows={regressionRows}
               />
             </TabsContent>
 
