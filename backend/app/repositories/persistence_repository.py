@@ -84,7 +84,8 @@ def persist_upload_to_db(
     headers_inserted = 0
     lines_inserted = 0
     queue_items_inserted = 0
-    status_regressions_flagged = 0
+    # Source row number -> accepted final status, for lines commit will skip.
+    status_regression_rows: dict[int, str] = {}
 
     # ─── 3. For each unique PR: write header + its lines ──────────────────
     for pr_number, pr_items in items_by_pr.items():
@@ -164,7 +165,7 @@ def persist_upload_to_db(
                 existing_final_line.pr_status, item.pr_status
             ):
                 duplicate_status = "status_regression"
-                status_regressions_flagged += 1
+                status_regression_rows[item.row_number] = existing_final_line.pr_status
 
             line = StagingPRLine(
                 staging_header_id=header.staging_header_id,
@@ -231,7 +232,7 @@ def persist_upload_to_db(
         "headers_inserted": headers_inserted,
         "lines_inserted": lines_inserted,
         "queue_items_inserted": queue_items_inserted,
-        "status_regressions_flagged": status_regressions_flagged,
+        "status_regression_rows": status_regression_rows,
     }
 
 

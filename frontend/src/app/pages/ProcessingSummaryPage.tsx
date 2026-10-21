@@ -95,6 +95,14 @@ export function ProcessingSummaryPage() {
         record.previous_batch_id ?? "Previous upload",
       ])
     : sampleLines.duplicates.map((line) => [line.pr, "-", line.line, line.identity, line.uploadedBefore]);
+  const regressionRows = (result?.records.status_regression ?? []).map((record) => [
+    record.line.pr_number,
+    record.line.pr_status || "-",
+    `Row ${record.line.row_number}`,
+    record.line.item_details,
+    record.reason,
+    record.line.amount_gst,
+  ]);
   const reviewRows = result
     ? [...result.records.inserted, ...result.records.updated]
         .filter((record) => {
@@ -197,6 +205,11 @@ export function ProcessingSummaryPage() {
                 <TabsTrigger value="duplicates" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
                   Duplicate Skips ({displayCounts.duplicateSkipped})
                 </TabsTrigger>
+                {statusRegressions > 0 && (
+                  <TabsTrigger value="regressions" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
+                    Status Regressions ({statusRegressions})
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="review" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
                   Needs Review ({displayCounts.needsReview})
                 </TabsTrigger>
@@ -224,6 +237,13 @@ export function ProcessingSummaryPage() {
               <SummaryTable
                 columns={["PR", "PR Status", "Line", "Reason", "Previously Uploaded"]}
                 rows={duplicateRows}
+              />
+            </TabsContent>
+
+            <TabsContent value="regressions" className="p-6">
+              <SummaryTable
+                columns={["PR", "Incoming Status", "Line", "Item", "Reason", "Amount"]}
+                rows={regressionRows}
               />
             </TabsContent>
 

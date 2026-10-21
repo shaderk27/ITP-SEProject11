@@ -228,6 +228,19 @@ def test_mixed_batch_only_regressing_line_skipped(db, admin_user, tmp_path):
         ],
     )
     assert upload["counts"]["status_regressions_skipped"] == 1
+    # Fresh JSON store: all three look new, but the skipped one is listed
+    # in its own bucket, not under accepted.
+    assert upload["counts"]["accepted"] == 2
+    assert [r["line"]["pr_number"] for r in upload["records"]["inserted"]] == [
+        PR_B,
+        PR_C,
+    ]
+    regressions = upload["records"]["status_regression"]
+    assert [r["line"]["pr_number"] for r in regressions] == [PR_A]
+    assert regressions[0]["status"] == "status_regression"
+    assert "Already Approved" in regressions[0]["reason"]
+    assert "status_regression_rows" not in upload["persistence"]
+
     response, _ = _commit(db, admin_user, upload)
 
     assert response.status_regressions_skipped == 1
@@ -273,15 +286,21 @@ def test_exact_duplicate_keeps_duplicate_behaviour(db, admin_user, tmp_path):
     upload = _upload(db, admin_user, tmp_path, [_row(PR_A, "Approved")], store)
     assert upload["counts"]["duplicate_skipped"] == 1
     assert upload["counts"]["status_regressions_skipped"] == 0
+    assert upload["records"]["status_regression"] == []
     assert upload["persistence"] == {}
 
 
 def test_guard_works_with_populated_json_store(db, admin_user, tmp_path):
     store = tmp_path / "shared.json"
     _pending_then_approved(db, admin_user, tmp_path, store)
-    response, _ = _upload_commit(
-        db, admin_user, tmp_path, [_row(PR_A, "Pending")], store
-    )
+    upload = _upload(db, admin_user, tmp_path, [_row(PR_A, "Pending")], store)
+    # The JSON store calls it a reupload update; it is moved out of that list.
+    assert upload["counts"]["reupload_updated"] == 0
+    assert upload["records"]["updated"] == []
+    assert len(upload["records"]["status_regression"]) == 1
+    assert upload["counts"]["status_regressions_skipped"] == 1
+
+    response, _ = _commit(db, admin_user, upload)
     assert response.status_regressions_skipped == 1
     assert _pr(db, PR_A).pr_status == "Approved"
 
@@ -300,3 +319,50 @@ def test_reviewed_classification_unchanged(db, admin_user, tmp_path, seed_refs):
     assert line.pr_status == "Approved"
     assert line.lab_id == seed_refs["lab_id"]
     assert line.category_id == seed_refs["category_id"]
+
+
+def test_multi_file_upload_combines_regressions(db, admin_user, tmp_path):
+    from app.api.upload import _combine_batch_results
+
+    _pending_then_approved(db, admin_user, tmp_path)
+    first = _upload(db, admin_user, tmp_path, [_row(PR_A, "Pending")])
+    second = _upload(db, admin_user, tmp_path, [_row(PR_B, "Pending")])
+
+    combined = _combine_batch_results(
+        [first, second], admin_user.email, admin_user.full_name, "admin"
+    )
+    assert combined["counts"]["status_regressions_skipped"] == 1
+    assert combined["counts"]["accepted"] == 1
+    assert [
+        r["line"]["pr_number"] for r in combined["records"]["status_regression"]
+    ] == [PR_A]
+    assert [r["line"]["pr_number"] for r in combined["records"]["inserted"]] == [PR_B]
+
+
+def test_move_status_regressions_rebuckets_and_sorts():
+    def rec(row, status="Pending"):
+        return {
+            "status": "x",
+            "reason": "",
+            "line": {"row_number": row, "pr_status": status},
+        }
+
+    records = {
+        "inserted": [rec(2), rec(7)],
+        "updated": [rec(3, "Pending Procurement Review"), rec(5)],
+        "duplicate": [],
+        "status_regression": [],
+    }
+    UploadService._move_status_regressions(
+        records, {7: "Approved", 3: "Approved (SVP)"}
+    )
+
+    assert [r["line"]["row_number"] for r in records["inserted"]] == [2]
+    assert [r["line"]["row_number"] for r in records["updated"]] == [5]
+    moved = records["status_regression"]
+    assert [r["line"]["row_number"] for r in moved] == [3, 7]
+    assert moved[0]["reason"] == (
+        "Already Approved (SVP) in final records; this file says "
+        "Pending Procurement Review. Skipped at commit."
+    )
+    assert all(r["status"] == "status_regression" for r in moved)

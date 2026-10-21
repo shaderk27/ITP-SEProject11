@@ -139,7 +139,12 @@ def _combine_batch_results(
             "status_regressions_skipped": 0,
         },
         "validation_errors": [],
-        "records": {"inserted": [], "updated": [], "duplicate": []},
+        "records": {
+            "inserted": [],
+            "updated": [],
+            "duplicate": [],
+            "status_regression": [],
+        },
     }
 
     for result in results:
@@ -151,6 +156,6 @@ def _combine_batch_results(
                 {**error, "field": f"{filename} - {error['field']}"}
             )
         for status in combined["records"]:
-            combined["records"][status].extend(result["records"][status])
+            combined["records"][status].extend(result["records"].get(status, []))
 
     return combined

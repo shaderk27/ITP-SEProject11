@@ -75,7 +75,12 @@ class UploadService:
         store = self.repository.load_store()
         self.repository.save_batch_metadata(metadata, store)
 
-        records = {"inserted": [], "updated": [], "duplicate": []}
+        records: dict[str, list[dict]] = {
+            "inserted": [],
+            "updated": [],
+            "duplicate": [],
+            "status_regression": [],
+        }
         needs_review_count = 0
 
         # Lookups for classification mapping
@@ -252,6 +257,9 @@ class UploadService:
             needs_review_count = persistence_counts.get(
                 "queue_items_inserted", needs_review_count
             )
+            self._move_status_regressions(
+                records, persistence_counts.pop("status_regression_rows", {})
+            )
 
         return {
             "success": True,
@@ -264,9 +272,7 @@ class UploadService:
                 "reupload_updated": len(records["updated"]),
                 "needs_review": needs_review_count,
                 "rejected": 0,
-                "status_regressions_skipped": persistence_counts.get(
-                    "status_regressions_flagged", 0
-                ),
+                "status_regressions_skipped": len(records["status_regression"]),
             },
             "validation_errors": [],
             "records": records,
@@ -288,5 +294,33 @@ class UploadService:
                 "status_regressions_skipped": 0,
             },
             "validation_errors": errors,
-            "records": {"inserted": [], "updated": [], "duplicate": []},
+            "records": {
+                "inserted": [],
+                "updated": [],
+                "duplicate": [],
+                "status_regression": [],
+            },
         }
+
+    @staticmethod
+    def _move_status_regressions(
+        records: dict[str, list[dict]], accepted_by_row: dict[int, str]
+    ) -> None:
+        """Re-bucket rows the DB check says commit will skip (W17), so the
+        summary doesn't list them as accepted or updated."""
+        for bucket in ("inserted", "updated"):
+            kept = []
+            for record in records[bucket]:
+                accepted = accepted_by_row.get(record["line"].get("row_number"))
+                if accepted is None:
+                    kept.append(record)
+                    continue
+                record["status"] = "status_regression"
+                record["reason"] = (
+                    f"Already {accepted} in final records; this file says "
+                    f"{record['line'].get('pr_status') or 'Pending'}. "
+                    "Skipped at commit."
+                )
+                records["status_regression"].append(record)
+            records[bucket] = kept
+        records["status_regression"].sort(key=lambda r: r["line"].get("row_number", 0))
