@@ -110,7 +110,7 @@ export function ReviewQueuePage() {
         `Batch #${result.batch_id} committed: ${prSummary}` +
           ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.` +
           (skipped > 0
-            ? ` ${skipped} status regression${skipped === 1 ? "" : "s"} skipped (Approved lines kept as Approved).`
+            ? ` Approved status protected on ${skipped} line${skipped === 1 ? "" : "s"} (incoming status change skipped).`
             : ""),
       );
       await fetchBatches();

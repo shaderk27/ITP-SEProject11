@@ -316,10 +316,11 @@ class UploadService:
                     kept.append(record)
                     continue
                 record["status"] = "status_regression"
+                incoming = record["line"].get("pr_status") or "a blank status"
                 record["reason"] = (
                     f"Already {accepted} in final records; this file says "
-                    f"{record['line'].get('pr_status') or 'Pending'}. "
-                    "Skipped at commit."
+                    f"{incoming}. Approved status is final, so this line is "
+                    "skipped at commit."
                 )
                 records["status_regression"].append(record)
             records[bucket] = kept

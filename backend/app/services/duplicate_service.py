@@ -10,14 +10,15 @@ def _status_word(status: str | None) -> str:
 def is_status_regression(
     accepted_status: str | None, incoming_status: str | None
 ) -> bool:
-    """True when a committed Approved line would go back to Pending.
+    """True when a committed Approved line would change to a non-Approved status.
 
-    Source variants such as "Approved (SVP)" and "Pending Procurement Review"
-    count as Approved / Pending. Other transitions are not guarded.
+    Approval is final: once the accepted status starts with "approved"
+    (e.g. "Approved (SVP)"), Pending, Rejected, Cancelled, blank or any other
+    status is refused. Another Approved variant may still replace it.
     """
-    return _status_word(accepted_status).startswith("approved") and _status_word(
+    return _status_word(accepted_status).startswith("approved") and not _status_word(
         incoming_status
-    ).startswith("pending")
+    ).startswith("approved")
 
 
 @dataclass(frozen=True)

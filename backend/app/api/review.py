@@ -774,7 +774,8 @@ def commit_batch(
             line_identity_key = _raw_line_value(line, "line_identity_key")
             existing_line = existing_lines_by_identity.get(line_identity_key)
 
-            # W17: a committed Approved line never goes back to Pending by upload.
+            # W17: approval is final; an upload cannot move an Approved line
+            # to any non-Approved status.
             incoming_status = _raw_line_value(line, "pr_status")
             if existing_line and is_status_regression(
                 existing_line.pr_status, incoming_status

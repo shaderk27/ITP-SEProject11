@@ -1,7 +1,8 @@
 """
-W17 status-regression guard: a committed Approved PR line must not go back to
-Pending through a later upload. Only the regressing line is skipped; the rest
-of the batch commits normally.
+W17 Approved status protection: once a committed PR line is Approved (any
+"Approved..." variant), a later upload cannot change it to Pending, Rejected,
+Cancelled, blank or any other non-Approved status. Only that line is skipped;
+the rest of the batch commits normally.
 
 Runs the real path: UploadService -> persist_upload_to_db -> commit_batch on
 PostgreSQL, inside the conftest.db savepoint so nothing persists. Each upload
@@ -15,6 +16,7 @@ from io import BytesIO
 from uuid import uuid4
 
 import pandas as pd
+import pytest
 from fastapi import BackgroundTasks
 
 from app.api.review import commit_batch
@@ -105,15 +107,26 @@ def _pending_then_approved(db, user, tmp_path, store=None):
 
 
 def test_is_status_regression_variants():
+    # Approved -> anything non-Approved is blocked.
     assert is_status_regression("Approved", "Pending")
     assert is_status_regression("Approved (SVP)", "Pending Procurement Review")
     assert is_status_regression(" approved (finance) ", "PENDING")
-    assert not is_status_regression("Pending", "Approved")
+    assert is_status_regression("Approved", "Rejected")
+    assert is_status_regression("Approved (Procurement)", " cancelled ")
+    assert is_status_regression("Approved", "On Hold")
+    assert is_status_regression("Approved", "")
+    assert is_status_regression("Approved", "   ")
+    assert is_status_regression("Approved", None)
+    # Approved -> another Approved variant, and anything -> Approved, may proceed.
     assert not is_status_regression("Approved", "Approved (SVP)")
-    assert not is_status_regression("Approved", "Rejected")
+    assert not is_status_regression("APPROVED (SVP)", " approved ")
+    assert not is_status_regression("Pending", "Approved")
+    assert not is_status_regression("Rejected", "Approved (Finance)")
+    # Nothing is protected until a line is Approved.
     assert not is_status_regression("Rejected", "Pending")
+    assert not is_status_regression("Pending", "Rejected")
     assert not is_status_regression(None, "Pending")
-    assert not is_status_regression("Approved", None)
+    assert not is_status_regression("", "Cancelled")
 
 
 # ─── Core scenario ───────────────────────────────────────────────────────
@@ -203,11 +216,94 @@ def test_approved_variant_protected_from_pending_variant(db, admin_user, tmp_pat
     assert pr.lines[0].pr_status == "Approved (SVP)"
 
 
-def test_other_transitions_keep_current_behaviour(db, admin_user, tmp_path):
+@pytest.mark.parametrize(
+    "incoming", ["Pending", "Rejected", "Cancelled", "On Hold", "rejected (finance)"]
+)
+def test_approved_is_final_against_any_other_status(db, admin_user, tmp_path, incoming):
     _upload_commit(db, admin_user, tmp_path, [_row(PR_A, "Approved")])
-    response, _ = _upload_commit(db, admin_user, tmp_path, [_row(PR_A, "Rejected")])
+    upload = _upload(db, admin_user, tmp_path, [_row(PR_A, incoming)])
+    assert upload["counts"]["status_regressions_skipped"] == 1
+    assert upload["counts"]["accepted"] == 0
+    assert incoming in upload["records"]["status_regression"][0]["reason"]
+
+    response, tasks = _commit(db, admin_user, upload)
+    pr = _pr(db, PR_A)
+
+    assert response.status_regressions_skipped == 1
+    assert pr.pr_status == "Approved"
+    assert [line.pr_status for line in pr.lines] == ["Approved"]
+    assert tasks.tasks == []
+
+    version = (
+        db.query(PRVersion).filter_by(pr_id=pr.pr_id, batch_id=response.batch_id).one()
+    )
+    skipped = version.new_data["status_regressions_skipped"]
+    assert [(s["accepted_status"], s["attempted_status"]) for s in skipped] == [
+        ("Approved", incoming)
+    ]
+    audit = (
+        db.query(AuditLog)
+        .filter_by(action_type="BATCH_COMMITTED", record_id=str(response.batch_id))
+        .one()
+    )
+    assert audit.new_value["status_regressions_skipped"] == 1
+
+
+def test_approved_to_another_approved_variant_proceeds(db, admin_user, tmp_path):
+    _upload_commit(db, admin_user, tmp_path, [_row(PR_A, "Approved")])
+    response, _ = _upload_commit(
+        db, admin_user, tmp_path, [_row(PR_A, "Approved (Finance)")]
+    )
+    pr = _pr(db, PR_A)
     assert response.status_regressions_skipped == 0
-    assert _pr(db, PR_A).pr_status == "Rejected"
+    assert pr.pr_status == "Approved (Finance)"
+    assert [line.pr_status for line in pr.lines] == ["Approved (Finance)"]
+
+
+def test_rejected_to_approved_proceeds(db, admin_user, tmp_path):
+    _upload_commit(db, admin_user, tmp_path, [_row(PR_A, "Rejected")])
+    response, _ = _upload_commit(db, admin_user, tmp_path, [_row(PR_A, "Approved")])
+    pr = _pr(db, PR_A)
+    assert response.status_regressions_skipped == 0
+    assert pr.pr_status == "Approved"
+    assert [line.pr_status for line in pr.lines] == ["Approved"]
+
+
+def test_blank_status_upload_is_rejected_by_validation(db, admin_user, tmp_path):
+    """A blank PR Status never reaches commit through the upload page."""
+    _upload_commit(db, admin_user, tmp_path, [_row(PR_A, "Approved")])
+    upload = _upload(db, admin_user, tmp_path, [_row(PR_A, "")])
+    assert upload["success"] is False
+    assert any("PR Status" in e["field"] for e in upload["validation_errors"])
+    assert _pr(db, PR_A).pr_status == "Approved"
+
+
+def _set_status(batch, db, status: str) -> None:
+    for header in db.query(StagingPRHeader).filter_by(batch_id=batch.batch_id):
+        for line in db.query(StagingPRLine).filter_by(
+            staging_header_id=header.staging_header_id
+        ):
+            line.raw_line_json = {**line.raw_line_json, "pr_status": status}
+    db.flush()
+
+
+@pytest.mark.parametrize("incoming", ["", "   "])
+def test_blank_status_blocked_at_commit(db, admin_user, make_staging_batch, incoming):
+    """Commit is the authoritative check, even for a blank incoming status."""
+    approved = make_staging_batch(source_pr_number=PR_A)
+    _set_status(approved, db, "Approved (SVP)")
+    commit_batch(approved.batch_id, BackgroundTasks(), db=db, current_user=admin_user)
+
+    blank = make_staging_batch(source_pr_number=PR_A)
+    _set_status(blank, db, incoming)
+    response = commit_batch(
+        blank.batch_id, BackgroundTasks(), db=db, current_user=admin_user
+    )
+    pr = _pr(db, PR_A)
+
+    assert response.status_regressions_skipped == 1
+    assert pr.pr_status == "Approved (SVP)"
+    assert [line.pr_status for line in pr.lines] == ["Approved (SVP)"]
 
 
 # ─── Mixed batches ───────────────────────────────────────────────────────
@@ -363,6 +459,7 @@ def test_move_status_regressions_rebuckets_and_sorts():
     assert [r["line"]["row_number"] for r in moved] == [3, 7]
     assert moved[0]["reason"] == (
         "Already Approved (SVP) in final records; this file says "
-        "Pending Procurement Review. Skipped at commit."
+        "Pending Procurement Review. Approved status is final, so this line "
+        "is skipped at commit."
     )
     assert all(r["status"] == "status_regression" for r in moved)

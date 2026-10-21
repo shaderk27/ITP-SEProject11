@@ -152,8 +152,8 @@ export function ProcessingSummaryPage() {
         {statusRegressions > 0 && (
           <SystemNotification
             type="warning"
-            title={`${statusRegressions} status regression${statusRegressions === 1 ? "" : "s"} will be skipped`}
-            message="These lines are already Approved in the final records but say Pending in this file. They stay Approved when the batch is committed; every other line is processed normally."
+            title={`Approved status protected on ${statusRegressions} line${statusRegressions === 1 ? "" : "s"}`}
+            message="These lines are already Approved in the final records. Approved status is final, so the different status in this file (for example Pending, Rejected, Cancelled or blank) will be skipped when the batch is committed. Every other line is processed normally."
           />
         )}
 
@@ -207,7 +207,7 @@ export function ProcessingSummaryPage() {
                 </TabsTrigger>
                 {statusRegressions > 0 && (
                   <TabsTrigger value="regressions" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
-                    Status Regressions ({statusRegressions})
+                    Approved Protected ({statusRegressions})
                   </TabsTrigger>
                 )}
                 <TabsTrigger value="review" className="rounded-none data-[state=active]:border-b-2 data-[state=active]:border-[#1e3a8a]">
