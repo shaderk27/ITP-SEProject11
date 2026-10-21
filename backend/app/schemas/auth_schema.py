@@ -84,7 +84,6 @@ class CreateUserRequest(BaseModel):
     primary_lab_id: Optional[int] = Field(
         default=None, description="Lab ID to mark as primary for this user"
     )
-    auto_primary: bool = False
 
 
 class RoleResponse(BaseModel):

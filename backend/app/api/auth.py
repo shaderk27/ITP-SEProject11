@@ -142,7 +142,6 @@ async def create_user(
     request: Request,
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin),
-    
 ):
     res = service.create_user(
         full_name=payload.full_name,
@@ -154,7 +153,6 @@ async def create_user(
         lab_ids=payload.lab_ids,
         primary_lab_id=payload.primary_lab_id,
         creator_admin_id=admin.get("id"),
-        auto_primary=payload.auto_primary,
     )
     log_audit_action(
         db=service.db,

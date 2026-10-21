@@ -5,7 +5,6 @@ from typing import List, Optional, Dict, Any
 import os
 
 from fastapi import HTTPException, Response, status
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import jwt
 import bcrypt
@@ -305,8 +304,6 @@ class AuthService:
         self.db.refresh(user)
         return {"success": True, "message": "Profile updated successfully."}
 
-
-
     def create_user(
         self,
         full_name: str,
@@ -318,86 +315,88 @@ class AuthService:
         lab_id: Optional[int] = None,
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
-        auto_primary: bool = False,
         creator_admin_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Create a new user account and process lab assignments."""
         normalized_email = email.strip().lower()
 
-        # ---- validation (unchanged) ----
         if not self._is_allowed_email_domain(normalized_email):
-            ...
+            allowed = ", ".join(sorted(ALLOWED_EMAIL_DOMAINS))
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Email domain is not allowed. Allowed domains: {allowed}.",
+            )
+
         existing = self.repository.get_user_by_email(self.db, normalized_email)
         if existing:
-            ...
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An account with this email already exists.",
+            )
+
         role = self.repository.get_role_by_id(self.db, role_id)
         if not role:
-            ...
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Selected role does not exist.",
+            )
+
         role_name = role.role_name.lower()
         if role_name == "teamlead" and lab_group_id is None:
-            ...
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lab group is required for Team Lead users.",
+            )
+
         if role_name in ["admin", "labic"]:
             lab_group_id = None
-        if role_name == "teamlead" and lab_group_id is not None:
-            ...  # the "lab group already has a teamlead" check
 
-        # ---- NEW BLOCK STARTS HERE (replaces the old create + assignment code) ----
+        if role_name == "teamlead" and lab_group_id is not None:
+            assigned_user = self.repository.get_user_by_role_and_lab_group(
+                self.db, role_id, lab_group_id
+            )
+            if assigned_user:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"This lab group already has a {role.role_name} assigned "
+                        f"to {assigned_user.full_name}."
+                    ),
+                )
+
         password_hash = self._hash_password(password)
 
-        target_lab_ids: List[int] = []
+        user = self.repository.create_user(
+            db=self.db,
+            role_id=role_id,
+            full_name=full_name,
+            email=normalized_email,
+            password_hash=password_hash,
+            staff_id=staff_id,
+            lab_group_id=lab_group_id,
+        )
+
+        # Process multiple or single lab assignments for Lab IC users
         if role_name == "labic":
-            ids = set(lab_ids or [])
+            # Collect lab IDs to assign (supporting both list and single lab_id)
+            target_lab_ids = set(lab_ids or [])
             if lab_id is not None:
-                ids.add(lab_id)
-            target_lab_ids = sorted(ids)  # fixed order → consistent lock order, no deadlocks
+                target_lab_ids.add(lab_id)
 
-        use_auto_primary = auto_primary and primary_lab_id is None
-
-        try:
-            if use_auto_primary:
-                for lid in target_lab_ids:
-                    if self.repository.lock_lab(self.db, lid) is None:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Lab {lid} does not exist.",
-                        )
-
-            user = self.repository.create_user(
-                db=self.db,
-                role_id=role_id,
-                full_name=full_name,
-                email=normalized_email,
-                password_hash=password_hash,
-                staff_id=staff_id,
-                lab_group_id=lab_group_id,
-                commit=False,
+            # Determine primary lab (fallback to first lab if not explicitly provided)
+            effective_primary_id = primary_lab_id or (
+                next(iter(target_lab_ids)) if target_lab_ids else None
             )
 
-            if role_name == "labic":
-                effective_primary_id = primary_lab_id or (
-                    target_lab_ids[0] if target_lab_ids else None
+            for target_lab_id in target_lab_ids:
+                is_primary = target_lab_id == effective_primary_id
+                self.repository.assign_lab_to_user(
+                    db=self.db,
+                    user_id=user.user_id,
+                    lab_id=target_lab_id,
+                    is_primary=is_primary,
+                    assigned_by=creator_admin_id,
                 )
-                for lid in target_lab_ids:
-                    self.repository.assign_lab_to_user(
-                        db=self.db,
-                        user_id=user.user_id,
-                        lab_id=lid,
-                        # None → repository picks primary only if the lab has none yet
-                        is_primary=None if use_auto_primary else (lid == effective_primary_id),
-                        assigned_by=creator_admin_id,
-                        commit=False,
-                    )
-
-            self.db.commit()  # the only commit: user + assignments together
-        except IntegrityError:
-            self.db.rollback()
-            raise HTTPException(    
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Could not create user: duplicate email or staff ID.",
-            )
-        except Exception:
-            self.db.rollback()  # also covers the HTTPException(400) above
-            raise
 
         # Refresh user instance to ensure relationships (like lab_assignments) are loaded
         self.db.refresh(user)
