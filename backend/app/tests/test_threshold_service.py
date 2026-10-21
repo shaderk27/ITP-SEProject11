@@ -188,15 +188,9 @@ def test_find_threshold_crossing_uses_upload_batch_chronology_and_exact_line():
         processed_at=datetime(2026, 5, 3, 9, 5, tzinfo=timezone.utc),
     )
 
-    pr1 = PurchaseRequest(
-        pr_id=1, latest_batch_id=10, request_date=date(2026, 5, 1)
-    )
-    pr2 = PurchaseRequest(
-        pr_id=2, latest_batch_id=20, request_date=date(2026, 5, 2)
-    )
-    pr3 = PurchaseRequest(
-        pr_id=3, latest_batch_id=30, request_date=date(2026, 4, 1)
-    )
+    pr1 = PurchaseRequest(pr_id=1, latest_batch_id=10, request_date=date(2026, 5, 1))
+    pr2 = PurchaseRequest(pr_id=2, latest_batch_id=20, request_date=date(2026, 5, 2))
+    pr3 = PurchaseRequest(pr_id=3, latest_batch_id=30, request_date=date(2026, 4, 1))
 
     line1 = PurchaseRequestLine(
         pr_line_id=101, pr_id=1, line_no=1, amount_gst=Decimal("500.00")
