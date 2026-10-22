@@ -35,14 +35,17 @@ const ROLES: Role[] = [
   { role_id: 3, role_name: "labic" },
 ];
 
-async function fetchLabicUsers(): Promise<any[]> {
+async function fetchUsersByRole(role: string): Promise<any[]> {
   try {
-    const r = await fetch(`${API}/auth/users?role=labic`, { credentials: "include" });
+    const r = await fetch(`${API}/auth/users?role=${role}`, { credentials: "include" });
     return r.ok ? await r.json() : [];
   } catch {
     return [];
   }
 }
+
+const fetchLabicUsers = () => fetchUsersByRole("labic");
+const fetchTeamLeadUsers = () => fetchUsersByRole("teamlead");
 
 export function CreateUserPage() {
   const navigate = useNavigate();
@@ -50,6 +53,7 @@ export function CreateUserPage() {
   const [labGroups, setLabGroups] = useState<LabGroup[]>([]);
   const [labs, setLabs] = useState<Lab[]>([]);
   const [labicUsers, setLabicUsers] = useState<any[]>([]);
+  const [teamLeadUsers, setTeamLeadUsers] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -82,6 +86,7 @@ export function CreateUserPage() {
       .catch(() => setLabs([]));
 
     fetchLabicUsers().then(setLabicUsers);
+    fetchTeamLeadUsers().then(setTeamLeadUsers);
   }, []);
 
   const handleChange = (
@@ -114,11 +119,13 @@ export function CreateUserPage() {
     if (form.password !== form.confirm_password)
       errors.confirm_password = "Passwords do not match.";
     if (!form.role_id) errors.role_id = "Role is required.";
-    if (
-      selectedRoleName === "teamlead" &&
-      !form.lab_group_id
-    ) {
+    if (selectedRoleName === "teamlead" && !form.lab_group_id) {
       errors.lab_group_id = "Lab group is required for Team Lead.";
+    } else if (
+      selectedRoleName === "teamlead" &&
+      getTeamLeadForGroup(Number(form.lab_group_id))
+    ) {
+      errors.lab_group_id = "This lab group already has a Team Lead.";
     }
     if (selectedRoleName === "labic" && !form.lab_id) {
       errors.lab_id = "Lab is required for Lab IC.";
@@ -159,13 +166,19 @@ export function CreateUserPage() {
       const data = await res.json();
       if (!res.ok) {
         setServerError(data?.detail ?? "Failed to create user. Please try again.");
+        if (res.status === 409 && selectedRoleName === "teamlead") {
+          // Our list was stale; re-sync so the taken group is disabled.
+          setTeamLeadUsers(await fetchTeamLeadUsers());
+        }
         setIsSubmitting(false);
         return;
       }
 
-      // Refresh existing Lab ICs so the lab dropdown hints stay accurate.
+      // Refresh existing assignments so the dropdown hints stay accurate.
       if (selectedRoleName === "labic") {
         setLabicUsers(await fetchLabicUsers());
+      } else if (selectedRoleName === "teamlead") {
+        setTeamLeadUsers(await fetchTeamLeadUsers());
       }
 
       let roleLabel: string;
@@ -210,6 +223,13 @@ export function CreateUserPage() {
   const selectedRoleName = selectedRole?.role_name.toLowerCase();
   const showLabGroup = selectedRoleName === "teamlead";
   const showLab = selectedRoleName === "labic";
+
+  // Mirrors the backend duplicate check: only ACTIVE team leads own a lab group.
+  function getTeamLeadForGroup(groupId: number) {
+    return teamLeadUsers.find(
+      (u) => u.is_active !== false && Number(u.lab_group_id) === groupId
+    );
+  }
 
   const getLabAssignmentStatusText = (labId: number) => {
     const hasPrimary = labicUsers.some((u) =>
@@ -364,11 +384,15 @@ export function CreateUserPage() {
                 }`}
               >
                 <option value="">Select a lab group...</option>
-                {labGroups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} - {g.wbs_code}
-                  </option>
-                ))}
+                {labGroups.map((g) => {
+                  const lead = getTeamLeadForGroup(g.id);
+                  return (
+                    <option key={g.id} value={g.id} disabled={!!lead}>
+                      {g.name} - {g.wbs_code}
+                      {lead ? ` (Assigned to ${lead.full_name})` : ""}
+                    </option>
+                  );
+                })}
               </select>
               {fieldErrors.lab_group_id && (
                 <p className="text-xs text-destructive">{fieldErrors.lab_group_id}</p>
