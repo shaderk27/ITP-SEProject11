@@ -89,7 +89,7 @@ class CreateUserRequest(BaseModel):
 class RoleResponse(BaseModel):
     role_id: int
     role_name: str
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
