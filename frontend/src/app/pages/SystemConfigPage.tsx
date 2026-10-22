@@ -406,7 +406,7 @@ export function SystemConfigPage() {
       const res = await fetch(
         `${API_BASE_URL}/api/auth/users/${userId}/assign-lab`,
         {
-          method: "PUT", // or "PATCH"
+          method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
@@ -439,7 +439,6 @@ export function SystemConfigPage() {
           credentials: "include",
           body: JSON.stringify({
             lab_id: assignTargetLab.id,
-            // is_primary: isPrimaryAssignment, // Sends boolean flag to server
           }),
         },
       );
@@ -502,7 +501,6 @@ export function SystemConfigPage() {
   };
 
   const handleAssignTeamLead = async () => {
-    // Convert and check for valid numeric ID
     const userId = Number(selectedTeamLeadUserId);
 
     if (!assignTargetGroup || !userId || isNaN(userId)) {
@@ -510,7 +508,6 @@ export function SystemConfigPage() {
       return;
     }
 
-    // Resolve group ID supporting both `id` and `lab_group_id`
     const labGroupId = assignTargetGroup.id ?? assignTargetGroup.lab_group_id;
 
     try {
@@ -539,7 +536,6 @@ export function SystemConfigPage() {
   const handleUnassignTeamLead = async (teamlead: any) => {
     if (!teamlead) return;
 
-    // Extract ID supporting both `id` and `user_id`
     const userId = teamlead.id ?? teamlead.user_id;
 
     if (!userId) {
@@ -1024,6 +1020,40 @@ export function SystemConfigPage() {
                                                     Assign Lab IC
                                                   </Button>
                                                 )}
+                                              </td>
+                                              <td className="p-3 text-sm text-right font-semibold text-gray-800">
+                                                $
+                                                {(
+                                                  lab.budget ?? 0
+                                                ).toLocaleString(undefined, {
+                                                  minimumFractionDigits: 2,
+                                                })}
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                      openEditLab(lab)
+                                                    }
+                                                  >
+                                                    <Edit className="h-3 w-3" />
+                                                  </Button>
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                      handleDelete(
+                                                        `/api/config/labs/${lab.id}`,
+                                                        lab.name,
+                                                      )
+                                                    }
+                                                    className="text-[#dc2626]"
+                                                  >
+                                                    <Trash2 className="h-3 w-3" />
+                                                  </Button>
+                                                </div>
                                               </td>
                                             </tr>
                                           );
@@ -1662,7 +1692,6 @@ export function SystemConfigPage() {
                     );
 
                     return availableUsers.map((u: any) => {
-                      // ✅ Fallback to u.id if u.user_id is undefined
                       const userId = u.id ?? u.user_id;
 
                       const assignmentCount = u.lab_assignments?.length || 0;
@@ -1775,7 +1804,6 @@ export function SystemConfigPage() {
                     Select a Team Lead...
                   </option>
                   {teamleadUsers.map((u: any) => {
-                    // Support both u.id and u.user_id
                     const userId = u.id ?? u.user_id;
                     return (
                       <option key={userId} value={userId}>

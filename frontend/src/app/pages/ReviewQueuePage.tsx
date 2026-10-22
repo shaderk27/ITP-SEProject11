@@ -105,9 +105,13 @@ export function ReviewQueuePage() {
         parts.push(`${result.prs_updated} updated PR${result.prs_updated === 1 ? "" : "s"}`);
       }
       const prSummary = parts.length > 0 ? parts.join(" + ") : "0 PRs";
+      const skipped = result.status_regressions_skipped ?? 0;
       setCommitSuccess(
         `Batch #${result.batch_id} committed: ${prSummary}` +
-          ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.`,
+          ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.` +
+          (skipped > 0
+            ? ` Approved status protected on ${skipped} line${skipped === 1 ? "" : "s"} (incoming status change skipped).`
+            : ""),
       );
       await fetchBatches();
     } catch (err) {

@@ -130,4 +130,5 @@ export interface CommitResponse {
   prs_updated: number;
   lines_created: number;
   pr_ids: number[];
+  status_regressions_skipped?: number;
 }

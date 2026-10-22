@@ -136,20 +136,26 @@ def _combine_batch_results(
             "reupload_updated": 0,
             "needs_review": 0,
             "rejected": 0,
+            "status_regressions_skipped": 0,
         },
         "validation_errors": [],
-        "records": {"inserted": [], "updated": [], "duplicate": []},
+        "records": {
+            "inserted": [],
+            "updated": [],
+            "duplicate": [],
+            "status_regression": [],
+        },
     }
 
     for result in results:
         filename = result["metadata"]["filename"]
         for key in combined["counts"]:
-            combined["counts"][key] += result["counts"][key]
+            combined["counts"][key] += result["counts"].get(key, 0)
         for error in result["validation_errors"]:
             combined["validation_errors"].append(
                 {**error, "field": f"{filename} - {error['field']}"}
             )
         for status in combined["records"]:
-            combined["records"][status].extend(result["records"][status])
+            combined["records"][status].extend(result["records"].get(status, []))
 
     return combined
