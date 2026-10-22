@@ -33,10 +33,6 @@ END $$;
 
 BEGIN;
 
-ALTER TABLE labs ALTER COLUMN lab_group_id DROP NOT NULL;
--- Lab IC assignments live in lab_ic_assignments (many-to-many). Fresh DBs get
--- it from db_setup.sql; older DBs: run migrate_lab_ic_to_assignments.sql once.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
 
 -- Roles.
 INSERT INTO roles (role_name)
