@@ -5,8 +5,8 @@
 -- (db_setup.sql does not create these tables, so fresh setups that never use
 -- RAG don't need pgvector installed).
 --
---   PGPASSWORD=postgres psql -U postgres -h localhost -d budget_system \
---     -f backend/migrations/add_rag_knowledge.sql
+--   PGPASSWORD=postgres psql -v ON_ERROR_STOP=1 -U postgres -h localhost \
+--     -d budget_system -f backend/migrations/add_rag_knowledge.sql
 --
 -- Needs the pgvector extension available on the server:
 --   macOS (Homebrew):  brew install pgvector
@@ -30,6 +30,35 @@
 --   * Deleting a document or PR line cascades to its chunks. is_active lets
 --     a chunk be retired without deleting it (e.g. a superseded doc version).
 -- =============================================================================
+DO $$
+DECLARE
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['users', 'purchase_request_lines']
+  LOOP
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = current_schema() AND table_name = t
+    ) THEN
+      RAISE EXCEPTION 'Prerequisite table % does not exist. Run db_setup.sql first.', t;
+    END IF;
+  END LOOP;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = current_schema() AND table_name = 'schema_migrations'
+  ) THEN
+    RAISE EXCEPTION 'schema_migrations table does not exist. Run add_schema_migrations.sql first.';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'trigger_set_updated_at') THEN
+    RAISE EXCEPTION 'Function trigger_set_updated_at() does not exist. Run db_setup.sql first.';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector') THEN
+    RAISE EXCEPTION 'The pgvector extension is not installed on this server. See the install notes at the top of this file.';
+  END IF;
+END $$;
 
 BEGIN;
 
@@ -97,5 +126,9 @@ DROP TRIGGER IF EXISTS set_updated_at_knowledge_chunks ON knowledge_chunks;
 CREATE TRIGGER set_updated_at_knowledge_chunks
 BEFORE UPDATE ON knowledge_chunks
 FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+
+INSERT INTO schema_migrations (migration_name)
+VALUES ('add_rag_knowledge')
+ON CONFLICT (migration_name) DO NOTHING;
 
 COMMIT;
