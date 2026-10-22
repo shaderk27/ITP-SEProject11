@@ -159,7 +159,8 @@ export async function exportDashboard(
   if (filters.startDate) params.set("start_date", filters.startDate);
   if (filters.endDate) params.set("end_date", filters.endDate);
   if (filters.dateRange) params.set("date_range", filters.dateRange);
-  if (filters.periodId) params.set("period_id", String(filters.periodId));
+  // 0 = All time; it must be sent, not dropped as falsy.
+  if (filters.periodId != null) params.set("period_id", String(filters.periodId));
   if (filters.labGroupId != null)
     params.set("lab_group_id", String(filters.labGroupId));
   if (filters.labId != null) params.set("lab_id", String(filters.labId));

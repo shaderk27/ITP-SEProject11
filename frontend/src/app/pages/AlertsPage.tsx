@@ -40,6 +40,7 @@ interface LabData {
 interface LabAlert {
   id: string;
   labId: number;
+  groupId: number;
   labCode: string;
   labName: string;
   budget: number;
@@ -145,21 +146,26 @@ export function AlertsPage() {
     const fetchDrilldown = async () => {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/alerts/drilldown?lab_id=${selectedLabDetails.labId}`,
+          `${API_BASE_URL}/api/alerts/drilldown?lab_group_id=${selectedLabDetails.groupId}&lab_id=${selectedLabDetails.labId}`,
           { credentials: "include" }
         );
         if (res.ok && !isCancelled) {
           const data = await res.json();
           const catMap: Record<string, DrilldownCategory> = {};
-          const firstGroup = data.lab_groups?.[0];
-          const firstLab = firstGroup?.labs?.find(
-            (lab: { lab_id: number }) => lab.lab_id === selectedLabDetails.labId
-          );
-          if (firstLab?.categories) {
-            firstLab.categories.forEach((c: DrilldownCategory) => {
-              const key = c.category_id !== null ? String(c.category_id) : "null";
-              catMap[key] = c;
-            });
+
+          for (const grp of data.lab_groups || []) {
+            const matchedLab = grp.labs?.find(
+              (lab: { lab_id: number }) =>
+                lab.lab_id === selectedLabDetails.labId
+            );
+            if (matchedLab?.categories) {
+              matchedLab.categories.forEach((c: DrilldownCategory) => {
+                const key =
+                  c.category_id !== null ? String(c.category_id) : "null";
+                catMap[key] = c;
+              });
+              break;
+            }
           }
           setDrilldownCategories(catMap);
         }
@@ -272,6 +278,7 @@ export function AlertsPage() {
           labAlerts.push({
             id: `LAB-${lab.id}`,
             labId: lab.id,
+            groupId: group.id,
             labCode: lab.code,
             labName: lab.name,
             budget: lab.budget,
@@ -729,7 +736,7 @@ export function AlertsPage() {
                                               {line.is_triggering_line && (
                                                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-amber-100 text-amber-800 border border-amber-300">
                                                   <Zap className="h-2.5 w-2.5" />
-                                                  Threshold Crossing Line
+                                                  Triggering Line
                                                 </span>
                                               )}
                                             </div>
