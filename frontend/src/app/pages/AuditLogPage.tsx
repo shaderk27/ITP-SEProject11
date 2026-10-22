@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Navigate } from "react-router";
 import { Card } from "../components/ui/card";
-import { ShieldAlert, Search, Eye, X } from "lucide-react";
+import { ShieldAlert, Search, Eye, RotateCcw, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 
@@ -256,14 +256,20 @@ export function AuditLogPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedLog, setSelectedLog] = useState<any | null>(null);
+  const [userFilter, setUserFilter] = useState("all");
+  const [actionFilter, setActionFilter] = useState("");
+  const [moduleFilter, setModuleFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [loadError, setLoadError] = useState("");
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchReferences = async () => {
       try {
-        const [catRes, labRes, groupRes, roleRes, userRes, logRes] =
-          await Promise.all([
+        const [catRes, labRes, groupRes, roleRes, userRes] = await Promise.all([
             fetch(`${API_BASE_URL}/api/config/categories`, {
               credentials: "include",
             }),
@@ -277,9 +283,6 @@ export function AuditLogPage() {
               credentials: "include",
             }),
             fetch(`${API_BASE_URL}/api/auth/users`, {
-              credentials: "include",
-            }),
-            fetch(`${API_BASE_URL}/api/audit/?limit=200`, {
               credentials: "include",
             }),
           ]);
@@ -319,18 +322,53 @@ export function AuditLogPage() {
           });
           setUsers(map);
         }
-        if (logRes.ok) {
-          setLogs(await logRes.json());
-        }
       } catch (err) {
         console.error(err);
-      } finally {
-        setIsLoading(false);
       }
     };
 
-    if (user?.role === "admin") fetchData();
+    if (user?.role === "admin") void fetchReferences();
   }, [API_BASE_URL, user]);
+
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    const controller = new AbortController();
+    const fetchLogs = async () => {
+      setIsLoading(true);
+      setLoadError("");
+      const params = new URLSearchParams({ limit: "500", sort: sortOrder });
+      if (userFilter !== "all") params.set("user_id", userFilter);
+      if (actionFilter.trim()) params.set("action", actionFilter.trim());
+      if (moduleFilter.trim()) params.set("module", moduleFilter.trim());
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/audit/?${params}`, {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error("Could not load audit logs.");
+        setLogs(await response.json());
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setLoadError(err instanceof Error ? err.message : "Could not load audit logs.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setIsLoading(false);
+      }
+    };
+    void fetchLogs();
+    return () => controller.abort();
+  }, [
+    API_BASE_URL,
+    actionFilter,
+    dateFrom,
+    dateTo,
+    moduleFilter,
+    sortOrder,
+    user,
+    userFilter,
+  ]);
 
   if (user?.role !== "admin") return <Navigate to="/403" replace />;
 
@@ -405,6 +443,101 @@ export function AuditLogPage() {
       </div>
 
       <div className="p-6">
+        <div className="mb-4 border-y border-gray-200 bg-white px-4 py-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+            <label className="text-xs font-medium text-gray-600">
+              User
+              <select
+                value={userFilter}
+                onChange={(event) => setUserFilter(event.target.value)}
+                className="mt-1 h-9 w-full border border-border bg-white px-2 text-sm"
+              >
+                <option value="all">All users</option>
+                {Object.entries(users)
+                  .sort(([, a], [, b]) => a.localeCompare(b))
+                  .map(([id, name]) => (
+                    <option key={id} value={id}>{name}</option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-xs font-medium text-gray-600">
+              Action
+              <input
+                value={actionFilter}
+                onChange={(event) => setActionFilter(event.target.value)}
+                placeholder="e.g. update"
+                className="mt-1 h-9 w-full border border-border px-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-gray-600">
+              Module
+              <input
+                value={moduleFilter}
+                onChange={(event) => setModuleFilter(event.target.value)}
+                placeholder="e.g. user or lab"
+                className="mt-1 h-9 w-full border border-border px-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-gray-600">
+              From
+              <input
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(event) => setDateFrom(event.target.value)}
+                className="mt-1 h-9 w-full border border-border px-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-gray-600">
+              To
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(event) => setDateTo(event.target.value)}
+                className="mt-1 h-9 w-full border border-border px-2 text-sm"
+              />
+            </label>
+            <div className="flex items-end gap-2">
+              <label className="min-w-0 flex-1 text-xs font-medium text-gray-600">
+                Timestamp
+                <select
+                  value={sortOrder}
+                  onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
+                  className="mt-1 h-9 w-full border border-border bg-white px-2 text-sm"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </label>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                title="Reset audit filters"
+                onClick={() => {
+                  setUserFilter("all");
+                  setActionFilter("");
+                  setModuleFilter("");
+                  setDateFrom("");
+                  setDateTo("");
+                  setSortOrder("newest");
+                  setSearchTerm("");
+                }}
+              >
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div className="mt-2 text-xs text-gray-500">
+            {isLoading ? "Loading filtered logs..." : `${filteredLogs.length} matching log${filteredLogs.length === 1 ? "" : "s"}`}
+          </div>
+        </div>
+        {loadError && (
+          <div className="mb-4 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {loadError}
+          </div>
+        )}
         <Card className="bg-white border-gray-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left">

@@ -358,9 +358,19 @@ def test_only_approved_lines_by_default(db, world):
     all_ids = _hit_line_ids(
         search_pr_lines(db, world["admin"], "oscilloscope", approved_only=False)
     )
+    pending_ids = _hit_line_ids(
+        search_pr_lines(
+            db,
+            world["admin"],
+            "oscilloscope",
+            approved_only=False,
+            status_prefix="pending",
+        )
+    )
 
     assert pending.pr_line_id not in default_ids
     assert pending.pr_line_id in all_ids
+    assert pending_ids == [pending.pr_line_id]
 
 
 def test_distance_cutoff_drops_unrelated_lines(db, world, monkeypatch):

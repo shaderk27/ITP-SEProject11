@@ -90,9 +90,9 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "role_id": user.role_id,
                 "lab_group_id": user.lab_group_id,
-                "lab_group_name": user.lab_group.lab_group_name
-                if user.lab_group
-                else None,
+                "lab_group_name": (
+                    user.lab_group.lab_group_name if user.lab_group else None
+                ),
                 "lab_group_code": user.lab_group.wbs_code if user.lab_group else None,
                 "lab_assignments": self._format_user_assignments(user),
                 "is_active": user.is_active,
@@ -194,9 +194,11 @@ class AuthService:
                 "lab_group_id": user.lab_group_id,
                 "lab_ids": assigned_lab_ids,
                 "must_reset_password": used_temp_password,
-                "assignedLabs": assigned_lab_codes
-                if assigned_lab_codes
-                else ([user.lab_group.wbs_code] if user.lab_group else []),
+                "assignedLabs": (
+                    assigned_lab_codes
+                    if assigned_lab_codes
+                    else ([user.lab_group.wbs_code] if user.lab_group else [])
+                ),
             },
         }
 
@@ -254,9 +256,11 @@ class AuthService:
             "lab_group_id": user.lab_group_id,
             "lab_ids": assigned_lab_ids,
             "must_reset_password": bool(payload.get("must_reset_password", False)),
-            "assignedLabs": assigned_lab_codes
-            if assigned_lab_codes
-            else ([user.lab_group.wbs_code] if user.lab_group else []),
+            "assignedLabs": (
+                assigned_lab_codes
+                if assigned_lab_codes
+                else ([user.lab_group.wbs_code] if user.lab_group else [])
+            ),
         }
 
     def _send_temp_password_email(
@@ -557,9 +561,12 @@ class AuthService:
                 "is_active": user.is_active,
             }
 
-        user.is_active = False
-        self.db.commit()
-        self.db.refresh(user)
+        user = self.repository.set_user_activation_status(
+            self.db,
+            user_id,
+            False,
+            acting_admin_id=current_admin_id,
+        )
 
         return {
             "user_id": user.user_id,
@@ -580,13 +587,12 @@ class AuthService:
             )
 
         if not user.is_active:
-            user.is_active = True
-            # Store admin audit reference if your model supports updated_by/activated_by
-            if hasattr(user, "updated_by") and current_admin_id is not None:
-                setattr(user, "updated_by", current_admin_id)
-
-            self.db.commit()
-            self.db.refresh(user)
+            user = self.repository.set_user_activation_status(
+                self.db,
+                user_id,
+                True,
+                acting_admin_id=current_admin_id,
+            )
 
         return {
             "user_id": user.user_id,
@@ -683,9 +689,9 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "role_id": user.role_id,
                 "lab_group_id": user.lab_group_id,
-                "lab_group_name": user.lab_group.lab_group_name
-                if user.lab_group
-                else None,
+                "lab_group_name": (
+                    user.lab_group.lab_group_name if user.lab_group else None
+                ),
                 "lab_group_code": user.lab_group.wbs_code if user.lab_group else None,
                 "lab_assignments": self._format_user_assignments(user),
                 "is_active": user.is_active,

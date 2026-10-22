@@ -101,9 +101,15 @@ def ask(monkeypatch):
     monkeypatch.setattr(llm_client, "generate_answer", fake_generate)
     monkeypatch.setattr(embedding_client, "embedding_configured", lambda: True)
 
-    def fake_search(db, user, question, limit, start, end):
+    def fake_search(db, user, question, limit, start, end, **status_filters):
         state["search_calls"].append(
-            {"question": question, "limit": limit, "start": start, "end": end}
+            {
+                "question": question,
+                "limit": limit,
+                "start": start,
+                "end": end,
+                **status_filters,
+            }
         )
         if "search_error" in state:
             raise state["search_error"]
@@ -181,6 +187,16 @@ def test_dashboard_window_is_used_for_the_search(ask):
 
     call = ask["search_calls"][0]
     assert (call["start"], call["end"]) == (date(2026, 7, 1), date(2026, 9, 28))
+
+
+def test_pending_question_searches_pending_lines(ask):
+    ask["run"]("Do we have pending calibration purchases?")
+
+    call = ask["search_calls"][0]
+    assert call["approved_only"] is False
+    assert call["status_prefix"] == "pending"
+    block = _facts(ask["system"])["matching_purchases"]
+    assert "pending purchase lines" in block["note"]
 
 
 def test_embeddings_off_skips_search_silently(ask, monkeypatch):
