@@ -51,8 +51,13 @@ class AuthRepository:
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
         creator_admin_id: Optional[int] = None,
+        commit: bool = True,
     ) -> User:
-        """Create and persist a new user in the system with lab assignments."""
+        """Create and persist a new user in the system with lab assignments.
+
+        With commit=False the rows are only flushed, so the caller can add more
+        changes (e.g. lab assignments) and commit or roll back everything at once.
+        """
         db_user = User(
             role_id=role_id,
             full_name=full_name,
@@ -80,8 +85,11 @@ class AuthRepository:
             )
             db.add(assignment)
 
-        db.commit()
-        db.refresh(db_user)
+        if commit:
+            db.commit()
+            db.refresh(db_user)
+        else:
+            db.flush()
         return db_user
 
     def set_user_activation_status(
@@ -268,8 +276,16 @@ class AuthRepository:
         )
         return list(db.execute(stmt).unique().scalars().all())
 
-    def get_lab_by_id(self, db: Session, lab_id: int) -> Optional[Lab]:
-        return db.query(Lab).filter(Lab.lab_id == lab_id).first()
+    def get_lab_by_id(
+        self, db: Session, lab_id: int, for_update: bool = False
+    ) -> Optional[Lab]:
+        """Fetch a lab. With for_update=True the lab row is locked until the
+        transaction ends, so concurrent primary-IC decisions for it are serialised.
+        """
+        query = db.query(Lab).filter(Lab.lab_id == lab_id)
+        if for_update:
+            query = query.with_for_update(of=Lab)
+        return query.first()
 
     def get_lab_group_by_id(self, db: Session, lab_group_id: int) -> Optional[LabGroup]:
         return db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()

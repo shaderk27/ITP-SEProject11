@@ -1,5 +1,3 @@
-# Lab Budget Monitoring System
-
 ## Database setup
 Copy `.env.example` to `.env` and replace `<PASSWORD>` with your local Postgres password:
 
@@ -12,52 +10,106 @@ Login cookies stay valid for `ACCESS_TOKEN_EXPIRE_MINUTES`; restarting the front
 
 ### Which SQL file to run, and when
 
-`db_setup.sql`, `migrate_lab_ic_to_assignments.sql` and `add_rag_knowledge.sql` live in `backend/migrations/`. `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`.
+`db_setup.sql` and all `add_*.sql` / `migrate_*.sql` files live in `backend/migrations/`. `dev_seed.sql` and `w7_auth_seed.sql` live in `backend/seeds/`. There is exactly one `db_setup.sql` in the repo (`backend/migrations/db_setup.sql`).
+
+**Migrations** change the schema only. They never insert demo data, are non-destructive and safe to re-run, and each records itself in the `schema_migrations` table.
 
 | File | What it does | When to run it |
 |---|---|---|
-| `db_setup.sql` | **Destructive.** Drops and recreates every table with the current schema (including `lab_ic_assignments`, `users.is_active` and `password_reset_tokens`). Creates no data. | A brand-new database, or when you want to wipe everything and start over. **Never** on a database whose data you want to keep. |
-| `migrate_lab_ic_to_assignments.sql` | Non-destructive, safe to re-run. Converts the old Lab IC model (`users.lab_id` or `labs.user_id`) into `lab_ic_assignments`, keeping existing data. | Only on an **existing** database created before `lab_ic_assignments` existed. Not needed after a fresh `db_setup.sql`. Do not also run the older `migrate_lab_ic_to_labs.sql`. |
-| `dev_seed.sql` | Safe to re-run. Adds schema columns the app needs that `db_setup.sql` does not create (`pr_status` on purchase requests and lines, the alert-notification flags on `labs` and `lab_groups`, and nullable `labs.lab_group_id`). Also seeds roles, the FY2026 budget period, spending categories, lab groups, labs and three test users. | After `db_setup.sql` or the migration, on every database you set up, including fresh ones. Despite the name, it contains schema changes, so skipping it leaves the app with missing columns. |
-| `w7_auth_seed.sql` | Safe to re-run. Adds demo users with Lab IC assignments for testing Lab IC scoping. Reuses the same lab groups and labs as `dev_seed.sql`. | Optional, after `dev_seed.sql`, and only once `lab_ic_assignments` exists. |
-| `add_rag_knowledge.sql` | Non-destructive, safe to re-run. Turns on the `pgvector` extension and creates the empty `knowledge_documents` and `knowledge_chunks` tables used by Ask AI's purchase search. Touches no existing data. | Optional. Only if you want Ask AI's purchase search (see [Purchase search (RAG)](#purchase-search-rag)). Needs the pgvector **Postgres extension** installed on your Postgres server first. This is not the pip package. Re-run it after every `db_setup.sql`, because a reset drops these tables. |
+| `db_setup.sql` | **Destructive.** Drops and recreates every table with the current schema and records the migrations below (except `add_rag_knowledge`) as applied. Creates no data. Refuses to run unless the session has `app.allow_reset = 'yes'`. | A brand-new database, or when you want to wipe everything and start over. **Never** on a database whose data you want to keep (local, Lightsail or any other). |
+| `add_schema_migrations.sql` | Creates the `schema_migrations` table. | First, on every existing database. |
+| `migrate_lab_ic_to_assignments.sql` | Converts the old Lab IC model (`users.lab_id` or `labs.user_id`) into `lab_ic_assignments`, keeping existing data. Do not also run the older `migrate_lab_ic_to_labs.sql`. | Existing databases created before `lab_ic_assignments` existed. A no-op if it already exists. |
+| `add_password_reset_tokens.sql` | Creates `password_reset_tokens`, or adds any missing columns to an older copy. | Existing databases. |
+| `add_pr_status_columns.sql` | Adds `pr_status` to `purchase_requests` and `purchase_request_lines`. | Existing databases. |
+| `add_alert_state_columns.sql` | Adds the `notified_*` and `alert_period_id` columns (with foreign keys to `budget_periods`) on `labs` and `lab_groups`, and makes `labs.lab_group_id` nullable. Stops with an error if existing `alert_period_id` values point at a missing period. | Existing databases. |
+| `add_rag_knowledge.sql` | Turns on the `pgvector` extension and creates the empty `knowledge_documents` and `knowledge_chunks` tables used by Ask AI's purchase search. Touches no existing data. | Optional. Only if you want Ask AI's purchase search (see [Purchase search (RAG)](#purchase-search-rag)). Needs the pgvector **Postgres extension** installed on the server first (not the pip package). Re-run it after every `db_setup.sql`, because a reset drops these tables. |
 
-**New database**
+**Seeds** insert data only. They never change the schema.
+
+| File | What it does | Safe on |
+|---|---|---|
+| `dev_seed.sql` | Demo data: FY2026 budget period, spending categories, FCB/ICT lab groups, demo labs and three test users (placeholder passwords). | **Local only** |
+| `w7_auth_seed.sql` | Demo users with Lab IC assignments for testing Lab IC scoping. Needs `dev_seed.sql` first. | **Local only** |
+
+Never run `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail or any shared/production database: they create users with placeholder passwords.
+
+### New database (fresh or reset)
 
 1. Create the empty database (once):
    ```powershell
-   psql "postgresql://postgres:<PASSWORD>@localhost:5432/postgres" -c "CREATE DATABASE budget_system;"
+   psql -v ON_ERROR_STOP=1 "postgresql://postgres:<PASSWORD>@localhost:5432/postgres" -c "CREATE DATABASE budget_system;"
    ```
-2. Run `db_setup.sql`, connected to `budget_system`.
-3. Run `dev_seed.sql`.
-4. Optionally run `w7_auth_seed.sql`.
+2. Run `db_setup.sql`, connected to `budget_system`, with the reset confirmation set in the same session:
+   ```powershell
+   $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
+   psql -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -c "SET app.allow_reset = 'yes'" -f backend/migrations/db_setup.sql
+   ```
+   In pgAdmin, run `SET app.allow_reset = 'yes';` first, then the file, in the same Query Tool tab.
+3. Local: run `dev_seed.sql`, then optionally `w7_auth_seed.sql`.
+4. Optionally run `add_rag_knowledge.sql` for Ask AI's purchase search.
 
-**Existing database with data you want to keep**
+### Existing database with data you want to keep
 
-1. Back up first (for example `pg_dump`).
-2. Run `migrate_lab_ic_to_assignments.sql` once. Skip this if the database already has a `lab_ic_assignments` table.
-3. Run `dev_seed.sql`.
-4. Optionally run `w7_auth_seed.sql`.
-5. Optionally run `add_rag_knowledge.sql` for Ask AI's purchase search.
+1. **Back up first**, and confirm the backup restores:
+   ```powershell
+   pg_dump -Fc "$env:DATABASE_URL" -f budget_system_backup.dump
+   ```
+2. Run the migrations in this order, using the `-v ON_ERROR_STOP=1` command from [Running a file](#running-a-file) and stopping at the first failure:
+   1. `add_schema_migrations.sql`
+   2. `migrate_lab_ic_to_assignments.sql`
+   3. `add_password_reset_tokens.sql`
+   4. `add_pr_status_columns.sql`
+   5. `add_alert_state_columns.sql`
+   6. `add_rag_knowledge.sql` (optional, see the pgvector note above)
+3. Optionally run `dev_seed.sql` / `w7_auth_seed.sql`.
 
-Do not run `db_setup.sql` on an existing database unless you intend to erase it.
+Migrations that find their change already in place do nothing except record themselves, so the same sequence is safe on any existing database, whatever its history. Do not run `db_setup.sql` on an existing database unless you intend to erase it.
 
-Run each file the same way, changing only its path (for example `backend/migrations/migrate_lab_ic_to_assignments.sql` or `backend/seeds/w7_auth_seed.sql`):
+### See which migrations a database has applied
+
+```sql
+SELECT * FROM schema_migrations ORDER BY applied_at;
+```
+
+### Running a file
+
+Run each file the same way, changing only its path. Always include `-v ON_ERROR_STOP=1`: without it, `psql` carries on after an error and can finish with a success exit code even though part of the file failed.
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-psql "$env:DATABASE_URL" -f backend/migrations/db_setup.sql
-psql "$env:DATABASE_URL" -f backend/seeds/dev_seed.sql
+psql -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -f backend/migrations/add_pr_status_columns.sql
 ```
+
+If a file fails, stop. Fix the cause and re-run that file before running any later one. Do not continue down the migration list after an error. If you run files in pgAdmin instead, stop at the first error message.
 
 If PowerShell says `psql` is not recognized, use the full PostgreSQL path:
 
 ```powershell
 $env:DATABASE_URL="postgresql://postgres:<PASSWORD>@localhost:5432/budget_system"
-& "C:\Program Files\PostgreSQL\18\bin\psql.exe" "$env:DATABASE_URL" -f backend/seeds/dev_seed.sql
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -f backend/migrations/add_pr_status_columns.sql
 ```
 
 You can also open any of these files in pgAdmin's Query Tool and run them there. Make sure the Query Tool is connected to `budget_system` first.
+
+### Changing Lightsail
+
+1. Take a backup (`pg_dump -Fc`) and restore it into a scratch database to confirm it works.
+2. Check the current schema (`\d` on the affected tables) and `SELECT * FROM schema_migrations;` if the table exists. Do not assume Lightsail matches a local database.
+3. Run the migrations on the scratch copy first, then on Lightsail.
+4. For `add_rag_knowledge.sql`: check `SELECT * FROM pg_available_extensions WHERE name = 'vector';` and that the migration role is allowed to `CREATE EXTENSION`. If either fails, stop. Only enable the improved PR-line search once the migration has run and appears in `schema_migrations`.
+5. Never run `db_setup.sql`, `dev_seed.sql` or `w7_auth_seed.sql` on Lightsail.
+
+### Check that fresh and migrated databases match
+
+Build one database with `db_setup.sql` and another by running the migrations on an older database. Apply `add_rag_knowledge.sql` to both, then compare:
+
+```powershell
+pg_dump --schema-only --no-owner "<fresh_url>"    | Sort-Object > fresh.sql
+pg_dump --schema-only --no-owner "<migrated_url>" | Sort-Object > migrated.sql
+Compare-Object (Get-Content fresh.sql) (Get-Content migrated.sql)
+```
+
+Sorting hides column-order differences (migrations append columns). Data such as `schema_migrations` timestamps may differ.
 
 ### Seeded login accounts
 
@@ -96,7 +148,7 @@ Open the local URL printed by Vite, usually `http://localhost:5173/`.
 
 ## Backend setup
 
-```bash
+```powershell
 python -m pip install -r backend/requirements.txt
 python -m pip install -r backend/requirements-dev.txt
 $env:PYTHONPATH="backend"
@@ -177,7 +229,7 @@ Recommended for anyone working on Ask AI, the review/commit flow or the PR-line 
    - Linux: `sudo apt install postgresql-<major version>-pgvector`
 2. Create the RAG tables. This is non-destructive and safe on a database with data:
    ```powershell
-   psql "$env:DATABASE_URL" -f backend/migrations/add_rag_knowledge.sql
+   psql -v ON_ERROR_STOP=1 "$env:DATABASE_URL" -f backend/migrations/add_rag_knowledge.sql
    ```
    If it fails with `extension "vector" is not available`, step 1 didn't install into the Postgres server you're connecting to.
 3. Install the free local embedding model's package:
@@ -244,7 +296,7 @@ npm --prefix frontend run type-check
 npm --prefix frontend run build
 ```
 
-```bash
+```powershell
 $env:PYTHONPATH="backend"
 python -m pytest backend/app/tests
 ```
