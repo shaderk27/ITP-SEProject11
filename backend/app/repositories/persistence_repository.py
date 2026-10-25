@@ -174,9 +174,7 @@ def persist_upload_to_db(
                         classifier_category_id or general_category.category_id
                     )
 
-                    used_fallback_group = (
-                        final_group_id == general_group.lab_group_id
-                    )
+                    used_fallback_group = final_group_id == general_group.lab_group_id
                     used_fallback_lab = False
                     used_fallback_category = (
                         final_category_id == general_category.category_id
@@ -213,9 +211,7 @@ def persist_upload_to_db(
                         or used_fallback_category
                     )
                     classification_status = "unclear" if any_fallback else "confident"
-                    review_status = (
-                        "pending_review" if any_fallback else "not_required"
-                    )
+                    review_status = "pending_review" if any_fallback else "not_required"
 
                     raw_json = dict(item.to_dict())
                     raw_json["line_identity_key"] = split_identity_key
@@ -633,9 +629,7 @@ def _split_quantity_equally(qty: Any, count: int) -> list[Decimal | None]:
     qty_dec = Decimal(str(qty))
     share = (qty_dec / Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     remainder = (qty_dec - (share * count)).quantize(Decimal("0.01"))
-    return [
-        share + (remainder if i == 0 else Decimal("0.00")) for i in range(count)
-    ]
+    return [share + (remainder if i == 0 else Decimal("0.00")) for i in range(count)]
 
 
 def _parse_pr_date(raw: Any):
