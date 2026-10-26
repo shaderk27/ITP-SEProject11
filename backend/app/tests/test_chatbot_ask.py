@@ -14,7 +14,7 @@ from app.services import chatbot_answer_service, llm_client
 from app.services.chatbot_answer_service import _build_facts
 
 
-def _row(group, lab, category, budget, spend) -> ChatbotBudgetContext:
+def _row(group, lab, category, budget, spend, pending=0) -> ChatbotBudgetContext:
     return ChatbotBudgetContext(
         lab_group_id=1,
         lab_group_name=group,
@@ -26,6 +26,12 @@ def _row(group, lab, category, budget, spend) -> ChatbotBudgetContext:
         approved_spend_sgd=str(spend),
         remaining_sgd=str(budget - spend),
         utilisation_pct=0.0,
+        pending_spend_sgd=str(pending),
+        projected_spend_sgd=str(spend + pending),
+        remaining_after_pending_sgd=str(budget - spend - pending),
+        projected_utilisation_pct=(
+            round((spend + pending) / budget * 100, 1) if budget else None
+        ),
     )
 
 
@@ -61,6 +67,25 @@ def test_facts_precompute_totals_and_risk_counts():
     assert facts["overall"]["at_risk_lines"] == 2
     food = next(lab for lab in facts["labs_by_spend"] if lab["name"] == "Food Lab")
     assert food["utilisation_pct"] == 105.0
+
+
+def test_facts_separate_approved_pending_and_projected_spend():
+    rows = [_row("FCB", "Food Lab", "Tools", 1000, 600, pending=300)]
+
+    facts = _build_facts(_context("teamlead", rows), "overview", "FY")
+
+    assert facts["overall"] == {
+        "budget": 1000.0,
+        "approved_spend": 600.0,
+        "pending_spend": 300.0,
+        "projected_spend": 900.0,
+        "remaining_after_approved": 400.0,
+        "remaining_after_pending": 100.0,
+        "utilisation_pct": 60.0,
+        "projected_utilisation_pct": 90.0,
+        "over_budget_lines": 0,
+        "at_risk_lines": 1,
+    }
 
 
 def test_no_budget_means_null_utilisation_not_zero():

@@ -59,6 +59,10 @@ class ChatbotBudgetContext(BaseModel):
     approved_spend_sgd: str
     remaining_sgd: str
     utilisation_pct: float
+    pending_spend_sgd: str = "0"
+    projected_spend_sgd: str = "0"
+    remaining_after_pending_sgd: str = "0"
+    projected_utilisation_pct: float | None = None
 
 
 class ChatbotLabGroupBudgetContext(BaseModel):
@@ -69,6 +73,10 @@ class ChatbotLabGroupBudgetContext(BaseModel):
     unallocated_sgd: str
     approved_spend_sgd: str
     utilisation_pct: float
+    pending_spend_sgd: str = "0"
+    projected_spend_sgd: str = "0"
+    remaining_after_pending_sgd: str = "0"
+    projected_utilisation_pct: float | None = None
 
 
 class ChatbotPurchaseLineContext(BaseModel):
@@ -125,7 +133,7 @@ class ChatbotAskRequest(BaseModel):
 class ChatbotAnswerSource(BaseModel):
     """Evidence behind an answer (W13-03A), shown under it in the widget."""
 
-    type: Literal["sql_calculation", "pr_line", "document"]
+    type: Literal["sql_calculation", "pr_line", "document", "audit_event"]
     ref: str = Field(..., description='Citation label, e.g. "PR 4500012345 line 2".')
     detail: str
 

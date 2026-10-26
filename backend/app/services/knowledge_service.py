@@ -235,12 +235,14 @@ def search_pr_lines(
     start: date | None = None,
     end: date | None = None,
     approved_only: bool = True,
+    status_prefix: str | None = None,
     max_distance: float | None = None,
 ) -> list[PRLineHit]:
     """Most similar PR-line cards the user is allowed to see, closest first.
 
-    approved_only matches the fact sheet, whose spend only counts lines whose
-    status starts with "approved". Hits further than max_distance (default:
+    approved_only matches the default fact sheet purchase sample. A specific
+    status_prefix, such as "pending", overrides it for explicit status-aware
+    questions. Hits further than max_distance (default:
     embedding_client.embedding_max_distance()) are dropped, so a question
     unrelated to any purchase returns nothing rather than the "least bad" lines.
 
@@ -282,7 +284,9 @@ def search_pr_lines(
         .filter(KnowledgeChunk.embedding_model == embedding_client.embedding_model_id())
         .filter(LabGroup.lab_group_name != "General")
     )
-    if approved_only:
+    if status_prefix:
+        query = query.filter(PurchaseRequestLine.pr_status.ilike(f"{status_prefix}%"))
+    elif approved_only:
         query = query.filter(PurchaseRequestLine.pr_status.ilike("approved%"))
     if cutoff is not None:
         query = query.filter(distance_expr <= cutoff)
