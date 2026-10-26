@@ -199,6 +199,19 @@ def test_pending_question_searches_pending_lines(ask):
     assert "pending purchase lines" in block["note"]
 
 
+def test_empty_pending_semantic_match_keeps_recent_purchase_fallback(ask):
+    ask["hits"] = []
+
+    ask["run"]("Show me pending purchases awaiting approval")
+
+    facts = _facts(ask["system"])
+    assert (
+        "does not mean there are no pending lines"
+        in facts["matching_purchases"]["note"]
+    )
+    assert "recent_purchases" in facts
+
+
 def test_embeddings_off_skips_search_silently(ask, monkeypatch):
     monkeypatch.setattr(embedding_client, "embedding_configured", lambda: False)
 

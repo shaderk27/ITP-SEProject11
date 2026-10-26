@@ -320,20 +320,20 @@ function formatUtilisation(context: ChatbotContextResponse): string[] {
     (acc, row) => {
       acc.budget += money(row.budget_sgd);
       acc.spend += money(row.approved_spend_sgd);
-        acc.pending += money(row.pending_spend_sgd);
-        acc.projected += money(row.projected_spend_sgd);
-        acc.afterPending += money(row.remaining_after_pending_sgd);
+      acc.pending += money(row.pending_spend_sgd);
+      acc.projected += money(row.projected_spend_sgd);
+      acc.afterPending += money(row.remaining_after_pending_sgd);
       acc.remaining += money(row.remaining_sgd);
       return acc;
     },
-      {
-        budget: 0,
-        spend: 0,
-        pending: 0,
-        projected: 0,
-        afterPending: 0,
-        remaining: 0,
-      },
+    {
+      budget: 0,
+      spend: 0,
+      pending: 0,
+      projected: 0,
+      afterPending: 0,
+      remaining: 0,
+    },
   );
   lines.push(
     `Total budget: ${formatSgd(totals.budget)}`,

@@ -259,12 +259,22 @@ export function AuditLogPage() {
   const [userFilter, setUserFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("");
   const [moduleFilter, setModuleFilter] = useState("");
+  const [debouncedActionFilter, setDebouncedActionFilter] = useState("");
+  const [debouncedModuleFilter, setDebouncedModuleFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
   const [loadError, setLoadError] = useState("");
 
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedActionFilter(actionFilter);
+      setDebouncedModuleFilter(moduleFilter);
+    }, 300);
+    return () => window.clearTimeout(timeoutId);
+  }, [actionFilter, moduleFilter]);
 
   useEffect(() => {
     const fetchReferences = async () => {
@@ -338,8 +348,10 @@ export function AuditLogPage() {
       setLoadError("");
       const params = new URLSearchParams({ limit: "500", sort: sortOrder });
       if (userFilter !== "all") params.set("user_id", userFilter);
-      if (actionFilter.trim()) params.set("action", actionFilter.trim());
-      if (moduleFilter.trim()) params.set("module", moduleFilter.trim());
+      if (debouncedActionFilter.trim())
+        params.set("action", debouncedActionFilter.trim());
+      if (debouncedModuleFilter.trim())
+        params.set("module", debouncedModuleFilter.trim());
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
       try {
@@ -361,10 +373,10 @@ export function AuditLogPage() {
     return () => controller.abort();
   }, [
     API_BASE_URL,
-    actionFilter,
+    debouncedActionFilter,
     dateFrom,
     dateTo,
-    moduleFilter,
+    debouncedModuleFilter,
     sortOrder,
     user,
     userFilter,

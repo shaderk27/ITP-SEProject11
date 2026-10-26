@@ -31,6 +31,7 @@ def test_admin_can_retrieve_recent_audit_events(db, admin_user):
     )
 
     assert result is not None
+    assert result["access"] == "granted"
     event = next(
         item for item in result["events"] if item["source"] == f"Audit #{log.audit_id}"
     )
@@ -49,9 +50,45 @@ def test_non_admin_is_not_given_audit_records(db):
     result = _audit_events(db, user, "Show the audit log", [(None, None)])
 
     assert result == {
+        "access": "denied",
         "note": "System audit history is restricted to Administrators.",
         "events": [],
     }
+
+
+def test_ordinary_budget_change_question_does_not_trigger_audit(db, admin_user):
+    result = _audit_events(
+        db,
+        admin_user,
+        "What changed in my budget this year?",
+        [(None, None)],
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_note"),
+    [
+        (
+            "Who changed purchase request PR399990100?",
+            "Exact purchase-request change attribution is not available",
+        ),
+        (
+            "Who changed the budget? Show the audit log.",
+            "Exact budget-change attribution is not directly searchable",
+        ),
+    ],
+)
+def test_unsupported_exact_audit_attribution_is_explained(
+    db, admin_user, question, expected_note
+):
+    result = _audit_events(db, admin_user, question, [(None, None)])
+
+    assert result is not None
+    assert result["access"] == "granted"
+    assert result["events"] == []
+    assert expected_note in result["note"]
 
 
 def test_cited_audit_event_is_returned_as_a_source():
@@ -94,3 +131,17 @@ def test_audit_fallback_answer_is_cited_and_names_actor():
 
     assert "Test Admin performed UPDATE on Budget (17)" in answer
     assert "[Audit #42]" in answer
+    assert "2026-10-20 10:30" in answer
+    assert "10:30:00" not in answer
+
+
+def test_empty_admin_audit_fallback_is_friendly():
+    answer = _audit_fallback_answer(
+        {
+            "access": "granted",
+            "note": "No matching audit events were found in the selected period.",
+            "events": [],
+        }
+    )
+
+    assert answer == "No matching audit events were found in the selected period."
