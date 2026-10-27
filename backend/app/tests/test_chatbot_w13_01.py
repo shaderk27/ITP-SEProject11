@@ -5,6 +5,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.api.dashboard import get_breakdown
 from app.models.auth import Role, User
 from app.models.config import (
     Budget,
@@ -124,12 +125,13 @@ def _add_line(
     category: SpendingCategory,
     amount: str,
     pr_status: str,
+    request_date: date = date(2042, 5, 1),
 ) -> None:
     suffix = _next_suffix()
     pr = PurchaseRequest(
         source_pr_number=f"PR-W13-{suffix}",
         requestor_name="W13 Requestor",
-        request_date=date(2042, 5, 1),
+        request_date=request_date,
         purpose="W13 chatbot context test",
         wbs_code=group.wbs_code,
         grand_total_sgd=Decimal(amount),
@@ -205,20 +207,34 @@ def test_chatbot_context_uses_approved_purchase_data_only(db, admin_user):
     group, lab = _seeded_group_lab_pairs(db)[0]
     category = _make_category(db)
     period_id = _seeded_period_id(db)
+    request = ChatbotContextRequest(
+        query_type="budget_utilisation_summary",
+        period_id=period_id,
+        date_range="all",
+    )
+    before = build_chatbot_context(db, admin_user, request)
+    before_group = next(
+        (
+            item
+            for item in before.lab_group_budget_context
+            if item.lab_group_id == group.lab_group_id
+        ),
+        None,
+    )
+    baseline_envelope = Decimal(before_group.envelope_budget_sgd) if before_group else 0
+    baseline_allocated = (
+        Decimal(before_group.allocated_to_labs_sgd) if before_group else 0
+    )
+    baseline_unallocated = Decimal(before_group.unallocated_sgd) if before_group else 0
+    baseline_approved = Decimal(before_group.approved_spend_sgd) if before_group else 0
+    baseline_pending = Decimal(before_group.pending_spend_sgd) if before_group else 0
+
     _set_group_envelope(db, group, "5000.00", period_id)
     _set_budget(db, group, lab, category, "1000.00", period_id)
     _add_line(db, group, lab, category, "250.00", "Approved")
     _add_line(db, group, lab, category, "999.00", "Pending Approval")
 
-    response = build_chatbot_context(
-        db,
-        admin_user,
-        ChatbotContextRequest(
-            query_type="budget_utilisation_summary",
-            period_id=period_id,
-            date_range="all",
-        ),
-    )
+    response = build_chatbot_context(db, admin_user, request)
     row = next(
         item
         for item in response.budget_context
@@ -227,18 +243,90 @@ def test_chatbot_context_uses_approved_purchase_data_only(db, admin_user):
 
     assert Decimal(row.budget_sgd) == Decimal("1000.00")
     assert Decimal(row.approved_spend_sgd) == Decimal("250.00")
+    assert Decimal(row.pending_spend_sgd) == Decimal("999.00")
+    assert Decimal(row.projected_spend_sgd) == Decimal("1249.00")
+    assert Decimal(row.remaining_after_pending_sgd) == Decimal("-249.00")
     group_row = next(
         item
         for item in response.lab_group_budget_context
         if item.lab_group_id == group.lab_group_id
     )
-    assert Decimal(group_row.envelope_budget_sgd) == Decimal("5000.00")
-    assert Decimal(group_row.allocated_to_labs_sgd) == Decimal("1000.00")
-    assert Decimal(group_row.unallocated_sgd) == Decimal("4000.00")
-    assert Decimal(group_row.approved_spend_sgd) == Decimal("250.00")
+    assert Decimal(group_row.envelope_budget_sgd) - baseline_envelope == Decimal(
+        "5000.00"
+    )
+    assert Decimal(group_row.allocated_to_labs_sgd) - baseline_allocated == Decimal(
+        "1000.00"
+    )
+    assert Decimal(group_row.unallocated_sgd) - baseline_unallocated == Decimal(
+        "4000.00"
+    )
+    assert Decimal(group_row.approved_spend_sgd) - baseline_approved == Decimal(
+        "250.00"
+    )
+    assert Decimal(group_row.pending_spend_sgd) - baseline_pending == Decimal("999.00")
     visible_amounts = {Decimal(line.amount_gst) for line in response.purchase_lines}
     assert Decimal("250.00") in visible_amounts
     assert Decimal("999.00") not in visible_amounts
+
+
+def test_chatbot_figures_reconcile_with_dashboard_and_report_source(db, admin_user):
+    group, lab = _seeded_group_lab_pairs(db)[0]
+    category = _make_category(db)
+    period = db.query(BudgetPeriod).order_by(BudgetPeriod.period_id).first()
+    if period is None:
+        pytest.skip("No budget periods seeded; run backend/seeds/dev_seed.sql.")
+    start = period.start_date or date(period.year_no, 4, 1)
+    end = period.end_date or date(period.year_no + 1, 3, 31)
+
+    _set_budget(db, group, lab, category, "1000.00", period.period_id)
+    _add_line(db, group, lab, category, "320.00", "Approved", start)
+    _add_line(db, group, lab, category, "80.00", "Pending Approval", start)
+
+    chatbot = build_chatbot_context(
+        db,
+        admin_user,
+        ChatbotContextRequest(
+            query_type="budget_utilisation_summary",
+            period_id=period.period_id,
+            start_date=start,
+            end_date=end,
+        ),
+    )
+    chatbot_row = next(
+        row
+        for row in chatbot.budget_context
+        if row.lab_id == lab.lab_id and row.category_id == category.category_id
+    )
+
+    dashboard = get_breakdown(
+        date_range="all",
+        start_date=start,
+        end_date=end,
+        period_id=period.period_id,
+        db=db,
+        current_user=admin_user,
+    )
+    dashboard_row = next(
+        category_row
+        for group_row in dashboard.lab_groups
+        for lab_row in group_row.labs
+        for category_row in lab_row.categories
+        if lab_row.lab_id == lab.lab_id
+        and category_row.category_id == category.category_id
+    )
+
+    assert Decimal(chatbot_row.budget_sgd) == Decimal(dashboard_row.budget_sgd)
+    assert Decimal(chatbot_row.approved_spend_sgd) == Decimal(
+        dashboard_row.actual_spend_sgd
+    )
+    assert Decimal(chatbot_row.pending_spend_sgd) == Decimal(dashboard_row.pending_sgd)
+    assert Decimal(chatbot_row.remaining_after_pending_sgd) == Decimal(
+        dashboard_row.available_balance_sgd
+    )
+    assert chatbot_row.utilisation_pct == dashboard_row.utilisation_pct
+    assert (
+        chatbot_row.projected_utilisation_pct == dashboard_row.projected_utilisation_pct
+    )
 
 
 def test_chatbot_context_scopes_teamlead_to_own_lab_group(db):

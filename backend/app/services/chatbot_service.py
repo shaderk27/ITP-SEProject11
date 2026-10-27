@@ -32,7 +32,7 @@ def supported_chatbot_questions() -> SupportedChatbotQuestionsResponse:
             SupportedChatbotQuestion(
                 query_type="budget_utilisation_summary",
                 label="Budget utilisation summary",
-                description="Summarise approved spend, budget, remaining balance, and utilisation by authorised lab scope.",
+                description="Summarise approved spend, pending spend, projected spend, remaining balances, and utilisation by authorised lab scope.",
                 example_questions=[
                     "What is my current budget utilisation?",
                     "Summarise approved spending for my lab group.",
@@ -84,7 +84,7 @@ def supported_chatbot_questions() -> SupportedChatbotQuestionsResponse:
             "spending_categories",
         ],
         guardrails=[
-            "Only approved purchase lines are exposed as actual spend.",
+            "Approved and pending spend are reported separately; only approved lines count as actual spend.",
             "Responses are scoped by the caller's role, lab group, and lab assignment.",
             "General/unknown lab groups are excluded from budget context until reviewed.",
             "Unsupported query types are rejected before any data is retrieved.",
@@ -114,7 +114,14 @@ def build_chatbot_context(
         db, current_user, request.period_id, start, end
     )
     budget_context = _budget_context(db, current_user, request.period_id, start, end)
-    purchase_lines = _purchase_line_context(db, current_user, start, end, request.limit)
+    purchase_lines = _purchase_line_context(
+        db,
+        current_user,
+        start,
+        end,
+        request.limit,
+        status_prefix=_purchase_status_prefix(request.question),
+    )
 
     return ChatbotContextResponse(
         query_type=request.query_type,
@@ -134,7 +141,7 @@ def build_chatbot_context(
         purchase_lines=purchase_lines,
         notes=[
             "This endpoint returns authorised structured context only; natural-language answer generation is handled by later chatbot tasks.",
-            "Approved spend uses PR line statuses that start with 'approved'.",
+            "Approved and pending spend use PR line statuses that start with 'approved' and 'pending' respectively.",
         ],
     )
 
@@ -209,6 +216,18 @@ def _lab_group_budget_context(
                 ),
                 0,
             ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            PurchaseRequestLine.pr_status.ilike("pending%"),
+                            PurchaseRequestLine.amount_gst,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
         )
         .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
         .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
@@ -219,9 +238,15 @@ def _lab_group_budget_context(
     spend_query = _apply_date_bounds(spend_query, start, end)
     spend_query = _apply_role_scope(spend_query, current_user)
 
+    spend_rows = spend_query.all()
     spends = {
         int(group_id): _to_decimal(amount)
-        for group_id, amount in spend_query.all()
+        for group_id, amount, _ in spend_rows
+        if group_id is not None
+    }
+    pending_spends = {
+        int(group_id): _to_decimal(amount)
+        for group_id, _, amount in spend_rows
         if group_id is not None
     }
     group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
@@ -231,6 +256,8 @@ def _lab_group_budget_context(
         envelope = envelopes.get(group_id, Decimal("0"))
         allocated = allocations.get(group_id, Decimal("0"))
         spend = spends.get(group_id, Decimal("0"))
+        pending = pending_spends.get(group_id, Decimal("0"))
+        projected = spend + pending
         rows.append(
             ChatbotLabGroupBudgetContext(
                 lab_group_id=group_id,
@@ -240,6 +267,10 @@ def _lab_group_budget_context(
                 unallocated_sgd=str(envelope - allocated),
                 approved_spend_sgd=str(spend),
                 utilisation_pct=_pct(spend, envelope),
+                pending_spend_sgd=str(pending),
+                projected_spend_sgd=str(projected),
+                remaining_after_pending_sgd=str(envelope - projected),
+                projected_utilisation_pct=_pct(projected, envelope),
             )
         )
     return rows
@@ -304,6 +335,18 @@ def _budget_context(
                 ),
                 0,
             ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            PurchaseRequestLine.pr_status.ilike("pending%"),
+                            PurchaseRequestLine.amount_gst,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
         )
         .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
         .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
@@ -319,7 +362,8 @@ def _budget_context(
     spend_query = _apply_role_scope(spend_query, current_user)
 
     spends: dict[tuple[int, int, int | None], Decimal] = {}
-    for group_id, lab_id, category_id, amount in spend_query.all():
+    pending_spends: dict[tuple[int, int, int | None], Decimal] = {}
+    for group_id, lab_id, category_id, amount, pending_amount in spend_query.all():
         if group_id is None or lab_id is None:
             continue
         spends[
@@ -329,6 +373,13 @@ def _budget_context(
                 int(category_id) if category_id is not None else None,
             )
         ] = _to_decimal(amount)
+        pending_spends[
+            (
+                int(group_id),
+                int(lab_id),
+                int(category_id) if category_id is not None else None,
+            )
+        ] = _to_decimal(pending_amount)
 
     group_names = {g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()}
     lab_names = {lab.lab_id: lab.lab_name for lab in db.query(Lab).all()}
@@ -337,9 +388,13 @@ def _budget_context(
     }
 
     rows: list[ChatbotBudgetContext] = []
-    for group_id, lab_id, category_id in sorted(set(budgets) | set(spends)):
+    for group_id, lab_id, category_id in sorted(
+        set(budgets) | set(spends) | set(pending_spends)
+    ):
         budget = budgets.get((group_id, lab_id, category_id), Decimal("0"))
         spend = spends.get((group_id, lab_id, category_id), Decimal("0"))
+        pending = pending_spends.get((group_id, lab_id, category_id), Decimal("0"))
+        projected = spend + pending
         remaining = budget - spend
         rows.append(
             ChatbotBudgetContext(
@@ -357,6 +412,10 @@ def _budget_context(
                 approved_spend_sgd=str(spend),
                 remaining_sgd=str(remaining),
                 utilisation_pct=_pct(spend, budget),
+                pending_spend_sgd=str(pending),
+                projected_spend_sgd=str(projected),
+                remaining_after_pending_sgd=str(budget - projected),
+                projected_utilisation_pct=_pct(projected, budget),
             )
         )
     return rows
@@ -368,6 +427,7 @@ def _purchase_line_context(
     start: date | None,
     end: date | None,
     limit: int,
+    status_prefix: str = "approved",
 ) -> list[ChatbotPurchaseLineContext]:
     query = (
         db.query(PurchaseRequest, PurchaseRequestLine, LabGroup, Lab, SpendingCategory)
@@ -378,7 +438,7 @@ def _purchase_line_context(
             SpendingCategory,
             SpendingCategory.category_id == PurchaseRequestLine.category_id,
         )
-        .filter(PurchaseRequestLine.pr_status.ilike("approved%"))
+        .filter(PurchaseRequestLine.pr_status.ilike(f"{status_prefix}%"))
         .filter(LabGroup.lab_group_name != "General")
         .order_by(
             PurchaseRequest.updated_at.desc(), PurchaseRequestLine.pr_line_id.desc()
@@ -409,6 +469,13 @@ def _purchase_line_context(
             )
         )
     return rows
+
+
+def _purchase_status_prefix(question: str | None) -> str:
+    """Keep normal purchase lookups approved-only, unless pending is explicit."""
+    text = (question or "").lower()
+    pending_terms = ("pending", "awaiting approval", "unapproved", "not approved")
+    return "pending" if any(term in text for term in pending_terms) else "approved"
 
 
 def _resolve_bounds(request: ChatbotContextRequest) -> tuple[date | None, date | None]:

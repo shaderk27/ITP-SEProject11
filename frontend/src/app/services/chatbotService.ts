@@ -27,6 +27,10 @@ interface ChatbotBudgetContext {
   approved_spend_sgd: string;
   remaining_sgd: string;
   utilisation_pct: number;
+  pending_spend_sgd: string;
+  projected_spend_sgd: string;
+  remaining_after_pending_sgd: string;
+  projected_utilisation_pct: number;
 }
 
 interface ChatbotLabGroupBudgetContext {
@@ -37,6 +41,10 @@ interface ChatbotLabGroupBudgetContext {
   unallocated_sgd: string;
   approved_spend_sgd: string;
   utilisation_pct: number;
+  pending_spend_sgd: string;
+  projected_spend_sgd: string;
+  remaining_after_pending_sgd: string;
+  projected_utilisation_pct: number;
 }
 
 interface ChatbotPurchaseLineContext {
@@ -75,7 +83,7 @@ export interface ChatTurn {
 
 /** Evidence behind an AI answer (W13-03A). */
 export interface AnswerSource {
-  type: "sql_calculation" | "pr_line" | "document";
+  type: "sql_calculation" | "pr_line" | "document" | "audit_event";
   /** Citation label, e.g. "PR 4500012345 line 2". */
   ref: string;
   detail: string;
@@ -161,6 +169,14 @@ export async function askAssistant(
   const data = (await response.json()) as ChatbotAskResponse;
   const lines = data.record_counts.budget_lines ?? 0;
   const searchNote = data.notes.find((n) => n.startsWith("Purchase search"));
+  if (data.model === "rules-audit") {
+    return {
+      text: data.answer,
+      source: "rules",
+      note: `AI unavailable · database audit answer · ${data.period_label}`,
+      sources: (data.sources ?? []).filter((s) => s.type === "audit_event"),
+    };
+  }
   return {
     text: data.answer,
     source: "ai",
@@ -266,14 +282,27 @@ function formatUtilisation(context: ChatbotContextResponse): string[] {
       (acc, row) => {
         acc.budget += money(row.envelope_budget_sgd);
         acc.spend += money(row.approved_spend_sgd);
+        acc.pending += money(row.pending_spend_sgd);
+        acc.projected += money(row.projected_spend_sgd);
+        acc.afterPending += money(row.remaining_after_pending_sgd);
         acc.remaining += money(row.unallocated_sgd);
         return acc;
       },
-      { budget: 0, spend: 0, remaining: 0 },
+      {
+        budget: 0,
+        spend: 0,
+        pending: 0,
+        projected: 0,
+        afterPending: 0,
+        remaining: 0,
+      },
     );
     lines.push(
       `Total envelope budget: ${formatSgd(totals.budget)}`,
       `Approved spend: ${formatSgd(totals.spend)}`,
+      `Pending spend: ${formatSgd(totals.pending)}`,
+      `Projected spend (approved + pending): ${formatSgd(totals.projected)}`,
+      `Remaining after pending: ${formatSgd(totals.afterPending)}`,
       `Unallocated envelope balance: ${formatSgd(totals.remaining)}`,
       "",
       "Top lab groups by utilisation:",
@@ -291,14 +320,27 @@ function formatUtilisation(context: ChatbotContextResponse): string[] {
     (acc, row) => {
       acc.budget += money(row.budget_sgd);
       acc.spend += money(row.approved_spend_sgd);
+      acc.pending += money(row.pending_spend_sgd);
+      acc.projected += money(row.projected_spend_sgd);
+      acc.afterPending += money(row.remaining_after_pending_sgd);
       acc.remaining += money(row.remaining_sgd);
       return acc;
     },
-    { budget: 0, spend: 0, remaining: 0 },
+    {
+      budget: 0,
+      spend: 0,
+      pending: 0,
+      projected: 0,
+      afterPending: 0,
+      remaining: 0,
+    },
   );
   lines.push(
     `Total budget: ${formatSgd(totals.budget)}`,
     `Approved spend: ${formatSgd(totals.spend)}`,
+    `Pending spend: ${formatSgd(totals.pending)}`,
+    `Projected spend (approved + pending): ${formatSgd(totals.projected)}`,
+    `Remaining after pending: ${formatSgd(totals.afterPending)}`,
     `Remaining budget: ${formatSgd(totals.remaining)}`,
     "",
     "Highest utilisation rows:",
@@ -328,8 +370,14 @@ function formatHighSpending(context: ChatbotContextResponse): string[] {
 
 function formatRisks(context: ChatbotContextResponse): string[] {
   const riskRows = [...context.budget_context]
-    .filter((row) => row.utilisation_pct >= 80 || money(row.remaining_sgd) < 0)
-    .sort((a, b) => b.utilisation_pct - a.utilisation_pct);
+    .filter(
+      (row) =>
+        row.projected_utilisation_pct >= 80 ||
+        money(row.remaining_after_pending_sgd) < 0,
+    )
+    .sort(
+      (a, b) => b.projected_utilisation_pct - a.projected_utilisation_pct,
+    );
 
   if (riskRows.length === 0) {
     return [
@@ -341,9 +389,9 @@ function formatRisks(context: ChatbotContextResponse): string[] {
   return [
     "Budget risk areas:",
     ...riskRows.slice(0, 6).map((row) => {
-      const remaining = money(row.remaining_sgd);
+      const remaining = money(row.remaining_after_pending_sgd);
       const status = remaining < 0 ? "over budget" : "high utilisation";
-      return `- ${row.lab_name} / ${row.category_name}: ${formatPercent(row.utilisation_pct)} used, ${formatSgd(remaining)} remaining (${status}).`;
+      return `- ${row.lab_name} / ${row.category_name}: ${formatPercent(row.projected_utilisation_pct)} projected utilisation, ${formatSgd(remaining)} remaining after pending (${status}).`;
     }),
     "",
     "Recommended next step: review the listed categories before approving additional PRs in the same scope.",
