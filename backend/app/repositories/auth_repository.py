@@ -35,10 +35,6 @@ class AuthRepository:
             .scalar_one_or_none()
         )
 
-    def get_user_by_staff_id(self, db: Session, staff_id: str) -> Optional[User]:
-        """Fetch a user by their unique institutional staff identifier."""
-        return db.query(User).filter(User.staff_id == staff_id).first()
-
     def create_user(
         self,
         db: Session,
@@ -237,8 +233,6 @@ class AuthRepository:
     def get_role_by_id(self, db: Session, role_id: int) -> Optional[Role]:
         return db.query(Role).filter(Role.role_id == role_id).first()
 
-    def get_role_by_name(self, db: Session, role_name: str) -> Optional[Role]:
-        return db.query(Role).filter(Role.role_name == role_name).first()
 
     def get_all_roles(self, db: Session) -> Sequence[Role]:
         return db.query(Role).all()
@@ -255,17 +249,6 @@ class AuthRepository:
             .all()
         )
 
-    def get_users_by_role_id(
-        self, db: Session, role_id: int, active_only: bool = True
-    ) -> List[User]:
-        query = (
-            db.query(User)
-            .options(joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab))
-            .filter(User.role_id == role_id)
-        )
-        if active_only:
-            query = query.filter(User.is_active.is_(True))
-        return query.all()
 
     def get_users_by_role(self, db: Session, role_name: str) -> List[User]:
         """Fetch all users assigned to a given role name."""
@@ -300,17 +283,6 @@ class AuthRepository:
             .first()
         )
 
-    def get_users_by_role_and_lab(
-        self, db: Session, role_id: int, lab_id: int
-    ) -> List[User]:
-        """Fetch all users assigned as IC for a specific lab."""
-        return (
-            db.query(User)
-            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
-            .filter(User.role_id == role_id, LabIcAssignment.lab_id == lab_id)
-            .filter(User.is_active.is_(True))
-            .all()
-        )
 
     def get_assignments(self, db: Session) -> list[dict]:
         """Return current lab group and lab IC assignments for admin UIs."""
@@ -347,20 +319,6 @@ class AuthRepository:
             }
             for row in rows
         ]
-
-    # Password reset helpers
-    def get_active_reset_token(
-        self, db: Session, user_id: int
-    ) -> Optional[PasswordResetToken]:
-        return (
-            db.query(PasswordResetToken)
-            .filter(
-                PasswordResetToken.user_id == user_id,
-                ~PasswordResetToken.used,
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
-            )
-            .first()
-        )
 
     def invalidate_reset_tokens(self, db: Session, user_id: int) -> None:
         db.query(PasswordResetToken).filter(
