@@ -46,7 +46,7 @@ def test_blank_provider_is_unavailable():
 
 
 def test_unknown_provider_is_unavailable(monkeypatch):
-    monkeypatch.setenv("EMBEDDING_PROVIDER", "openrouter")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "bogus")
     with pytest.raises(EmbeddingUnavailableError):
         embedding_client.embed_documents(["x"])
 

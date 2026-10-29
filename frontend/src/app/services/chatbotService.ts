@@ -135,6 +135,8 @@ interface ChatbotAskResponse {
   focus: string[];
   notes: string[];
   sources?: AnswerSource[];
+  /** True when the question was out of scope; `answer` is the "what you can ask" message. */
+  out_of_scope?: boolean;
 }
 
 /**
@@ -176,6 +178,9 @@ export async function askAssistant(
       note: `AI unavailable · database audit answer · ${data.period_label}`,
       sources: (data.sources ?? []).filter((s) => s.type === "audit_event"),
     };
+  }
+  if (data.out_of_scope) {
+    return { text: data.answer, source: "ai", note: "Outside what Ask AI can answer" };
   }
   return {
     text: data.answer,
