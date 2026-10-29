@@ -233,7 +233,6 @@ class AuthRepository:
     def get_role_by_id(self, db: Session, role_id: int) -> Optional[Role]:
         return db.query(Role).filter(Role.role_id == role_id).first()
 
-
     def get_all_roles(self, db: Session) -> Sequence[Role]:
         return db.query(Role).all()
 
@@ -248,7 +247,6 @@ class AuthRepository:
             .order_by(User.user_id)
             .all()
         )
-
 
     def get_users_by_role(self, db: Session, role_name: str) -> List[User]:
         """Fetch all users assigned to a given role name."""
@@ -282,7 +280,6 @@ class AuthRepository:
             .filter(User.is_active.is_(True))
             .first()
         )
-
 
     def get_assignments(self, db: Session) -> list[dict]:
         """Return current lab group and lab IC assignments for admin UIs."""
