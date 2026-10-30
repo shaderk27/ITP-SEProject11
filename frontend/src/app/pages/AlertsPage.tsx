@@ -14,6 +14,14 @@ import {
 import { Button } from "../components/ui/button";
 import { useAuth } from "../context/AuthContext";
 
+const formatCurrency = (amount: number = 0) => {
+  const absFormatted = Math.abs(amount).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return amount < 0 ? `-$${absFormatted}` : `$${absFormatted}`;
+};
+
 interface Category {
   id: number;
   name: string;
@@ -263,7 +271,9 @@ export function AlertsPage() {
         !isLabIC && group.budget > 0 ? (group.spent / group.budget) * 100 : 0;
       const groupSeverity = getSeverity(groupUtil);
 
-      let groupLabs = labs.filter((l) => l.group_id === group.id && l.budget > 0);
+      let groupLabs = labs.filter(
+        (l) => l.group_id === group.id && (l.budget > 0 || l.spent > 0)
+      );
 
       if (isLabIC) {
         groupLabs = groupLabs.filter((l) => user?.labIds.includes(l.id));
@@ -271,7 +281,12 @@ export function AlertsPage() {
 
       const labAlerts: LabAlert[] = [];
       groupLabs.forEach((lab) => {
-        const util = (lab.spent / lab.budget) * 100;
+        const util =
+          lab.budget > 0
+            ? (lab.spent / lab.budget) * 100
+            : lab.spent > 0
+            ? 100
+            : 0;
         const severity = getSeverity(util);
 
         if (severity.type !== "none" || groupSeverity.type !== "none") {
@@ -483,10 +498,7 @@ export function AlertsPage() {
                             Total Budget
                           </p>
                           <p className="text-sm font-bold text-gray-900">
-                            $
-                            {group.totalBudget.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                            })}
+                            {formatCurrency(group.totalBudget)}
                           </p>
                         </div>
                         <div className="bg-white/50 rounded p-2">
@@ -494,10 +506,7 @@ export function AlertsPage() {
                             Group Spent
                           </p>
                           <p className="text-sm font-bold text-gray-900">
-                            $
-                            {group.totalSpent.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                            })}
+                            {formatCurrency(group.totalSpent)}
                           </p>
                         </div>
                       </div>
@@ -539,7 +548,7 @@ export function AlertsPage() {
                                     Allocated:
                                   </span>{" "}
                                   <span className="font-semibold text-gray-800">
-                                    ${lab.budget.toLocaleString()}
+                                    {formatCurrency(lab.budget)}
                                   </span>
                                 </div>
                                 <div>
@@ -547,7 +556,7 @@ export function AlertsPage() {
                                     Spent:
                                   </span>{" "}
                                   <span className="font-semibold text-gray-800">
-                                    ${lab.actual.toLocaleString()}
+                                    {formatCurrency(lab.actual)}
                                   </span>
                                 </div>
                                 <div>
@@ -631,10 +640,12 @@ export function AlertsPage() {
                 <tbody className="divide-y divide-gray-100">
                   {categories.map((cat) => {
                     const catKey = String(cat.id);
-                    const allocated =
-                      selectedLabDetails.budgets?.[cat.id] || 0;
-                    const spent =
-                      selectedLabDetails.spentByCategory?.[cat.id] || 0;
+                    const allocated = Number(
+                      selectedLabDetails.budgets?.[cat.id] || 0
+                    );
+                    const spent = Number(
+                      selectedLabDetails.spentByCategory?.[cat.id] || 0
+                    );
                     if (allocated === 0 && spent === 0) return null;
                     const balance = allocated - spent;
 
@@ -661,28 +672,24 @@ export function AlertsPage() {
                                 {prLines.length === 1 ? "line" : "lines"}
                               </span>
                             )}
+                            {balance < 0 && (
+                              <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold uppercase rounded bg-red-100 text-red-700 border border-red-200">
+                                Overrun
+                              </span>
+                            )}
                           </td>
                           <td className="p-3 text-right text-gray-600">
-                            $
-                            {allocated.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                            })}
+                            {formatCurrency(allocated)}
                           </td>
                           <td className="p-3 text-right text-rose-600 font-medium">
-                            $
-                            {spent.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                            })}
+                            {formatCurrency(spent)}
                           </td>
                           <td
                             className={`p-3 text-right font-bold ${
                               balance < 0 ? "text-red-600" : "text-emerald-600"
                             }`}
                           >
-                            $
-                            {balance.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                            })}
+                            {formatCurrency(balance)}
                           </td>
                         </tr>
 
@@ -756,12 +763,9 @@ export function AlertsPage() {
                                             </span>
                                           </td>
                                           <td className="py-2 px-3 text-right font-bold text-gray-900 whitespace-nowrap">
-                                            $
-                                            {Number(
-                                              line.amount_gst
-                                            ).toLocaleString(undefined, {
-                                              minimumFractionDigits: 2,
-                                            })}
+                                            {formatCurrency(
+                                              Number(line.amount_gst)
+                                            )}
                                           </td>
                                         </tr>
                                       ))}
@@ -776,6 +780,31 @@ export function AlertsPage() {
                     );
                   })}
                 </tbody>
+                <tfoot className="bg-gray-50 border-t-2 border-gray-200 font-bold">
+                  <tr>
+                    <td className="p-3 text-gray-700 uppercase text-xs">
+                      Total Lab Summary
+                    </td>
+                    <td className="p-3 text-right text-gray-900">
+                      {formatCurrency(selectedLabDetails.budget)}
+                    </td>
+                    <td className="p-3 text-right text-rose-600">
+                      {formatCurrency(selectedLabDetails.actual)}
+                    </td>
+                    <td
+                      className={`p-3 text-right ${
+                        selectedLabDetails.budget - selectedLabDetails.actual <
+                        0
+                          ? "text-red-600"
+                          : "text-emerald-600"
+                      }`}
+                    >
+                      {formatCurrency(
+                        selectedLabDetails.budget - selectedLabDetails.actual
+                      )}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
           </Card>

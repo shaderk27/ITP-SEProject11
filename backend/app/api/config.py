@@ -76,6 +76,16 @@ def _period_out(p: BudgetPeriod) -> dict:
     }
 
 
+def _active_pr_status_filter():
+    return or_(
+        PurchaseRequestLine.pr_status.is_(None),
+        and_(
+            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+        ),
+    )
+
+
 # ==============================
 # FISCAL YEAR (BUDGET PERIOD) API
 # ==============================
@@ -141,11 +151,7 @@ def get_lab_groups(
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
     )
-    # period_id: >0 = that fiscal year; 0 = all fiscal years (the dashboard's
-    # "All time"); None = current FY. Same convention as get_breakdown.
-    all_periods = period_id == 0
     pid = period_id if period_id is not None else get_or_create_current_period(db)
-    budget_period_filter = [] if all_periods else [Budget.period_id == pid]
 
     query = db.query(LabGroup)
     if role_name == "teamlead":
@@ -179,7 +185,7 @@ def get_lab_groups(
             .filter(
                 Budget.lab_group_id == g.lab_group_id,
                 Budget.lab_id.is_(None),
-                *budget_period_filter,
+                Budget.period_id == pid,
             )
             .scalar()
             or 0
@@ -190,21 +196,13 @@ def get_lab_groups(
             .filter(
                 Budget.lab_group_id == g.lab_group_id,
                 Budget.lab_id.isnot(None),
-                *budget_period_filter,
+                Budget.period_id == pid,
             )
             .scalar()
             or 0
         )
 
-        if active_period or all_periods:
-            date_filter = (
-                []
-                if all_periods
-                else [
-                    PurchaseRequest.request_date >= active_period.start_date,
-                    PurchaseRequest.request_date <= active_period.end_date,
-                ]
-            )
+        if active_period:
             total_spent = float(
                 db.query(func.sum(PurchaseRequestLine.amount_gst))
                 .join(
@@ -213,14 +211,9 @@ def get_lab_groups(
                 .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
                 .filter(
                     Lab.lab_group_id == g.lab_group_id,
-                    *date_filter,
-                    or_(
-                        PurchaseRequestLine.pr_status.is_(None),
-                        and_(
-                            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
-                        ),
-                    ),
+                    PurchaseRequest.request_date >= active_period.start_date,
+                    PurchaseRequest.request_date <= active_period.end_date,
+                    _active_pr_status_filter(),
                 )
                 .scalar()
                 or 0
@@ -247,6 +240,7 @@ def get_lab_groups(
 @router.post("/labgroups", response_model=LabGroupOut)
 def create_lab_group(
     group: LabGroupCreate,
+    background_tasks: BackgroundTasks,
     request: Request,
     period_id: int | None = None,
     db: Session = Depends(get_db),
@@ -265,6 +259,65 @@ def create_lab_group(
             detail=f"Cannot create Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
         )
 
+    # Pre-commit validation of selected orphaned labs' allocations & committed spend
+    assigned_lab_ids = getattr(group, "assigned_lab_ids", None) or []
+    allocated_to_labs = 0.0
+    total_spent = 0.0
+
+    if assigned_lab_ids:
+        allocated_to_labs = float(
+            db.query(func.sum(Budget.budget_amount))
+            .filter(
+                Budget.lab_id.in_(assigned_lab_ids),
+                Budget.period_id == pid,
+            )
+            .scalar()
+            or 0
+        )
+
+        active_period = (
+            db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
+        )
+        if active_period:
+            total_spent = float(
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(
+                    PurchaseRequest,
+                    PurchaseRequest.pr_id == PurchaseRequestLine.pr_id,
+                )
+                .filter(
+                    PurchaseRequestLine.lab_id.in_(assigned_lab_ids),
+                    PurchaseRequest.request_date >= active_period.start_date,
+                    PurchaseRequest.request_date <= active_period.end_date,
+                    _active_pr_status_filter(),
+                )
+                .scalar()
+                or 0
+            )
+
+    requested_group_budget = float(group.budget)
+
+    # Guard 1: Cannot create Lab Group with envelope below assigned labs' existing allocations
+    if requested_group_budget + 1e-6 < allocated_to_labs:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot set Lab Group budget to ${requested_group_budget:,.2f}: "
+                f"${allocated_to_labs:,.2f} is already allocated to labs in this group. "
+                "Please reduce lab budget allocations first."
+            ),
+        )
+
+    # Guard 2: Cannot create Lab Group with envelope below assigned labs' committed spending
+    if requested_group_budget + 1e-6 < total_spent:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot set Lab Group budget to ${requested_group_budget:,.2f}: "
+                f"${total_spent:,.2f} has already been spent/utilised in this Lab Group."
+            ),
+        )
+
     new_group = LabGroup(
         lab_group_name=group.name,
         wbs_code=group.wbs_code,
@@ -273,7 +326,7 @@ def create_lab_group(
     db.add(new_group)
     db.flush()
 
-    if group.budget > 0:
+    if requested_group_budget > 0:
         envelope = Budget(
             period_id=pid,
             lab_group_id=new_group.lab_group_id,
@@ -284,15 +337,13 @@ def create_lab_group(
         )
         db.add(envelope)
 
-    if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
-        labs_to_update = (
-            db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
-        )
+    if assigned_lab_ids:
+        labs_to_update = db.query(Lab).filter(Lab.lab_id.in_(assigned_lab_ids)).all()
         for lab in labs_to_update:
             lab.lab_group_id = new_group.lab_group_id
 
         budgets_to_update = (
-            db.query(Budget).filter(Budget.lab_id.in_(group.assigned_lab_ids)).all()
+            db.query(Budget).filter(Budget.lab_id.in_(assigned_lab_ids)).all()
         )
         for b in budgets_to_update:
             b.lab_group_id = new_group.lab_group_id
@@ -309,20 +360,25 @@ def create_lab_group(
         new_value={
             "name": new_group.lab_group_name,
             "wbs_code": new_group.wbs_code,
-            "budget": float(group.budget),
+            "budget": requested_group_budget,
         },
         request=request,
     )
+
+    if assigned_lab_ids:
+        background_tasks.add_task(
+            check_and_notify_lab_group_thresholds, new_group.lab_group_id
+        )
 
     return {
         "id": new_group.lab_group_id,
         "name": new_group.lab_group_name,
         "wbs_code": new_group.wbs_code,
         "description": new_group.description,
-        "budget": float(group.budget),
-        "allocated_to_labs": 0.0,
-        "unallocated": float(group.budget),
-        "spent": 0.0,
+        "budget": requested_group_budget,
+        "allocated_to_labs": allocated_to_labs,
+        "unallocated": requested_group_budget - allocated_to_labs,
+        "spent": total_spent,
         "threshold": 80,
     }
 
@@ -355,6 +411,85 @@ def update_lab_group(
         raise HTTPException(
             status_code=400,
             detail=f"Cannot update Lab Group: The WBS Prefix '{group.wbs_code}' is already in use by another group.",
+        )
+
+    assigned_lab_ids = getattr(group, "assigned_lab_ids", None) or []
+
+    # Calculate current allocations (including any newly assigned orphaned labs)
+    current_allocated = float(
+        db.query(func.sum(Budget.budget_amount))
+        .filter(
+            Budget.lab_group_id == group_id,
+            Budget.lab_id.isnot(None),
+            Budget.period_id == pid,
+        )
+        .scalar()
+        or 0
+    )
+    newly_assigned_allocated = 0.0
+    if assigned_lab_ids:
+        newly_assigned_allocated = float(
+            db.query(func.sum(Budget.budget_amount))
+            .filter(
+                Budget.lab_id.in_(assigned_lab_ids),
+                or_(
+                    Budget.lab_group_id.is_(None),
+                    Budget.lab_group_id != group_id,
+                ),
+                Budget.period_id == pid,
+            )
+            .scalar()
+            or 0
+        )
+    total_allocated_to_labs = current_allocated + newly_assigned_allocated
+
+    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
+    if active_period:
+        lab_spend_filter = (
+            or_(
+                Lab.lab_group_id == group_id,
+                Lab.lab_id.in_(assigned_lab_ids),
+            )
+            if assigned_lab_ids
+            else (Lab.lab_group_id == group_id)
+        )
+        total_spent = float(
+            db.query(func.sum(PurchaseRequestLine.amount_gst))
+            .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+            .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+            .filter(
+                lab_spend_filter,
+                PurchaseRequest.request_date >= active_period.start_date,
+                PurchaseRequest.request_date <= active_period.end_date,
+                _active_pr_status_filter(),
+            )
+            .scalar()
+            or 0
+        )
+    else:
+        total_spent = 0.0
+
+    requested_group_budget = float(group.budget)
+
+    # Guard 1: Cannot reduce Lab Group envelope below what is already allocated to labs
+    if requested_group_budget + 1e-6 < total_allocated_to_labs:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot set Lab Group budget to ${requested_group_budget:,.2f}: "
+                f"${total_allocated_to_labs:,.2f} is already allocated to labs in this group. "
+                "Please reduce lab budget allocations first."
+            ),
+        )
+
+    # Guard 2: Cannot reduce Lab Group envelope below what has already been spent
+    if requested_group_budget + 1e-6 < total_spent:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot set Lab Group budget to ${requested_group_budget:,.2f}: "
+                f"${total_spent:,.2f} has already been spent/utilised in this Lab Group."
+            ),
         )
 
     envelope = (
@@ -390,15 +525,13 @@ def update_lab_group(
         )
         db.add(envelope)
 
-    if hasattr(group, "assigned_lab_ids") and group.assigned_lab_ids:
-        labs_to_update = (
-            db.query(Lab).filter(Lab.lab_id.in_(group.assigned_lab_ids)).all()
-        )
+    if assigned_lab_ids:
+        labs_to_update = db.query(Lab).filter(Lab.lab_id.in_(assigned_lab_ids)).all()
         for lab in labs_to_update:
             lab.lab_group_id = group_id
 
         budgets_to_update = (
-            db.query(Budget).filter(Budget.lab_id.in_(group.assigned_lab_ids)).all()
+            db.query(Budget).filter(Budget.lab_id.in_(assigned_lab_ids)).all()
         )
         for b in budgets_to_update:
             b.lab_group_id = group_id
@@ -415,7 +548,7 @@ def update_lab_group(
         new_value={
             "name": db_group.lab_group_name,
             "wbs_code": db_group.wbs_code,
-            "budget": float(group.budget),
+            "budget": requested_group_budget,
         },
         request=request,
     )
@@ -438,10 +571,10 @@ def update_lab_group(
         "name": db_group.lab_group_name,
         "wbs_code": db_group.wbs_code,
         "description": db_group.description,
-        "budget": float(group.budget),
+        "budget": requested_group_budget,
         "allocated_to_labs": allocated,
-        "unallocated": float(group.budget) - allocated,
-        "spent": 0.0,
+        "unallocated": requested_group_budget - allocated,
+        "spent": total_spent,
         "threshold": 80,
     }
 
@@ -726,13 +859,7 @@ def get_labs(
                     PurchaseRequestLine.lab_id == lab.lab_id,
                     PurchaseRequest.request_date >= active_period.start_date,
                     PurchaseRequest.request_date <= active_period.end_date,
-                    or_(
-                        PurchaseRequestLine.pr_status.is_(None),
-                        and_(
-                            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
-                        ),
-                    ),
+                    _active_pr_status_filter(),
                 )
                 .scalar()
                 or 0
@@ -750,13 +877,7 @@ def get_labs(
                     PurchaseRequestLine.lab_id == lab.lab_id,
                     PurchaseRequest.request_date >= active_period.start_date,
                     PurchaseRequest.request_date <= active_period.end_date,
-                    or_(
-                        PurchaseRequestLine.pr_status.is_(None),
-                        and_(
-                            PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                            PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
-                        ),
-                    ),
+                    _active_pr_status_filter(),
                 )
                 .group_by(PurchaseRequestLine.category_id)
                 .all()
@@ -792,6 +913,7 @@ def get_labs(
 @router.post("/labs", response_model=LabOut)
 def create_lab(
     lab_in: LabCreate,
+    background_tasks: BackgroundTasks,
     request: Request,
     period_id: int | None = None,
     db: Session = Depends(get_db),
@@ -882,6 +1004,12 @@ def create_lab(
         request=request,
     )
 
+    background_tasks.add_task(check_and_notify_lab_thresholds, new_lab.lab_id)
+    if new_lab.lab_group_id:
+        background_tasks.add_task(
+            check_and_notify_lab_group_thresholds, new_lab.lab_group_id
+        )
+
     return {
         "id": new_lab.lab_id,
         "code": new_lab.lab_code or "",
@@ -894,6 +1022,7 @@ def create_lab(
         "ic_name": lab_in.ic_name,
         "ic_email": lab_in.ic_email,
         "budgets": lab_in.budgets,
+        "spent_by_category": {},
     }
 
 
@@ -927,7 +1056,9 @@ def update_lab(
             detail=f"Cannot update lab: The code '{lab_in.lab_code}' is already in use by another lab.",
         )
 
-    requested_total = sum(amount for amount in lab_in.budgets.values() if amount > 0)
+    requested_total = sum(
+        float(amount) for amount in lab_in.budgets.values() if amount and amount > 0
+    )
 
     group_envelope = float(
         db.query(func.sum(Budget.budget_amount))
@@ -952,7 +1083,7 @@ def update_lab(
         or 0
     )
 
-    if (existing_allocated + requested_total) > group_envelope:
+    if (existing_allocated + requested_total) > group_envelope + 1e-6:
         remaining = group_envelope - existing_allocated
         raise HTTPException(
             status_code=400,
@@ -965,6 +1096,85 @@ def update_lab(
     old_budgets_map = {
         str(b.category_id): float(b.budget_amount) for b in old_budgets_rows
     }
+
+    # Calculate current FY spend per category BEFORE mutating budgets
+    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
+    if active_period:
+        total_spent = float(
+            db.query(func.sum(PurchaseRequestLine.amount_gst))
+            .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+            .filter(
+                PurchaseRequestLine.lab_id == lab_id,
+                PurchaseRequest.request_date >= active_period.start_date,
+                PurchaseRequest.request_date <= active_period.end_date,
+                _active_pr_status_filter(),
+            )
+            .scalar()
+            or 0
+        )
+
+        spent_data = (
+            db.query(
+                PurchaseRequestLine.category_id,
+                func.sum(PurchaseRequestLine.amount_gst),
+            )
+            .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
+            .filter(
+                PurchaseRequestLine.lab_id == lab_id,
+                PurchaseRequest.request_date >= active_period.start_date,
+                PurchaseRequest.request_date <= active_period.end_date,
+                _active_pr_status_filter(),
+            )
+            .group_by(PurchaseRequestLine.category_id)
+            .all()
+        )
+        spent_by_cat = {
+            str(cat_id): float(amount)
+            for cat_id, amount in spent_data
+            if cat_id is not None
+        }
+    else:
+        total_spent = 0.0
+        spent_by_cat = {}
+
+    category_names = {
+        str(c.category_id): c.category_name for c in db.query(SpendingCategory).all()
+    }
+
+    # Guard: Prevent shifting/reducing category budget below already-spent amount
+    for cat_id_str, cat_spent in spent_by_cat.items():
+        if cat_spent <= 0:
+            continue
+        old_cat_budget = float(old_budgets_map.get(cat_id_str, 0.0))
+        new_cat_budget = float(lab_in.budgets.get(cat_id_str, 0.0))
+        # If category was not in overrun, floor is cat_spent; if already in overrun, floor is old_cat_budget
+        min_required_cat_budget = (
+            cat_spent if old_cat_budget >= cat_spent else old_cat_budget
+        )
+        if new_cat_budget + 1e-6 < min_required_cat_budget:
+            cat_name = category_names.get(cat_id_str, f"Category {cat_id_str}")
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot reduce '{cat_name}' budget to ${new_cat_budget:,.2f}: "
+                    f"${cat_spent:,.2f} has already been spent/utilised in this category."
+                ),
+            )
+
+    old_total_lab_budget = sum(old_budgets_map.values())
+    min_required_lab_budget = (
+        total_spent if old_total_lab_budget >= total_spent else old_total_lab_budget
+    )
+    if requested_total + 1e-6 < min_required_lab_budget:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot reduce Lab total budget to ${requested_total:,.2f}: "
+                f"${total_spent:,.2f} has already been spent/utilised by this lab."
+            ),
+        )
+
+    old_group_id = db_lab.lab_group_id
     old_snapshot = {
         "code": db_lab.lab_code,
         "name": db_lab.lab_name,
@@ -1013,32 +1223,12 @@ def update_lab(
     )
 
     background_tasks.add_task(check_and_notify_lab_thresholds, db_lab.lab_id)
-    background_tasks.add_task(
-        check_and_notify_lab_group_thresholds, db_lab.lab_group_id
-    )
-
-    active_period = db.query(BudgetPeriod).filter(BudgetPeriod.period_id == pid).first()
-    if active_period:
-        total_spent = float(
-            db.query(func.sum(PurchaseRequestLine.amount_gst))
-            .join(PurchaseRequest, PurchaseRequest.pr_id == PurchaseRequestLine.pr_id)
-            .filter(
-                PurchaseRequestLine.lab_id == db_lab.lab_id,
-                PurchaseRequest.request_date >= active_period.start_date,
-                PurchaseRequest.request_date <= active_period.end_date,
-                or_(
-                    PurchaseRequestLine.pr_status.is_(None),
-                    and_(
-                        PurchaseRequestLine.pr_status.not_ilike("%reject%"),
-                        PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
-                    ),
-                ),
-            )
-            .scalar()
-            or 0
+    if db_lab.lab_group_id:
+        background_tasks.add_task(
+            check_and_notify_lab_group_thresholds, db_lab.lab_group_id
         )
-    else:
-        total_spent = 0.0
+    if old_group_id and old_group_id != db_lab.lab_group_id:
+        background_tasks.add_task(check_and_notify_lab_group_thresholds, old_group_id)
 
     return {
         "id": db_lab.lab_id,
@@ -1052,6 +1242,7 @@ def update_lab(
         "ic_name": lab_in.ic_name,
         "ic_email": lab_in.ic_email,
         "budgets": lab_in.budgets,
+        "spent_by_category": spent_by_cat,
     }
 
 
