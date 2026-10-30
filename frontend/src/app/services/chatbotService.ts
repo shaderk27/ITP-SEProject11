@@ -180,7 +180,11 @@ export async function askAssistant(
     };
   }
   if (data.out_of_scope) {
-    return { text: data.answer, source: "ai", note: "Outside what Ask AI can answer" };
+    return {
+      text: data.answer,
+      source: data.model.startsWith("rules") ? "rules" : "ai",
+      note: "Outside what Ask AI can answer",
+    };
   }
   return {
     text: data.answer,

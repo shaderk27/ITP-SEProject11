@@ -61,11 +61,30 @@ MAX_HISTORY_MESSAGES = 6
 MAX_HISTORY_CHARS = 2000
 MAX_COMPARE_YEARS = 3
 # "2025", "FY2025", "FY 2025", "FY'25", "FY25"; in "2025/26" only 2025 matches.
+YEAR_PATTERN = re.compile(
+    r"\b(?:fy\s?'?)?(20\d{2})\b|\bfy\s?'?(\d{2})\b", re.IGNORECASE
+)
 # The model replies with only this marker when a question is out of scope, and
 # answer_question swaps in a fixed, role-specific "what you can ask" message.
 OUT_OF_SCOPE_MARKER = "OUT_OF_SCOPE"
-YEAR_PATTERN = re.compile(
-    r"\b(?:fy\s?'?)?(20\d{2})\b|\bfy\s?'?(\d{2})\b", re.IGNORECASE
+# Without the LLM, these keyword checks decide out-of-scope instead. A question
+# with no budget word, or one about roles and access, gets the help message;
+# anything else goes to the rule-based budget answers in the widget.
+BUDGET_TERMS_PATTERN = re.compile(
+    # Word stems: "spen" covers spend/spent/spending.
+    r"\b(?:budget|spen|expen|cost|money|dollar|purchas|bought|order|wbs|item"
+    r"|categor|alert|utili|remain|balance|allocat|approv|pending|reject|exceed"
+    r"|total|fiscal|quarter|trend|highest|lowest|vendor|supplier|requestor"
+    r"|dashboard|report|envelope|threshold|audit)\w*"
+    # Short words that must match whole.
+    r"|\b(?:sgd|buy|prs?|labs?|groups?|risks?|left|over|top|most|least"
+    r"|years?|months?|how much|how many|fy\s?'?\d{0,4}|20\d{2})\b",
+    re.IGNORECASE,
+)
+ROLE_TERMS_PATTERN = re.compile(
+    r"\b(admins?|administrators?|team ?leads?|lab[ -]?ics?|lab[ -]in[ -]charge"
+    r"|permissions?|access|privileges?|roles?)\b",
+    re.IGNORECASE,
 )
 
 SYSTEM_PROMPT = """You are "Ask AI", the assistant inside the SIT Lab Budget Monitoring System.
@@ -169,10 +188,14 @@ def answer_question(
         # Audit retrieval is already fully structured and role-scoped. Keep it
         # usable without an external LLM instead of falling back to an
         # unrelated budget summary in the widget.
-        if audit_events is None:
+        if audit_events is not None:
+            answer = _audit_fallback_answer(audit_events)
+            answer_model = "rules-audit"
+        elif _looks_out_of_scope(request.question):
+            answer = OUT_OF_SCOPE_MARKER
+            answer_model = "rules-out-of-scope"
+        else:
             raise
-        answer = _audit_fallback_answer(audit_events)
-        answer_model = "rules-audit"
 
     # A mixed question can come back as an answer plus the marker; keep the
     # answer then, and use the help message only when nothing else is left.
@@ -911,6 +934,13 @@ def _user_line(context: ChatbotContextResponse) -> str:
         lab = labs[0] if labs else "their assigned lab"
         return f"A Lab-in-Charge, who can only see the lab {lab}."
     return "A user with no data access."
+
+
+def _looks_out_of_scope(question: str) -> bool:
+    """Keyword stand-in for the LLM's out-of-scope check when it is down."""
+    return bool(ROLE_TERMS_PATTERN.search(question)) or not (
+        BUDGET_TERMS_PATTERN.search(question)
+    )
 
 
 def _out_of_scope_answer(context: ChatbotContextResponse) -> str:
