@@ -165,11 +165,11 @@ Set these in the root `.env`. They are backend only, so never prefix them with `
 
 | Variable | Required | What it does |
 |---|---|---|
-| `LLM_API_KEY` | For AI answers | The provider's API key. Leave blank to run Ask AI without an AI provider (see fallback below). |
-| `LLM_BASE_URL` | No | Any OpenAI-compatible chat completions endpoint. This is what chooses the provider. |
-| `LLM_MODEL` | No | The model name, spelled the way the provider spells it. |
+| `LLM_API_KEY` | For AI answers | The OpenAI API key. Leave blank to run Ask AI without the AI (see fallback below). |
+| `LLM_BASE_URL` | No | The OpenAI API endpoint. Defaults to `https://api.openai.com/v1`. |
+| `LLM_MODEL` | No | The OpenAI model name. Defaults to `gpt-4o-mini`. |
 
-Example for OpenAI:
+Example:
 
 ```text
 LLM_API_KEY=<your key>
@@ -177,10 +177,7 @@ LLM_BASE_URL=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
 ```
 
-<!-- TODO(client-handover): remove the OpenRouter paragraph below before final submission to the client. -->
-OpenRouter is the interim provider during development: `LLM_BASE_URL=https://openrouter.ai/api/v1` with `LLM_MODEL=google/gemini-2.5-flash-lite`. These are also the current defaults when `LLM_BASE_URL` or `LLM_MODEL` is left blank, and the older `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` names are still read if the `LLM_*` ones are not set.
-
-Switching provider means changing these lines and restarting the backend. No code change is needed.
+Changing the key or model means editing these lines and restarting the backend. No code change is needed.
 
 **Fallback without AI.** If `LLM_API_KEY` is blank, the provider is unreachable, returns an error, or takes longer than 30 seconds, `POST /api/chatbot/ask` returns `503` and the widget answers with the built-in rule-based answers from `POST /api/chatbot/query-context` instead. Ask AI keeps working either way; the label under each answer shows which one was used:
 

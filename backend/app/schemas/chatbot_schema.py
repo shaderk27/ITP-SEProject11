@@ -147,3 +147,6 @@ class ChatbotAskResponse(BaseModel):
     focus: list[str]
     notes: list[str]
     sources: list[ChatbotAnswerSource] = Field(default_factory=list)
+    # True when the question was outside what Ask AI answers; `answer` is then
+    # the fixed "what you can ask" message.
+    out_of_scope: bool = False
