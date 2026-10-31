@@ -151,7 +151,10 @@ def get_lab_groups(
     role_name = (
         (current_user.role.role_name if current_user.role else "").lower().strip()
     )
+    # The dashboard uses period_id=0 for an all-fiscal-years view.
+    all_periods = period_id == 0
     pid = period_id if period_id is not None else get_or_create_current_period(db)
+    budget_period_filter = [] if all_periods else [Budget.period_id == pid]
 
     query = db.query(LabGroup)
     if role_name == "teamlead":
@@ -185,7 +188,7 @@ def get_lab_groups(
             .filter(
                 Budget.lab_group_id == g.lab_group_id,
                 Budget.lab_id.is_(None),
-                Budget.period_id == pid,
+                *budget_period_filter,
             )
             .scalar()
             or 0
@@ -196,13 +199,21 @@ def get_lab_groups(
             .filter(
                 Budget.lab_group_id == g.lab_group_id,
                 Budget.lab_id.isnot(None),
-                Budget.period_id == pid,
+                *budget_period_filter,
             )
             .scalar()
             or 0
         )
 
-        if active_period:
+        if active_period or all_periods:
+            date_filter = (
+                []
+                if all_periods
+                else [
+                    PurchaseRequest.request_date >= active_period.start_date,
+                    PurchaseRequest.request_date <= active_period.end_date,
+                ]
+            )
             total_spent = float(
                 db.query(func.sum(PurchaseRequestLine.amount_gst))
                 .join(
@@ -211,8 +222,7 @@ def get_lab_groups(
                 .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
                 .filter(
                     Lab.lab_group_id == g.lab_group_id,
-                    PurchaseRequest.request_date >= active_period.start_date,
-                    PurchaseRequest.request_date <= active_period.end_date,
+                    *date_filter,
                     _active_pr_status_filter(),
                 )
                 .scalar()

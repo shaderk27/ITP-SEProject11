@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException, BackgroundTasks
+from fastapi import HTTPException, BackgroundTasks, Request
 
 from app.api.config import (
     PeriodCreate,
@@ -32,29 +32,50 @@ def _group_and_category(db):
     return group, category
 
 
-def test_create_period_derives_april_to_march(db):
-    result = create_period(PeriodCreate(year=2040), db=db)
+def _request(method: str = "POST", path: str = "/api/config") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": method,
+            "path": path,
+            "headers": [],
+            "client": ("testclient", 50000),
+        }
+    )
+
+
+def _create_period(year, db, admin_user):
+    return create_period(
+        PeriodCreate(year=year),
+        request=_request(path="/api/config/periods"),
+        db=db,
+        current_user=admin_user,
+    )
+
+
+def test_create_period_derives_april_to_march(db, admin_user):
+    result = _create_period(2040, db, admin_user)
     assert result["name"] == "FY2040"
     assert result["year"] == 2040
     assert result["start_date"] == "2040-04-01"
     assert result["end_date"] == "2041-03-31"
 
 
-def test_create_period_rejects_duplicate(db):
-    create_period(PeriodCreate(year=2041), db=db)
+def test_create_period_rejects_duplicate(db, admin_user):
+    _create_period(2041, db, admin_user)
     with pytest.raises(HTTPException) as exc:
-        create_period(PeriodCreate(year=2041), db=db)
+        _create_period(2041, db, admin_user)
     assert exc.value.status_code == 400
 
 
-def test_update_lab_only_clears_the_selected_fiscal_year(db):
+def test_update_lab_only_clears_the_selected_fiscal_year(db, admin_user):
     """The delete in update_lab is scoped to the target period, so setting a new
     year's budget leaves other years' budgets intact."""
     group, category = _group_and_category(db)
     cat_key = str(category.category_id)
 
-    fy_a = create_period(PeriodCreate(year=2050), db=db)["id"]
-    fy_b = create_period(PeriodCreate(year=2051), db=db)["id"]
+    fy_a = _create_period(2050, db, admin_user)["id"]
+    fy_b = _create_period(2051, db, admin_user)["id"]
     # Labs are funded from the group's envelope, so each FY needs one.
     for fy in (fy_a, fy_b):
         db.add(
@@ -74,8 +95,11 @@ def test_update_lab_only_clears_the_selected_fiscal_year(db):
             lab_group_id=group.lab_group_id,
             budgets={cat_key: 1000.0},
         ),
+        background_tasks=BackgroundTasks(),
+        request=_request(path="/api/config/labs"),
         period_id=fy_a,
         db=db,
+        current_user=admin_user,
     )
     lab_id = lab["id"]
 
@@ -89,8 +113,10 @@ def test_update_lab_only_clears_the_selected_fiscal_year(db):
             budgets={cat_key: 7000.0},
         ),
         background_tasks=BackgroundTasks(),  # Added the required background_tasks object
+        request=_request(method="PUT", path=f"/api/config/labs/{lab_id}"),
         period_id=fy_b,
         db=db,
+        current_user=admin_user,
     )
 
     fy_a_budget = sum(
@@ -114,8 +140,8 @@ def test_lab_groups_budget_scoped_to_period(db, admin_user):
     Budget card) reflects only the requested fiscal year, not a sum across
     years. Guards the contract the frontend relies on for FY scoping."""
     group, category = _group_and_category(db)
-    fy_a = create_period(PeriodCreate(year=2060), db=db)["id"]
-    fy_b = create_period(PeriodCreate(year=2061), db=db)["id"]
+    fy_a = _create_period(2060, db, admin_user)["id"]
+    fy_b = _create_period(2061, db, admin_user)["id"]
     now = datetime.now(timezone.utc)
     db.add_all(
         [
