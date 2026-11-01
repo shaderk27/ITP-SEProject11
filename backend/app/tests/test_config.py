@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+import pytest
 from app.main import app
 from app.database import get_db
 from app.dependencies.auth import get_current_user
@@ -13,10 +14,16 @@ def override_get_current_user():
     )
 
 
-app.dependency_overrides[get_current_user] = override_get_current_user
-
-# 2. Setup the Test Client
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def configure_dependency_overrides():
+    """Keep this module independent of tests that clear global app overrides."""
+    app.dependency_overrides[get_current_user] = override_get_current_user
+    yield
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_create_category():

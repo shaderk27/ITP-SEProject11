@@ -127,7 +127,9 @@ def test_all_time_total_is_sum_of_fiscal_years_for_every_group(db, admin_user):
         assert sum(g["budget"] for g in all_time) > 0
 
 
-def test_dashboard_export_all_time_uses_all_years_budget(db, admin_user, monkeypatch):
+def test_dashboard_export_all_time_uses_all_years_budget(
+    db, admin_user, two_year_group, monkeypatch
+):
     captured = {}
 
     def fake_workbook(meta, kpis, *args):
