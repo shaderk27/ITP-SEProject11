@@ -32,7 +32,6 @@ from app.models.staging import (
 )
 from app.models.upload import PRLineItem, UploadMetadata
 from app.models.auth import User
-from app.services.duplicate_service import is_status_regression
 
 
 def persist_upload_to_db(
@@ -101,8 +100,6 @@ def persist_upload_to_db(
     headers_inserted = 0
     lines_inserted = 0
     queue_items_inserted = 0
-    # Source row -> accepted final status for rows that commit will skip.
-    status_regression_rows: dict[int, str] = {}
 
     # ─── 3. For each unique PR: write header + its lines ──────────────────
     for pr_number, pr_items in items_by_pr.items():
@@ -129,20 +126,18 @@ def persist_upload_to_db(
             item: PRLineItem = ci["item"]
             classification: dict[str, Any] = ci["classification"]
 
-            detected_labs = _detect_labs_in_line(item, lab_patterns, first_item)
+            detected_labs = _detect_labs_in_line(item, lab_patterns)
             line_total_amount = _resolve_line_amount(item)
 
-            # Resolve category from classifier or directly from Req Type / PR Category
-            classifier_category_id = classification.get("category_id")
-            if (
-                classifier_category_id is None
-                or classifier_category_id == general_category.category_id
-            ):
-                matched_cat_id = _match_category_id(
-                    item, categories_by_name, general_category.category_id
-                )
-                if matched_cat_id is not None:
-                    classifier_category_id = matched_cat_id
+            # Resolve category while preserving conflict flagging (e.g. "Maintenance, Consumables")
+            classifier_category_id, classification_reason = _resolve_category_id(
+                item_pr_category=item.pr_category,
+                item_req_type=item.req_type,
+                classifier_category_id=classification.get("category_id"),
+                classifier_reason=classification.get("reason"),
+                categories_by_name=categories_by_name,
+                general_cat_id=general_category.category_id,
+            )
 
             # ─── 4A. Automated Multi-Lab Spending Distribution ────────────
             if len(detected_labs) > 1:
@@ -180,13 +175,16 @@ def persist_upload_to_db(
                     used_fallback_group = final_group_id == general_group.lab_group_id
                     used_fallback_lab = False
                     used_fallback_category = (
-                        final_category_id == general_category.category_id
+                        classifier_category_id is None
+                        or final_category_id == general_category.category_id
                     )
 
                     split_reason = (
                         f"Automated multi-lab spending distribution ({idx + 1}/{num_labs} "
                         f"equal share across: {detected_labels})."
                     )
+                    if classification_reason and used_fallback_category:
+                        split_reason = f"{split_reason} {classification_reason}"
 
                     if existing_final_line:
                         final_lab_id = existing_final_line.lab_id
@@ -206,15 +204,6 @@ def persist_upload_to_db(
                         split_reason = (
                             "Existing committed split line found. Preserving reviewed "
                             "lab/category; only source status may update on commit."
-                        )
-
-                    duplicate_status = "unchecked"
-                    if existing_final_line and is_status_regression(
-                        existing_final_line.pr_status, item.pr_status
-                    ):
-                        duplicate_status = "status_regression"
-                        status_regression_rows[item.row_number] = (
-                            existing_final_line.pr_status
                         )
 
                     any_fallback = (
@@ -256,7 +245,7 @@ def persist_upload_to_db(
                         suggested_lab_id=final_lab_id,
                         suggested_category_id=final_category_id,
                         classification_status=classification_status,
-                        duplicate_status=duplicate_status,
+                        duplicate_status="unchecked",
                         review_status=review_status,
                         match_reason=split_reason,
                         raw_line_json=raw_json,
@@ -270,9 +259,7 @@ def persist_upload_to_db(
                             staging_line_id=line.staging_line_id,
                             queue_status="open",
                             priority="normal",
-                            review_reason=(
-                                f"{split_reason} Category or Lab Group still requires review."
-                            ),
+                            review_reason=split_reason,
                         )
                         db.add(queue_item)
                         queue_items_inserted += 1
@@ -288,7 +275,6 @@ def persist_upload_to_db(
                 if classifier_group_id is None:
                     classifier_group_id = detected_labs[0].lab_group_id
 
-            classification_reason = classification.get("reason") or ""
             existing_final_line = _find_existing_final_line(
                 db, pr_number, item.line_identity_key
             )
@@ -300,9 +286,15 @@ def persist_upload_to_db(
             )
             final_category_id = classifier_category_id or general_category.category_id
 
-            used_fallback_group = classifier_group_id is None
+            used_fallback_group = (
+                classifier_group_id is None
+                or final_group_id == general_group.lab_group_id
+            )
             used_fallback_lab = classifier_lab_id is None
-            used_fallback_category = classifier_category_id is None
+            used_fallback_category = (
+                classifier_category_id is None
+                or final_category_id == general_category.category_id
+            )
 
             if existing_final_line:
                 final_lab_id = existing_final_line.lab_id
@@ -331,13 +323,6 @@ def persist_upload_to_db(
             classification_status = "unclear" if any_fallback else "confident"
             review_status = "pending_review" if any_fallback else "not_required"
 
-            duplicate_status = "unchecked"
-            if existing_final_line and is_status_regression(
-                existing_final_line.pr_status, item.pr_status
-            ):
-                duplicate_status = "status_regression"
-                status_regression_rows[item.row_number] = existing_final_line.pr_status
-
             line = StagingPRLine(
                 staging_header_id=header.staging_header_id,
                 source_line_no=item.row_number,
@@ -351,7 +336,7 @@ def persist_upload_to_db(
                 suggested_lab_id=final_lab_id,
                 suggested_category_id=final_category_id,
                 classification_status=classification_status,
-                duplicate_status=duplicate_status,
+                duplicate_status="unchecked",
                 review_status=review_status,
                 match_reason=classification_reason or None,
                 raw_line_json=item.to_dict(),
@@ -403,7 +388,6 @@ def persist_upload_to_db(
         "headers_inserted": headers_inserted,
         "lines_inserted": lines_inserted,
         "queue_items_inserted": queue_items_inserted,
-        "status_regression_rows": status_regression_rows,
     }
 
 
@@ -529,15 +513,13 @@ def _find_labs_in_text(
 def _detect_labs_in_line(
     item: PRLineItem,
     lab_patterns: list[tuple[str, re.Pattern[str], Lab]],
-    header_item: PRLineItem | None = None,
 ) -> list[Lab]:
     """
-    Detect labs referenced on a PR line:
+    Detect labs referenced on a PR line strictly from that row's own fields:
       1. Checks explicit location/purpose fields (`lab`, `purpose`, `instruction_to_vendor`).
          If >= 2 labs are found there, returns them directly.
       2. Checks `item_details` for collective multi-lab purchases. If `item_details`
          itself references >= 2 labs, merges them with any location field lab.
-      3. Falls back to header-level `purpose` / `instruction_to_vendor` on multi-row PRs.
     """
     loc_text = " | ".join(
         part
@@ -557,20 +539,6 @@ def _detect_labs_in_line(
                 seen.add(lab.lab_id)
                 merged.append(lab)
         return merged
-
-    if header_item is not None and header_item is not item:
-        header_loc_text = " | ".join(
-            part
-            for part in (
-                loc_text,
-                header_item.purpose,
-                header_item.instruction_to_vendor,
-            )
-            if part and str(part).strip()
-        )
-        header_detected = _find_labs_in_text(header_loc_text, lab_patterns)
-        if len(header_detected) >= 2:
-            return header_detected
 
     return loc_labs or details_labs
 
@@ -593,30 +561,86 @@ def _resolve_line_amount(item: PRLineItem) -> Decimal:
     return Decimal("0.00")
 
 
-def _match_category_id(
-    item: PRLineItem,
+def _resolve_category_id(
+    item_pr_category: str | None,
+    item_req_type: str | None,
+    classifier_category_id: int | None,
+    classifier_reason: str | None,
     categories_by_name: dict[str, int],
     general_cat_id: int,
-) -> int | None:
+) -> tuple[int | None, str | None]:
     """
-    Match `item.req_type` (Column 8 in DivPRReport, e.g. 'Maintenance') or
-    `item.pr_category` against configured SpendingCategory names.
+    Resolve the spending category for a PR line while strictly preserving conflict detection:
+      1. Scan `pr_category` and `req_type` for all matching non-General category names.
+      2. If >= 2 distinct categories are present (e.g. 'Maintenance, Consumables'),
+         treat it as a category conflict and return (None, conflict_reason) so the line
+         falls back to 'General' and enters the Review Queue for manual editing.
+      3. If the upstream classifier already resolved a valid non-General category_id
+         (and step 2 found no conflict), keep it.
+      4. If the upstream classifier returned None (e.g. because multiple labs in
+         Purpose caused the single-lab classifier to bail out), and step 1 found
+         exactly 1 unambiguous category with no upstream conflict reason, use it.
     """
-    for raw_val in (item.pr_category, item.req_type):
-        if not raw_val or not str(raw_val).strip():
-            continue
-        cleaned = str(raw_val).strip().lower()
-        if (
-            cleaned in categories_by_name
-            and categories_by_name[cleaned] != general_cat_id
-        ):
-            return categories_by_name[cleaned]
-        for cat_name, cat_id in categories_by_name.items():
-            if cat_id != general_cat_id and (
-                cat_name in cleaned or cleaned in cat_name
-            ):
-                return cat_id
-    return None
+    combined = " | ".join(
+        str(v).strip()
+        for v in (item_pr_category, item_req_type)
+        if v and str(v).strip()
+    )
+
+    matched_names: list[str] = []
+    matched_ids: list[int] = []
+    seen_ids: set[int] = set()
+
+    if combined:
+        sorted_cats = sorted(
+            (
+                (name, cid)
+                for name, cid in categories_by_name.items()
+                if cid != general_cat_id
+            ),
+            key=lambda pair: len(pair[0]),
+            reverse=True,
+        )
+        for cat_name, cat_id in sorted_cats:
+            pattern = re.compile(
+                rf"(?<![A-Za-z0-9]){re.escape(cat_name)}(?![A-Za-z0-9])",
+                re.IGNORECASE,
+            )
+            if pattern.search(combined) and cat_id not in seen_ids:
+                seen_ids.add(cat_id)
+                matched_ids.append(cat_id)
+                matched_names.append(cat_name.title())
+
+    # Explicit conflict: 2+ categories found in Req Type / PR Category
+    if len(matched_ids) > 1:
+        conflict_msg = (
+            f"Conflicting categories in Req Type ({', '.join(matched_names)}); "
+            "manual review required."
+        )
+        return None, conflict_msg
+
+    # Respect upstream classifier if it already assigned a valid non-General category
+    if classifier_category_id is not None and classifier_category_id != general_cat_id:
+        return classifier_category_id, classifier_reason
+
+    # If upstream classifier flagged a conflict/ambiguity in its reason, keep None
+    reason_lower = (classifier_reason or "").lower()
+    if any(
+        kw in reason_lower
+        for kw in (
+            "conflict",
+            "multiple categor",
+            "ambiguous categor",
+            "unclear categor",
+        )
+    ):
+        return None, classifier_reason
+
+    # Unambiguous single category match
+    if len(matched_ids) == 1:
+        return matched_ids[0], classifier_reason
+
+    return None, classifier_reason
 
 
 def _split_amount_equally(total: Any, count: int) -> list[Decimal]:

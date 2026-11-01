@@ -5,22 +5,20 @@ Endpoints for Team Leads and Admins to see batches with unresolved
 auto-classifications. Frontend's Review Queue page reads from here.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.services.threshold_service import (
     check_and_notify_lab_thresholds,
     check_and_notify_lab_group_thresholds,
 )
-from app.services.knowledge_service import index_pr_lines_in_background
-from app.services.duplicate_service import is_status_regression
 from app.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models.config import Lab, LabGroup, SpendingCategory
+from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     AuditLog,
     PRVersion,
@@ -189,7 +187,6 @@ class CommitResponse(BaseModel):
     prs_updated: int
     lines_created: int
     pr_ids: list[int]
-    status_regressions_skipped: int = 0
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────
@@ -681,12 +678,27 @@ def commit_batch(
             f"Batch {batch_id} has no staging headers to commit.",
         )
 
+    # Pre-scan staging lines to sync pre-commit notification flags before adding new spend
+    pre_lab_ids: set[int] = set()
+    pre_group_ids: set[int] = set()
+    for header in headers:
+        staging_lines = (
+            db.query(StagingPRLine)
+            .filter(StagingPRLine.staging_header_id == header.staging_header_id)
+            .all()
+        )
+        for s_line in staging_lines:
+            if s_line.suggested_lab_id:
+                pre_lab_ids.add(s_line.suggested_lab_id)
+            if s_line.suggested_lab_group_id:
+                pre_group_ids.add(s_line.suggested_lab_group_id)
+    _sync_pre_commit_threshold_flags(db, pre_lab_ids, pre_group_ids)
+
     pr_ids: list[int] = []
     prs_created_count = 0
     prs_updated_count = 0
     lines_created = 0
     lines_updated = 0
-    status_regressions_skipped = 0
 
     # Keep track of unique labs and lab groups affected by this commit
     affected_lab_ids = set()
@@ -700,6 +712,8 @@ def commit_batch(
             .all()
         )
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
+        if pr_lab_group_id:
+            affected_lab_group_ids.add(pr_lab_group_id)
 
         pr_status_value = _raw_line_value(lines[0], "pr_status") if lines else ""
         pr_status_value = pr_status_value or None
@@ -766,40 +780,19 @@ def commit_batch(
             pr = existing_pr
             prs_updated_count += 1
 
+        pr_ids.append(pr.pr_id)
+
         existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
         status_updates: list[dict] = []
-        regressions_skipped: list[dict] = []
 
         for line in lines:
-            line_identity_key = _raw_line_value(line, "line_identity_key")
-            existing_line = existing_lines_by_identity.get(line_identity_key)
-
-            # W17: approval is final; an upload cannot move an Approved line
-            # to any non-Approved status.
-            incoming_status = _raw_line_value(line, "pr_status")
-            if existing_line and is_status_regression(
-                existing_line.pr_status, incoming_status
-            ):
-                line.duplicate_status = "status_regression"
-                regressions_skipped.append(
-                    {
-                        "line_identity_key": line_identity_key,
-                        "line_no": line.source_line_no,
-                        "staging_line_id": line.staging_line_id,
-                        "accepted_status": existing_line.pr_status,
-                        "attempted_status": incoming_status,
-                    }
-                )
-                if line is lines[0]:
-                    # Header status follows the first line; keep it accepted.
-                    pr.pr_status = existing_line.pr_status
-                continue
-
             if line.suggested_lab_id:
                 affected_lab_ids.add(line.suggested_lab_id)
             if line.suggested_lab_group_id:
                 affected_lab_group_ids.add(line.suggested_lab_group_id)
 
+            line_identity_key = _raw_line_value(line, "line_identity_key")
+            existing_line = existing_lines_by_identity.get(line_identity_key)
             if existing_line:
                 old_staging_line = _staging_line_for_committed_line(db, existing_line)
                 old_status = _source_status_snapshot(old_staging_line)
@@ -860,15 +853,6 @@ def commit_batch(
             if old_data is None:
                 old_data = {}
             old_data["status_updates"] = [u["old_status"] for u in status_updates]
-        if regressions_skipped:
-            new_data["status_regressions_skipped"] = regressions_skipped
-            status_regressions_skipped += len(regressions_skipped)
-
-        # Skipped lines trigger no threshold or vector refresh work.
-        if len(regressions_skipped) < len(lines):
-            pr_ids.append(pr.pr_id)
-            if pr_lab_group_id:
-                affected_lab_group_ids.add(pr_lab_group_id)
 
         db.add(
             PRVersion(
@@ -909,7 +893,6 @@ def commit_batch(
                 "prs_updated": prs_updated_count,
                 "lines_created": lines_created,
                 "lines_updated": lines_updated,
-                "status_regressions_skipped": status_regressions_skipped,
             },
         )
     )
@@ -923,10 +906,6 @@ def commit_batch(
     for group_id in affected_lab_group_ids:
         background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
 
-    # Refresh Ask AI's PR-line search cards (no-op when embeddings are off).
-    if pr_ids:
-        background_tasks.add_task(index_pr_lines_in_background, list(pr_ids))
-
     return CommitResponse(
         success=True,
         batch_id=batch.batch_id,
@@ -935,11 +914,137 @@ def commit_batch(
         prs_updated=prs_updated_count,
         lines_created=lines_created,
         pr_ids=pr_ids,
-        status_regressions_skipped=status_regressions_skipped,
     )
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
+def _sync_pre_commit_threshold_flags(
+    db: Session, lab_ids: set[int], group_ids: set[int]
+) -> None:
+    """
+    Syncs notification flags with actual pre-commit utilization before new PR lines
+    are committed, so stale `notified_50=True` flags (e.g. after deleting test PRs)
+    are cleared if pre-commit utilization was below the threshold.
+    """
+    try:
+        today = date.today()
+        current_period = (
+            db.query(BudgetPeriod)
+            .filter(BudgetPeriod.start_date <= today, BudgetPeriod.end_date >= today)
+            .first()
+        )
+        if not isinstance(current_period, BudgetPeriod):
+            return
+
+        active_status_filter = or_(
+            PurchaseRequestLine.pr_status.is_(None),
+            and_(
+                PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+            ),
+        )
+
+        for lid in lab_ids:
+            lab = db.query(Lab).filter(Lab.lab_id == lid).first()
+            if not isinstance(lab, Lab):
+                continue
+            if lab.lab_group_id:
+                group_ids.add(lab.lab_group_id)
+
+            total_budget = float(
+                db.query(func.sum(Budget.budget_amount))
+                .filter(
+                    Budget.lab_id == lid,
+                    Budget.period_id == current_period.period_id,
+                )
+                .scalar()
+                or 0
+            )
+            if total_budget <= 0:
+                lab.notified_50 = False
+                lab.notified_80 = False
+                lab.notified_95 = False
+                lab.notified_100 = False
+                continue
+
+            pre_spent = float(
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(
+                    PurchaseRequest,
+                    PurchaseRequest.pr_id == PurchaseRequestLine.pr_id,
+                )
+                .filter(
+                    PurchaseRequestLine.lab_id == lid,
+                    PurchaseRequest.request_date >= current_period.start_date,
+                    PurchaseRequest.request_date <= current_period.end_date,
+                    active_status_filter,
+                )
+                .scalar()
+                or 0
+            )
+            pre_util = (pre_spent / total_budget) * 100
+            if pre_util < 100:
+                lab.notified_100 = False
+            if pre_util < 95:
+                lab.notified_95 = False
+            if pre_util < 80:
+                lab.notified_80 = False
+            if pre_util < 50:
+                lab.notified_50 = False
+
+        for gid in group_ids:
+            group = db.query(LabGroup).filter(LabGroup.lab_group_id == gid).first()
+            if not isinstance(group, LabGroup):
+                continue
+
+            env_budget = float(
+                db.query(func.sum(Budget.budget_amount))
+                .filter(
+                    Budget.lab_group_id == gid,
+                    Budget.lab_id.is_(None),
+                    Budget.period_id == current_period.period_id,
+                )
+                .scalar()
+                or 0
+            )
+            if env_budget <= 0:
+                group.notified_50 = False
+                group.notified_80 = False
+                group.notified_95 = False
+                group.notified_100 = False
+                continue
+
+            pre_group_spent = float(
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(
+                    PurchaseRequest,
+                    PurchaseRequest.pr_id == PurchaseRequestLine.pr_id,
+                )
+                .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+                .filter(
+                    Lab.lab_group_id == gid,
+                    PurchaseRequest.request_date >= current_period.start_date,
+                    PurchaseRequest.request_date <= current_period.end_date,
+                    active_status_filter,
+                )
+                .scalar()
+                or 0
+            )
+            pre_group_util = (pre_group_spent / env_budget) * 100
+            if pre_group_util < 100:
+                group.notified_100 = False
+            if pre_group_util < 95:
+                group.notified_95 = False
+            if pre_group_util < 80:
+                group.notified_80 = False
+            if pre_group_util < 50:
+                group.notified_50 = False
+
+        db.flush()
+    except Exception:
+        pass
+
+
 def _load_queue_item_or_404(db: Session, review_queue_id: int):
     row = (
         db.query(ReviewQueueItem, StagingPRLine, StagingPRHeader, UploadBatch)
