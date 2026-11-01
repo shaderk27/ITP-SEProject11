@@ -264,7 +264,8 @@ export function ReviewDetailsPage() {
                   <SelectContent>
                     {labsForGroup.map((l) => (
                       <SelectItem key={l.lab_id} value={String(l.lab_id)}>
-                        {l.lab_name}
+                        {/* Code first: some labs share a name across groups. */}
+                        {l.lab_code ? `${l.lab_code} ${l.lab_name}` : l.lab_name}
                         {l.is_general ? " (general)" : ""}
                       </SelectItem>
                     ))}

@@ -12,7 +12,7 @@ from decimal import Decimal
 from typing import Callable, Generator
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
@@ -24,6 +24,20 @@ from app.models.staging import (
     StagingPRLine,
     UploadBatch,
 )
+
+
+@pytest.fixture(autouse=True)
+def _embeddings_off(monkeypatch):
+    """Tests never load a real embedding model or call a provider, whatever the
+    developer's .env says. Tests that need embeddings fake them explicitly."""
+    for name in (
+        "EMBEDDING_PROVIDER",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_MAX_DISTANCE",
+    ):
+        monkeypatch.setenv(name, "")
 
 
 @pytest.fixture
@@ -95,6 +109,7 @@ def seed_refs(db: Session) -> dict:
                     period_id=period.period_id,
                     lab_group_id=group.lab_group_id,
                     budget_amount=Decimal("9999999.00"),
+                    updated_at=func.now(),
                 )
             )
             db.flush()

@@ -105,9 +105,13 @@ export function ReviewQueuePage() {
         parts.push(`${result.prs_updated} updated PR${result.prs_updated === 1 ? "" : "s"}`);
       }
       const prSummary = parts.length > 0 ? parts.join(" + ") : "0 PRs";
+      const skipped = result.status_regressions_skipped ?? 0;
       setCommitSuccess(
         `Batch #${result.batch_id} committed: ${prSummary}` +
-          ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.`,
+          ` and ${result.lines_created} line${result.lines_created === 1 ? "" : "s"} written to final tables.` +
+          (skipped > 0
+            ? ` Approved status protected on ${skipped} line${skipped === 1 ? "" : "s"} (incoming status change skipped).`
+            : ""),
       );
       await fetchBatches();
     } catch (err) {
@@ -201,8 +205,12 @@ export function ReviewQueuePage() {
             const isCommittingThis = committingBatch === batch.batch_id;
 
             return (
-              <Card key={batch.batch_id} className="bg-white border-border overflow-hidden">
-                <div className="w-full p-5 flex items-center justify-between gap-4 hover:bg-[#f8f9fa]">
+              <Card key={batch.batch_id} className="bg-white border-[#cbd5e1] overflow-hidden">
+                <div
+                  className={`w-full p-5 flex items-center justify-between gap-4 ${
+                    isBatchExpanded ? "bg-[#e2e8f0]" : "hover:bg-[#f1f5f9]"
+                  }`}
+                >
                   <button
                     type="button"
                     className="flex items-center gap-3 text-left flex-1"
@@ -239,7 +247,7 @@ export function ReviewQueuePage() {
                 </div>
 
                 {isBatchExpanded && (
-                  <div className="border-t border-border bg-[#f8f9fa] p-4 space-y-3">
+                  <div className="border-t border-[#cbd5e1] bg-[#f1f5f9] p-4 space-y-3">
                     {!detail || detail.kind === "loading" ? (
                       <p className="text-sm text-muted-foreground py-2 px-1">Loading line errors…</p>
                     ) : detail.kind === "error" ? (
@@ -285,10 +293,16 @@ function PRGroupCard({
   const openCount = pr.lines.filter((l) => l.queue_status === "open").length;
   const allResolved = openCount === 0;
   return (
-    <div className="rounded-md border border-border bg-white overflow-hidden">
+    <div
+      className={`rounded-md border border-[#cbd5e1] border-l-4 bg-white overflow-hidden ${
+        allResolved ? "border-l-[#10b981]" : "border-l-[#f59e0b]"
+      }`}
+    >
       <button
         type="button"
-        className="w-full p-4 flex items-center justify-between gap-4 text-left hover:bg-[#f8f9fa]"
+        className={`w-full p-4 flex items-center justify-between gap-4 text-left ${
+          isExpanded ? "bg-[#f8fafc]" : "hover:bg-[#f8fafc]"
+        }`}
         onClick={onToggle}
       >
         <div className="flex items-center gap-3">
@@ -311,18 +325,18 @@ function PRGroupCard({
       </button>
 
       {isExpanded && (
-        <div className="border-t border-border overflow-x-auto">
+        <div className="border-t border-[#cbd5e1] overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-[#f8f9fa]">
-              <tr className="border-b border-border">
-                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Line</th>
-                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Item</th>
-                <th className="text-left p-3 text-xs font-medium text-muted-foreground">WBS</th>
-                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Current Classification</th>
-                <th className="text-left p-3 text-xs font-medium text-muted-foreground">Issue</th>
-                <th className="text-right p-3 text-xs font-medium text-muted-foreground">Amount + GST</th>
-                <th className="text-center p-3 text-xs font-medium text-muted-foreground">Status</th>
-                <th className="text-center p-3 text-xs font-medium text-muted-foreground">Action</th>
+            <thead className="bg-[#e2e8f0]">
+              <tr className="border-b border-[#cbd5e1]">
+                <th className="text-left p-3 text-xs font-semibold text-[#334155]">Line</th>
+                <th className="text-left p-3 text-xs font-semibold text-[#334155]">Item</th>
+                <th className="text-left p-3 text-xs font-semibold text-[#334155]">WBS</th>
+                <th className="text-left p-3 text-xs font-semibold text-[#334155]">Current Classification</th>
+                <th className="text-left p-3 text-xs font-semibold text-[#334155]">Issue</th>
+                <th className="text-right p-3 text-xs font-semibold text-[#334155]">Amount + GST</th>
+                <th className="text-center p-3 text-xs font-semibold text-[#334155]">Status</th>
+                <th className="text-center p-3 text-xs font-semibold text-[#334155]">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -341,7 +355,7 @@ function PRGroupCard({
 function LineRow({ line }: { line: ReviewQueueLine }) {
   return (
     <Fragment>
-      <tr className="border-b border-border last:border-0 hover:bg-[#f8f9fa]">
+      <tr className="border-b border-[#e2e8f0] last:border-0 even:bg-[#f1f5f9] hover:bg-[#e0f2fe]">
         <td className="p-3 text-sm font-medium text-foreground">
           Line {line.source_line_no ?? "—"}
         </td>

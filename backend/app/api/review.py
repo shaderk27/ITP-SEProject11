@@ -12,7 +12,12 @@ from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.services.threshold_service import check_and_notify_lab_thresholds
+from app.services.threshold_service import (
+    check_and_notify_lab_thresholds,
+    check_and_notify_lab_group_thresholds,
+)
+from app.services.knowledge_service import index_pr_lines_in_background
+from app.services.duplicate_service import is_status_regression
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.config import Lab, LabGroup, SpendingCategory
@@ -97,6 +102,7 @@ class LabGroupOption(BaseModel):
 
 class LabOption(BaseModel):
     lab_id: int
+    lab_code: str | None
     lab_name: str
     lab_group_id: int | None
     is_general: bool
@@ -183,6 +189,7 @@ class CommitResponse(BaseModel):
     prs_updated: int
     lines_created: int
     pr_ids: list[int]
+    status_regressions_skipped: int = 0
 
 
 # ─── Endpoints ───────────────────────────────────────────────────────────
@@ -191,16 +198,6 @@ def list_batches(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[BatchSummary]:
-    """
-    Return batches relevant to the Review Queue page:
-      - batches that still have at least one OPEN queue item, OR
-      - batches in 'ready_to_commit' status (waiting for the commit click).
-
-    Role scoping:
-      - Admin     → sees every relevant batch.
-      - Team Lead → only batches that have at least one line in their lab_group.
-      - Lab IC    → 403.
-    """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
         raise HTTPException(
@@ -211,7 +208,6 @@ def list_batches(
     if role_name == "teamlead" and not current_user.lab_group_id:
         return []
 
-    # 1. Batches with at least one open queue item (active review work).
     open_batches_query = (
         db.query(UploadBatch.batch_id)
         .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
@@ -230,7 +226,6 @@ def list_batches(
             StagingPRLine.suggested_lab_group_id == current_user.lab_group_id
         )
 
-    # 2. Batches in 'ready_to_commit' status (zero open items, awaiting Commit click).
     ready_batches_query = db.query(UploadBatch.batch_id).filter(
         UploadBatch.upload_status == "ready_to_commit"
     )
@@ -271,17 +266,6 @@ def get_batch_detail(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BatchDetail:
-    """
-    Return a single batch with its PRs and the line errors needing review.
-
-    Role scoping mirrors /api/review/batches:
-      - Admin sees every open line in the batch.
-      - Team Lead sees only lines whose suggested_lab_group_id matches theirs.
-      - Lab IC: 403.
-
-    PRs that contain zero in-scope open lines are omitted from the response,
-    so the page never shows empty PR groups.
-    """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
         raise HTTPException(
@@ -296,7 +280,6 @@ def get_batch_detail(
             detail=f"Batch {batch_id} not found.",
         )
 
-    # Name lookups so each line can carry resolved display strings.
     lab_group_names = {
         g.lab_group_id: g.lab_group_name for g in db.query(LabGroup).all()
     }
@@ -314,8 +297,6 @@ def get_batch_detail(
 
     pr_groups: list[ReviewPRGroup] = []
     for header in headers:
-        # Include both 'open' and 'resolved' queue items so Team Leads can
-        # re-edit a saved correction before the batch is committed.
         line_query = (
             db.query(StagingPRLine, ReviewQueueItem)
             .join(
@@ -332,7 +313,7 @@ def get_batch_detail(
 
         line_rows = line_query.order_by(StagingPRLine.source_line_no).all()
         if not line_rows:
-            continue  # Skip PRs with no in-scope open lines.
+            continue
 
         lines: list[ReviewQueueLine] = []
         for line, queue_item in line_rows:
@@ -386,10 +367,6 @@ def get_queue_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> QueueItemDetail:
-    """
-    Single queue item view for the Edit Line form. Returns everything the
-    UI needs in one payload, including dropdown options.
-    """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
         raise HTTPException(
@@ -399,7 +376,6 @@ def get_queue_item(
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
-    # Team Lead can only see items in their own lab_group.
     if role_name == "teamlead":
         if (
             current_user.lab_group_id is None
@@ -410,7 +386,6 @@ def get_queue_item(
                 "This review item is not in your assigned lab group.",
             )
 
-    # Resolve current display names.
     lab_groups = db.query(LabGroup).order_by(LabGroup.lab_group_name).all()
     labs = db.query(Lab).order_by(Lab.lab_name).all()
     categories = (
@@ -424,7 +399,6 @@ def get_queue_item(
     current_lab = lab_name_by_id.get(line.suggested_lab_id, "General")
     current_category = cat_name_by_id.get(line.suggested_category_id, "General")
 
-    # Pull the most recent review_action on this queue item, if any.
     latest_action_row = (
         db.query(ReviewAction, User)
         .join(User, User.user_id == ReviewAction.reviewed_by)
@@ -483,6 +457,7 @@ def get_queue_item(
         available_labs=[
             LabOption(
                 lab_id=lab.lab_id,
+                lab_code=lab.lab_code,
                 lab_name=lab.lab_name,
                 lab_group_id=lab.lab_group_id,
                 is_general=bool(lab.is_general),
@@ -503,18 +478,6 @@ def correct_queue_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CorrectionResponse:
-    """
-    Apply a manual correction to one queue item.
-
-    Side effects (single transaction):
-      - Update staging_pr_lines.suggested_* with picked IDs
-      - Mark staging_pr_lines.review_status = 'resolved'
-      - Mark review_queue_items.queue_status = 'resolved' + resolved_at
-      - Insert review_actions row (per-correction audit)
-      - Insert audit_logs row (system-wide audit, W11-04 plumbing)
-      - If batch now has zero open items, upgrade upload_batches.upload_status
-        to 'ready_to_commit'.
-    """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
         raise HTTPException(
@@ -524,16 +487,12 @@ def correct_queue_item(
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
-    # Block edits only after the batch has been committed to final tables.
-    # Before commit: Team Leads can re-correct the same item as many times
-    # as they need to (each save adds a new review_actions row, full history).
     if batch.upload_status == "committed":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Batch {batch.batch_id} has already been committed. This item can no longer be edited.",
         )
 
-    # Team Lead scoping: must own the item's current lab_group.
     if role_name == "teamlead":
         if (
             current_user.lab_group_id is None
@@ -544,7 +503,6 @@ def correct_queue_item(
                 "This review item is not in your assigned lab group.",
             )
 
-    # Validate FKs exist + lab belongs to chosen group.
     lab_group = (
         db.query(LabGroup).filter(LabGroup.lab_group_id == body.lab_group_id).first()
     )
@@ -572,7 +530,6 @@ def correct_queue_item(
             status.HTTP_400_BAD_REQUEST, f"Unknown category_id={body.category_id}."
         )
 
-    # Snapshot old values for audit before mutating.
     old_values = {
         "suggested_lab_group_id": line.suggested_lab_group_id,
         "suggested_lab_id": line.suggested_lab_id,
@@ -586,18 +543,15 @@ def correct_queue_item(
         "review_status": "resolved",
     }
 
-    # 1. Update the staging line with the corrected classification.
     line.suggested_lab_group_id = body.lab_group_id
     line.suggested_lab_id = body.lab_id
     line.suggested_category_id = body.category_id
     line.review_status = "resolved"
     line.classification_status = "confident"
 
-    # 2. Close the queue item.
     item.queue_status = "resolved"
     item.resolved_at = func.now()
 
-    # 3. Write per-correction audit row.
     db.add(
         ReviewAction(
             review_queue_id=item.review_queue_id,
@@ -610,7 +564,6 @@ def correct_queue_item(
         )
     )
 
-    # 4. Write system-wide audit row.
     db.add(
         AuditLog(
             user_id=current_user.user_id,
@@ -624,7 +577,6 @@ def correct_queue_item(
 
     db.flush()
 
-    # 5. If this was the last open item in the batch, mark batch ready_to_commit.
     remaining_open = (
         db.query(func.count(ReviewQueueItem.review_queue_id))
         .join(
@@ -660,28 +612,6 @@ def commit_batch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> CommitResponse:
-    """
-    Promote a fully-reviewed batch from staging into the final tables (W9-02).
-
-    Preconditions:
-      - User is Admin or Team Lead.
-      - Batch must exist.
-      - Batch must have NO open review_queue_items (every line resolved).
-      - For Team Lead: batch must contain at least one line in their lab_group.
-
-    Side effects (single transaction):
-      - For each staging header:
-        * If no purchase_requests row exists with same source_pr_number:
-            INSERT new PR + pr_versions(change_type='created', old_data=NULL)
-        * If one already exists (re-upload):
-            DELETE all its existing purchase_request_lines,
-            UPDATE the PR fields with the new values,
-            INSERT pr_versions(change_type='updated', old_data=<prior snapshot>)
-      - INSERT one purchase_request_lines row per staging_pr_lines row
-        (carrying source_staging_line_id for traceability)
-      - UPDATE upload_batches.upload_status = 'committed', processed_at = NOW()
-      - INSERT one audit_logs row (BATCH_COMMITTED) with both created + updated counts
-    """
     role_name = _role_name(current_user)
     if role_name not in ALLOWED_REVIEW_ROLES:
         raise HTTPException(
@@ -692,13 +622,11 @@ def commit_batch(
     if not batch:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Batch {batch_id} not found.")
 
-    # Block re-commits.
     if batch.upload_status == "committed":
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"Batch {batch_id} is already committed."
         )
 
-    # Block if any open queue items remain.
     open_count = (
         db.query(func.count(ReviewQueueItem.review_queue_id))
         .join(
@@ -720,7 +648,6 @@ def commit_batch(
             f"Batch {batch_id} still has {open_count} open review item(s). Resolve them first.",
         )
 
-    # Team Lead scope: must own at least one line in this batch.
     if role_name == "teamlead":
         if current_user.lab_group_id is None:
             raise HTTPException(
@@ -759,9 +686,11 @@ def commit_batch(
     prs_updated_count = 0
     lines_created = 0
     lines_updated = 0
+    status_regressions_skipped = 0
 
-    # Keep track of unique labs affected by this commit
+    # Keep track of unique labs and lab groups affected by this commit
     affected_lab_ids = set()
+    affected_lab_group_ids = set()
 
     for header in headers:
         lines = (
@@ -770,22 +699,11 @@ def commit_batch(
             .order_by(StagingPRLine.source_line_no)
             .all()
         )
-        # Use the first line's lab_group as the PR-level lab_group_id.
-        # (All lines under one PR typically share a group; refine later if not.)
         pr_lab_group_id = lines[0].suggested_lab_group_id if lines else None
-        # PR Status from source xlsx (e.g. "Approved (SVP)", "Pending Approval",
-        # "Rejected"). Same value on every row of a given PR, so first line wins.
+
         pr_status_value = _raw_line_value(lines[0], "pr_status") if lines else ""
         pr_status_value = pr_status_value or None
 
-        # UPDATE if a PR with this source_pr_number already exists; otherwise INSERT.
-        # Re-upload semantics (merged W9-02 + W9-04):
-        #   - Header fields (requestor, wbs, totals) refresh from the new source file.
-        #   - Existing committed lines are PRESERVED — reviewer's lab/category sticks.
-        #     Only `source_staging_line_id` is bumped to point at the newest staging row.
-        #   - Lines without a matching `line_identity_key` are inserted as new.
-        #   - `pr_versions` captures the full PR-header snapshot every commit
-        #     (created OR updated), plus source-system status diffs when present.
         existing_pr = (
             db.query(PurchaseRequest)
             .filter(PurchaseRequest.source_pr_number == header.source_pr_number)
@@ -833,7 +751,6 @@ def commit_batch(
                 "pr_status": existing_pr.pr_status,
             }
 
-            # Refresh PR header fields from the new source file; lines handled below.
             existing_pr.latest_batch_id = batch.batch_id
             existing_pr.requestor_name = header.requestor_name
             existing_pr.req_type = header.req_type
@@ -849,28 +766,45 @@ def commit_batch(
             pr = existing_pr
             prs_updated_count += 1
 
-        pr_ids.append(pr.pr_id)
-
-        # Line-level preservation (Harry's W9-04 logic):
-        # match each incoming staging line to an existing final line by line_identity_key.
         existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
         status_updates: list[dict] = []
+        regressions_skipped: list[dict] = []
 
         for line in lines:
-            # Record every lab that is having money spent on it
-            if line.suggested_lab_id:
-                affected_lab_ids.add(line.suggested_lab_id)
-
             line_identity_key = _raw_line_value(line, "line_identity_key")
             existing_line = existing_lines_by_identity.get(line_identity_key)
+
+            # W17: approval is final; an upload cannot move an Approved line
+            # to any non-Approved status.
+            incoming_status = _raw_line_value(line, "pr_status")
+            if existing_line and is_status_regression(
+                existing_line.pr_status, incoming_status
+            ):
+                line.duplicate_status = "status_regression"
+                regressions_skipped.append(
+                    {
+                        "line_identity_key": line_identity_key,
+                        "line_no": line.source_line_no,
+                        "staging_line_id": line.staging_line_id,
+                        "accepted_status": existing_line.pr_status,
+                        "attempted_status": incoming_status,
+                    }
+                )
+                if line is lines[0]:
+                    # Header status follows the first line; keep it accepted.
+                    pr.pr_status = existing_line.pr_status
+                continue
+
+            if line.suggested_lab_id:
+                affected_lab_ids.add(line.suggested_lab_id)
+            if line.suggested_lab_group_id:
+                affected_lab_group_ids.add(line.suggested_lab_group_id)
+
             if existing_line:
                 old_staging_line = _staging_line_for_committed_line(db, existing_line)
                 old_status = _source_status_snapshot(old_staging_line)
                 new_status = _source_status_snapshot(line)
 
-                # Preserve reviewed final Lab/Category/Amount, only bump traceability pointer.
-                # PR Status is source-system metadata, not reviewer work — refresh
-                # it from the new staging line so it tracks the latest source file.
                 existing_line.source_staging_line_id = line.staging_line_id
                 existing_line.pr_status = _raw_line_value(line, "pr_status") or None
                 lines_updated += 1
@@ -902,8 +836,6 @@ def commit_batch(
             )
             lines_created += 1
 
-        # One pr_versions row per commit, with full header snapshot on both
-        # 'created' and 'updated' change types, plus source-status diffs if any.
         db.flush()
         final_line_count = (
             db.query(func.count(PurchaseRequestLine.pr_line_id))
@@ -928,6 +860,15 @@ def commit_batch(
             if old_data is None:
                 old_data = {}
             old_data["status_updates"] = [u["old_status"] for u in status_updates]
+        if regressions_skipped:
+            new_data["status_regressions_skipped"] = regressions_skipped
+            status_regressions_skipped += len(regressions_skipped)
+
+        # Skipped lines trigger no threshold or vector refresh work.
+        if len(regressions_skipped) < len(lines):
+            pr_ids.append(pr.pr_id)
+            if pr_lab_group_id:
+                affected_lab_group_ids.add(pr_lab_group_id)
 
         db.add(
             PRVersion(
@@ -941,11 +882,20 @@ def commit_batch(
             )
         )
 
-    # Mark batch committed.
+    # Also ensure parent Lab Groups of any affected labs are included
+    if affected_lab_ids:
+        parent_group_rows = (
+            db.query(Lab.lab_group_id)
+            .filter(Lab.lab_id.in_(affected_lab_ids), Lab.lab_group_id.isnot(None))
+            .distinct()
+            .all()
+        )
+        for (gid,) in parent_group_rows:
+            affected_lab_group_ids.add(gid)
+
     batch.upload_status = "committed"
     batch.processed_at = func.now()
 
-    # System audit.
     db.add(
         AuditLog(
             user_id=current_user.user_id,
@@ -959,16 +909,23 @@ def commit_batch(
                 "prs_updated": prs_updated_count,
                 "lines_created": lines_created,
                 "lines_updated": lines_updated,
+                "status_regressions_skipped": status_regressions_skipped,
             },
         )
     )
 
     db.commit()
 
-    # TRIGGER THRESHOLD EMAILS
-    # Will instantly run the math and send emails for the specific labs involved in this commit
+    # TRIGGER THRESHOLD EMAILS (Both Lab-level and Lab Group-level)
     for lab_id in affected_lab_ids:
         background_tasks.add_task(check_and_notify_lab_thresholds, lab_id)
+
+    for group_id in affected_lab_group_ids:
+        background_tasks.add_task(check_and_notify_lab_group_thresholds, group_id)
+
+    # Refresh Ask AI's PR-line search cards (no-op when embeddings are off).
+    if pr_ids:
+        background_tasks.add_task(index_pr_lines_in_background, list(pr_ids))
 
     return CommitResponse(
         success=True,
@@ -978,12 +935,12 @@ def commit_batch(
         prs_updated=prs_updated_count,
         lines_created=lines_created,
         pr_ids=pr_ids,
+        status_regressions_skipped=status_regressions_skipped,
     )
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
 def _load_queue_item_or_404(db: Session, review_queue_id: int):
-    """Fetch a queue item joined with line / header / batch, or raise 404."""
     row = (
         db.query(ReviewQueueItem, StagingPRLine, StagingPRHeader, UploadBatch)
         .join(
@@ -1007,7 +964,6 @@ def _load_queue_item_or_404(db: Session, review_queue_id: int):
 
 
 def _role_name(user: User) -> str:
-    """Pull the user's role_name lowercased — empty string if unset."""
     return (user.role.role_name if user.role else "").lower().strip()
 
 
@@ -1056,8 +1012,6 @@ def _build_summary(
     role_name: str,
     user_lab_group_id: int | None,
 ) -> BatchSummary:
-    """Compute total_lines and open_queue_count for one batch, with role-aware filtering."""
-    # Total parsed lines in this batch (not role-filtered — count what was uploaded).
     total_lines = (
         db.query(func.count(StagingPRLine.staging_line_id))
         .join(
@@ -1069,7 +1023,6 @@ def _build_summary(
         or 0
     )
 
-    # Open queue items in this batch — Team Lead only sees their own group's items.
     open_count_query = (
         db.query(func.count(ReviewQueueItem.review_queue_id))
         .join(

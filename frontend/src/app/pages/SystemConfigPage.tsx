@@ -26,6 +26,14 @@ import {
   Star,
 } from "lucide-react";
 
+const formatCurrency = (amount: number = 0) => {
+  const absFormatted = Math.abs(amount).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return amount < 0 ? `-$${absFormatted}` : `$${absFormatted}`;
+};
+
 const generateVenueTags = (
   rawCode?: string | null,
   rawName?: string | null,
@@ -78,11 +86,14 @@ export function SystemConfigPage() {
   const [teamleadUsers, setTeamleadUsers] = useState<any[]>([]);
   const [selectedLabIds, setSelectedLabIds] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isPrimaryAssignment, setIsPrimaryAssignment] =
-    useState<boolean>(false);
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
 
   const [editingGroupId, setEditingGroupId] = useState<number | null>(null);
+  const [editingGroupFloor, setEditingGroupFloor] = useState<{
+    allocated: number;
+    spent: number;
+  } | null>(null);
+
   const [editingLabId, setEditingLabId] = useState<number | null>(null);
   const [editingCategoryId, setEditingCategoryId] = useState<number | null>(
     null,
@@ -113,11 +124,13 @@ export function SystemConfigPage() {
     budgets: {} as Record<string, number>,
   });
 
-  // Track which group's unallocated balance to validate against
+  // Track which group's unallocated balance and category spend locks to validate against
   const [activeGroupValidation, setActiveGroupValidation] = useState<{
     id: number;
     unallocated: number;
     name: string;
+    spentByCategory: Record<string, number>;
+    originalBudgets: Record<string, number>;
   } | null>(null);
 
   const [isAssignLabICModalOpen, setIsAssignLabICModalOpen] = useState(false);
@@ -191,7 +204,7 @@ export function SystemConfigPage() {
         console.error(err);
       }
     })();
-  }, []);
+  }, [API_BASE_URL]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -288,6 +301,10 @@ export function SystemConfigPage() {
 
   const openEditGroup = (group: any) => {
     setEditingGroupId(group.id);
+    setEditingGroupFloor({
+      allocated: Number(group.allocated_to_labs || 0),
+      spent: Number(group.spent || 0),
+    });
     setNewGroupForm({
       name: group.name,
       wbs_code: group.wbs_code || "",
@@ -309,6 +326,8 @@ export function SystemConfigPage() {
       id: group.id,
       unallocated: group.unallocated,
       name: group.name,
+      spentByCategory: {},
+      originalBudgets: {},
     });
     setNewLabForm({
       lab_code: "",
@@ -326,7 +345,7 @@ export function SystemConfigPage() {
     setEditingLabId(lab.id);
     const parentGroup = labGroups.find((g) => g.id === lab.group_id);
     const labCurrentTotal = Object.values(
-      lab.budgets as Record<string, number>,
+      (lab.budgets || {}) as Record<string, number>,
     ).reduce((a, b) => a + b, 0);
     setActiveGroupValidation(
       parentGroup
@@ -334,6 +353,8 @@ export function SystemConfigPage() {
             id: parentGroup.id,
             unallocated: parentGroup.unallocated + labCurrentTotal,
             name: parentGroup.name,
+            spentByCategory: lab.spent_by_category || {},
+            originalBudgets: lab.budgets || {},
           }
         : null,
     );
@@ -353,6 +374,7 @@ export function SystemConfigPage() {
   const resetGroupModal = () => {
     setIsGroupModalOpen(false);
     setEditingGroupId(null);
+    setEditingGroupFloor(null);
     setNewGroupForm({ name: "", wbs_code: "", description: "", budget: "" });
     setSelectedLabIds([]);
   };
@@ -379,17 +401,11 @@ export function SystemConfigPage() {
   const openAssignLabICModal = (lab: any) => {
     setAssignTargetLab(lab);
 
-    // Find the primary IC assigned to this lab (if any)
     const primaryUser = labicUsers.find((u) =>
       u.lab_assignments?.some((a: any) => a.lab_id === lab.id && a.is_primary),
     );
 
-    // Default dropdown selection to the primary user's ID, or empty string if assigning a new user
     setSelectedLabICUserId(primaryUser?.user_id ?? "");
-
-    // If adding a modal toggle for role type (e.g., isPrimary state), default it to false when adding secondaries
-    setIsPrimaryAssignment(false);
-
     setIsAssignLabICModalOpen(true);
   };
   const resetAssignLabICModal = () => {
@@ -406,7 +422,7 @@ export function SystemConfigPage() {
       const res = await fetch(
         `${API_BASE_URL}/api/auth/users/${userId}/assign-lab`,
         {
-          method: "PUT", // or "PATCH"
+          method: "PUT",
           headers: {
             "Content-Type": "application/json",
           },
@@ -439,7 +455,6 @@ export function SystemConfigPage() {
           credentials: "include",
           body: JSON.stringify({
             lab_id: assignTargetLab.id,
-            // is_primary: isPrimaryAssignment, // Sends boolean flag to server
           }),
         },
       );
@@ -502,7 +517,6 @@ export function SystemConfigPage() {
   };
 
   const handleAssignTeamLead = async () => {
-    // Convert and check for valid numeric ID
     const userId = Number(selectedTeamLeadUserId);
 
     if (!assignTargetGroup || !userId || isNaN(userId)) {
@@ -510,7 +524,6 @@ export function SystemConfigPage() {
       return;
     }
 
-    // Resolve group ID supporting both `id` and `lab_group_id`
     const labGroupId = assignTargetGroup.id ?? assignTargetGroup.lab_group_id;
 
     try {
@@ -539,7 +552,6 @@ export function SystemConfigPage() {
   const handleUnassignTeamLead = async (teamlead: any) => {
     if (!teamlead) return;
 
-    // Extract ID supporting both `id` and `user_id`
     const userId = teamlead.id ?? teamlead.user_id;
 
     if (!userId) {
@@ -590,8 +602,32 @@ export function SystemConfigPage() {
     0,
   );
   const isBudgetExceeded = activeGroupValidation
-    ? currentRequestedTotal > activeGroupValidation.unallocated
+    ? currentRequestedTotal > activeGroupValidation.unallocated + 1e-6
     : false;
+
+  // Check if any category budget is being reduced below its already-spent amount
+  const violatedCategories = activeGroupValidation
+    ? categories.filter((cat) => {
+        const key = String(cat.id);
+        const spent = Number(activeGroupValidation.spentByCategory?.[key] || 0);
+        if (spent <= 0) return false;
+        const orig = Number(activeGroupValidation.originalBudgets?.[key] || 0);
+        const minAllowed = orig >= spent ? spent : orig;
+        const requested = Number(newLabForm.budgets?.[cat.id] || 0);
+        return requested + 1e-6 < minAllowed;
+      })
+    : [];
+  const isCategorySpendViolated = violatedCategories.length > 0;
+
+  // Check if Lab Group budget is being reduced below allocated or spent amounts
+  const enteredGroupBudget = Number(newGroupForm.budget || 0);
+  const minAllowedGroupBudget = editingGroupFloor
+    ? Math.max(editingGroupFloor.allocated, editingGroupFloor.spent)
+    : 0;
+  const isGroupBudgetBelowFloor =
+    editingGroupId !== null &&
+    editingGroupFloor !== null &&
+    enteredGroupBudget + 1e-6 < minAllowedGroupBudget;
 
   if (isLoading)
     return (
@@ -708,6 +744,7 @@ export function SystemConfigPage() {
                       const teamlead = teamleadUsers.find(
                         (u) => u.lab_group_id === group.id,
                       );
+                      const unallocatedVal = Number(group.unallocated ?? 0);
 
                       return (
                         <React.Fragment key={group.id}>
@@ -768,23 +805,19 @@ export function SystemConfigPage() {
                               )}
                             </td>
                             <td className="p-4 text-sm text-right font-bold text-[#1e3a8a]">
-                              $
-                              {group.budget?.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                              })}
+                              {formatCurrency(group.budget ?? 0)}
                             </td>
                             <td className="p-4 text-sm text-right text-gray-500">
-                              $
-                              {group.allocated_to_labs?.toLocaleString(
-                                undefined,
-                                { minimumFractionDigits: 2 },
-                              )}
+                              {formatCurrency(group.allocated_to_labs ?? 0)}
                             </td>
-                            <td className="p-4 text-sm text-right font-bold text-[#16a34a]">
-                              $
-                              {group.unallocated?.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                              })}
+                            <td
+                              className={`p-4 text-sm text-right font-bold ${
+                                unallocatedVal < 0
+                                  ? "text-[#dc2626]"
+                                  : "text-[#16a34a]"
+                              }`}
+                            >
+                              {formatCurrency(unallocatedVal)}
                             </td>
                             <td className="p-4 text-center">
                               <div className="flex items-center justify-center gap-2">
@@ -836,8 +869,8 @@ export function SystemConfigPage() {
                                   {groupLabs.length === 0 ? (
                                     <p className="text-sm text-gray-400 italic bg-gray-50 p-6 text-center rounded-lg border border-dashed border-gray-200">
                                       No labs exist in this group yet. Click
-                                      "Add Lab" to allocate funds from the $
-                                      {group.unallocated?.toLocaleString()}{" "}
+                                      "Add Lab" to allocate funds from the{" "}
+                                      {formatCurrency(group.unallocated ?? 0)}{" "}
                                       remaining budget.
                                     </p>
                                   ) : (
@@ -863,7 +896,6 @@ export function SystemConfigPage() {
                                       </thead>
                                       <tbody>
                                         {groupLabs.map((lab) => {
-                                          // Find all users assigned to this specific lab
                                           const assignedUsers =
                                             labicUsers.filter((u) =>
                                               u.lab_assignments?.some(
@@ -920,7 +952,6 @@ export function SystemConfigPage() {
                                                           </div>
 
                                                           <div className="flex items-center gap-1 shrink-0">
-                                                            {/* Toggle Primary / Secondary Button */}
                                                             <Button
                                                               size="sm"
                                                               variant="ghost"
@@ -963,7 +994,6 @@ export function SystemConfigPage() {
                                                               />
                                                             </Button>
 
-                                                            {/* Unassign User Button */}
                                                             <Button
                                                               size="sm"
                                                               variant="ghost"
@@ -1025,6 +1055,37 @@ export function SystemConfigPage() {
                                                   </Button>
                                                 )}
                                               </td>
+                                              <td className="p-3 text-sm text-right font-semibold text-gray-800">
+                                                {formatCurrency(
+                                                  lab.budget ?? 0,
+                                                )}
+                                              </td>
+                                              <td className="p-3 text-center">
+                                                <div className="flex items-center justify-center gap-2">
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                      openEditLab(lab)
+                                                    }
+                                                  >
+                                                    <Edit className="h-3 w-3" />
+                                                  </Button>
+                                                  <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() =>
+                                                      handleDelete(
+                                                        `/api/config/labs/${lab.id}`,
+                                                        lab.name,
+                                                      )
+                                                    }
+                                                    className="text-[#dc2626]"
+                                                  >
+                                                    <Trash2 className="h-3 w-3" />
+                                                  </Button>
+                                                </div>
+                                              </td>
                                             </tr>
                                           );
                                         })}
@@ -1038,10 +1099,8 @@ export function SystemConfigPage() {
                                             Total Allocated to Labs:
                                           </td>
                                           <td className="p-3 text-right text-sm font-bold text-gray-800">
-                                            $
-                                            {group.allocated_to_labs?.toLocaleString(
-                                              undefined,
-                                              { minimumFractionDigits: 2 },
+                                            {formatCurrency(
+                                              group.allocated_to_labs ?? 0,
                                             )}
                                           </td>
                                           <td></td>
@@ -1156,6 +1215,7 @@ export function SystemConfigPage() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
+                if (isGroupBudgetBelowFloor) return;
                 const endpoint = editingGroupId
                   ? `/api/config/labgroups/${editingGroupId}?period_id=${selectedPeriodId}`
                   : `/api/config/labgroups?period_id=${selectedPeriodId}`;
@@ -1201,7 +1261,13 @@ export function SystemConfigPage() {
                 </div>
               </div>
 
-              <div className="mt-4 p-4 border rounded-md bg-blue-50/50 border-blue-100">
+              <div
+                className={`mt-4 p-4 border rounded-md ${
+                  isGroupBudgetBelowFloor
+                    ? "bg-red-50/70 border-red-200"
+                    : "bg-blue-50/50 border-blue-100"
+                }`}
+              >
                 <label className="text-sm font-bold text-[#1e3a8a] flex items-center mb-2">
                   <DollarSign className="h-4 w-4 mr-1" /> Total Lab Group Budget
                 </label>
@@ -1209,6 +1275,18 @@ export function SystemConfigPage() {
                   This is the absolute maximum that can be distributed to labs
                   within this group.
                 </p>
+                {editingGroupFloor && minAllowedGroupBudget > 0 && (
+                  <p className="text-xs font-medium text-gray-600 mb-2">
+                    Currently Allocated to Labs:{" "}
+                    <span className="font-bold text-gray-900">
+                      {formatCurrency(editingGroupFloor.allocated)}
+                    </span>{" "}
+                    | Utilised/Spent:{" "}
+                    <span className="font-bold text-gray-900">
+                      {formatCurrency(editingGroupFloor.spent)}
+                    </span>
+                  </p>
+                )}
                 <div className="relative">
                   <span className="absolute left-3 top-2.5 text-gray-500 font-bold">
                     $
@@ -1218,7 +1296,11 @@ export function SystemConfigPage() {
                     min="0"
                     step="0.01"
                     required
-                    className="w-full pl-7 p-2 border border-blue-200 rounded-md font-bold text-lg text-gray-800"
+                    className={`w-full pl-7 p-2 border rounded-md font-bold text-lg text-gray-800 ${
+                      isGroupBudgetBelowFloor
+                        ? "border-red-400 bg-white focus:ring-red-200"
+                        : "border-blue-200"
+                    }`}
                     placeholder="0.00"
                     value={newGroupForm.budget}
                     onChange={(e) =>
@@ -1231,6 +1313,15 @@ export function SystemConfigPage() {
                     }
                   />
                 </div>
+                {isGroupBudgetBelowFloor && (
+                  <div className="mt-3 p-2.5 bg-red-100 text-red-700 text-xs font-semibold rounded flex items-center">
+                    <AlertTriangle className="h-4 w-4 mr-2 shrink-0" />
+                    Cannot set Lab Group budget below{" "}
+                    {formatCurrency(minAllowedGroupBudget)} because that amount
+                    is already allocated to labs or spent. Reduce lab
+                    allocations first.
+                  </div>
+                )}
               </div>
 
               {orphanedLabs.length > 0 && (
@@ -1278,7 +1369,11 @@ export function SystemConfigPage() {
                 >
                   Cancel
                 </Button>
-                <Button type="submit" className="bg-[#1e3a8a] text-white">
+                <Button
+                  type="submit"
+                  disabled={isGroupBudgetBelowFloor}
+                  className="bg-[#1e3a8a] text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   {editingGroupId ? "Save Changes" : "Create Lab Group"}
                 </Button>
               </div>
@@ -1307,7 +1402,7 @@ export function SystemConfigPage() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (isBudgetExceeded) return;
+                if (isBudgetExceeded || isCategorySpendViolated) return;
                 const base = editingLabId
                   ? `/api/config/labs/${editingLabId}`
                   : "/api/config/labs";
@@ -1403,21 +1498,24 @@ export function SystemConfigPage() {
                     </h4>
 
                     <div
-                      className={`text-right p-3 rounded-lg border ${isBudgetExceeded ? "bg-red-50 border-red-200" : "bg-green-50 border-green-200"}`}
+                      className={`text-right p-3 rounded-lg border ${
+                        isBudgetExceeded
+                          ? "bg-red-50 border-red-200"
+                          : "bg-green-50 border-green-200"
+                      }`}
                     >
                       <p className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">
                         Unallocated Group Budget
                       </p>
                       <p
-                        className={`text-lg font-black ${isBudgetExceeded ? "text-red-600" : "text-green-700"}`}
+                        className={`text-lg font-black ${
+                          isBudgetExceeded ? "text-red-600" : "text-green-700"
+                        }`}
                       >
-                        $
-                        {(
+                        {formatCurrency(
                           activeGroupValidation.unallocated -
-                          currentRequestedTotal
-                        ).toLocaleString(undefined, {
-                          minimumFractionDigits: 2,
-                        })}
+                            currentRequestedTotal,
+                        )}
                       </p>
                     </div>
                   </div>
@@ -1430,41 +1528,87 @@ export function SystemConfigPage() {
                     </div>
                   )}
 
+                  {isCategorySpendViolated && (
+                    <div className="mb-4 p-3 bg-red-100 text-red-700 text-sm font-semibold rounded-md flex items-center">
+                      <AlertTriangle className="h-4 w-4 mr-2 flex-shrink-0" />
+                      Cannot shift/reduce budget for{" "}
+                      {violatedCategories.map((c) => c.name).join(", ")} below
+                      the amount already utilised/spent in this fiscal year.
+                    </div>
+                  )}
+
                   {categories.length === 0 ? (
                     <p className="text-sm text-red-500 italic">
                       Please add Spending Categories first!
                     </p>
                   ) : (
                     <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-100">
-                      {categories.map((cat) => (
-                        <div key={cat.id}>
-                          <label className="text-xs font-bold text-gray-600 uppercase">
-                            {cat.name}
-                          </label>
-                          <div className="relative mt-1.5">
-                            <span className="absolute left-3 top-2.5 text-gray-500 font-medium">
-                              $
-                            </span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              className={`w-full pl-7 p-2 border rounded-md focus:ring-2 outline-none transition-colors ${isBudgetExceeded ? "border-red-300 focus:ring-red-200 bg-red-50" : "border-gray-300 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"}`}
-                              placeholder="0.00"
-                              value={newLabForm.budgets[cat.id] || ""}
-                              onChange={(e) =>
-                                setNewLabForm({
-                                  ...newLabForm,
-                                  budgets: {
-                                    ...newLabForm.budgets,
-                                    [cat.id]: parseFloat(e.target.value) || 0,
-                                  },
-                                })
-                              }
-                            />
+                      {categories.map((cat) => {
+                        const key = String(cat.id);
+                        const catSpent = Number(
+                          activeGroupValidation.spentByCategory?.[key] || 0,
+                        );
+                        const origBudget = Number(
+                          activeGroupValidation.originalBudgets?.[key] || 0,
+                        );
+                        const minAllowed =
+                          origBudget >= catSpent ? catSpent : origBudget;
+                        const requested = Number(
+                          newLabForm.budgets[cat.id] || 0,
+                        );
+                        const isThisCatViolated =
+                          catSpent > 0 && requested + 1e-6 < minAllowed;
+
+                        return (
+                          <div key={cat.id}>
+                            <div className="flex items-center justify-between">
+                              <label className="text-xs font-bold text-gray-600 uppercase">
+                                {cat.name}
+                              </label>
+                              {catSpent > 0 && (
+                                <span
+                                  className={`text-[11px] font-semibold ${
+                                    isThisCatViolated
+                                      ? "text-red-600"
+                                      : "text-gray-500"
+                                  }`}
+                                >
+                                  Utilised: {formatCurrency(catSpent)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="relative mt-1.5">
+                              <span className="absolute left-3 top-2.5 text-gray-500 font-medium">
+                                $
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className={`w-full pl-7 p-2 border rounded-md focus:ring-2 outline-none transition-colors ${
+                                  isBudgetExceeded || isThisCatViolated
+                                    ? "border-red-400 focus:ring-red-200 bg-red-50"
+                                    : "border-gray-300 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a]"
+                                }`}
+                                placeholder="0.00"
+                                value={newLabForm.budgets[cat.id] ?? ""}
+                                onChange={(e) =>
+                                  setNewLabForm({
+                                    ...newLabForm,
+                                    budgets: {
+                                      ...newLabForm.budgets,
+                                      [cat.id]:
+                                        e.target.value === ""
+                                          ? 0
+                                          : parseFloat(e.target.value) || 0,
+                                    },
+                                  })
+                                }
+                              />
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1476,7 +1620,7 @@ export function SystemConfigPage() {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isBudgetExceeded}
+                  disabled={isBudgetExceeded || isCategorySpendViolated}
                   className="bg-[#1e3a8a] text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {editingLabId ? "Save Allocation" : "Confirm Allocation"}
@@ -1662,7 +1806,6 @@ export function SystemConfigPage() {
                     );
 
                     return availableUsers.map((u: any) => {
-                      // ✅ Fallback to u.id if u.user_id is undefined
                       const userId = u.id ?? u.user_id;
 
                       const assignmentCount = u.lab_assignments?.length || 0;
@@ -1775,7 +1918,6 @@ export function SystemConfigPage() {
                     Select a Team Lead...
                   </option>
                   {teamleadUsers.map((u: any) => {
-                    // Support both u.id and u.user_id
                     const userId = u.id ?? u.user_id;
                     return (
                       <option key={userId} value={userId}>

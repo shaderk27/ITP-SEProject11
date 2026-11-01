@@ -10,7 +10,8 @@ export interface User {
   role: UserRole;
   assignedLabs: string[];
   labGroupId: number | null;
-  labId: number | null;
+  // Lab IC's assigned labs, primary lab first.
+  labIds: number[];
   mustResetPassword: boolean;
 }
 
@@ -126,7 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 email: "",
                 role: "labic",
                 labGroupId: null,
-                labId: null,
+                labIds: [],
                 assignedLabs: [],
                 mustResetPassword: true,
               });
@@ -152,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: data.email,
           role: data.role,
           labGroupId: data.lab_group_id,
-          labId: data.lab_id,
+          labIds: data.lab_ids ?? [],
           assignedLabs: parseAssignedLabs(rawAssignedLabs),
           mustResetPassword: data.must_reset_password ?? false,
         });
@@ -188,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: rawUser.email,
       role: rawUser.role,
       labGroupId: rawUser.lab_group_id,
-      labId: rawUser.lab_id,
+      labIds: rawUser.lab_ids ?? [],
       assignedLabs: parseAssignedLabs(rawAssignedLabs),
       mustResetPassword: rawUser.must_reset_password ?? false,
     });

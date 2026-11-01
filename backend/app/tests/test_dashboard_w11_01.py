@@ -27,7 +27,14 @@ from app.api.dashboard import (
     get_spending_summary,
 )
 from app.models.auth import Role, User
-from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
+from app.models.config import (
+    Budget,
+    BudgetPeriod,
+    Lab,
+    LabGroup,
+    LabIcAssignment,
+    SpendingCategory,
+)
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
 
 # Unique-ish suffix base so repeated entity names never collide inside a run.
@@ -172,10 +179,12 @@ def _make_labic(db, lab: Lab) -> User:
         full_name=f"W11 Test IC {suffix}",
         email=f"w11t.ic.{suffix}@example.test",
         password_hash="placeholder_no_auth_yet",
-        lab_id=lab.lab_id,
     )
     db.add(user)
     db.flush()
+    db.add(LabIcAssignment(lab_id=lab.lab_id, user_id=user.user_id, is_primary=True))
+    db.flush()
+    db.refresh(user)
     return user
 
 

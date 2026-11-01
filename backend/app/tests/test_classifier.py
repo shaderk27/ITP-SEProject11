@@ -83,7 +83,10 @@ class FakeDb:
                 user_id=1,
                 full_name="Bobby Jones",
                 email="bobby@sit.edu",
-                lab_id=30,
+                lab_assignments=[
+                    SimpleNamespace(lab_id=20, is_primary=True),
+                    SimpleNamespace(lab_id=30, is_primary=False),
+                ],
                 lab_group_id=1,
             )
         ]

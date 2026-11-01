@@ -3,6 +3,24 @@ from dataclasses import dataclass
 from app.models.upload import PRLineItem
 
 
+def _status_word(status: str | None) -> str:
+    return (status or "").strip().lower()
+
+
+def is_status_regression(
+    accepted_status: str | None, incoming_status: str | None
+) -> bool:
+    """True when a committed Approved line would change to a non-Approved status.
+
+    Approval is final: once the accepted status starts with "approved"
+    (e.g. "Approved (SVP)"), Pending, Rejected, Cancelled, blank or any other
+    status is refused. Another Approved variant may still replace it.
+    """
+    return _status_word(accepted_status).startswith("approved") and not _status_word(
+        incoming_status
+    ).startswith("approved")
+
+
 @dataclass(frozen=True)
 class DuplicateDecision:
     status: str

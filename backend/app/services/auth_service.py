@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 import os
 
 from fastapi import HTTPException, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import jwt
 import bcrypt
@@ -89,9 +90,9 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "role_id": user.role_id,
                 "lab_group_id": user.lab_group_id,
-                "lab_group_name": user.lab_group.lab_group_name
-                if user.lab_group
-                else None,
+                "lab_group_name": (
+                    user.lab_group.lab_group_name if user.lab_group else None
+                ),
                 "lab_group_code": user.lab_group.wbs_code if user.lab_group else None,
                 "lab_assignments": self._format_user_assignments(user),
                 "is_active": user.is_active,
@@ -193,9 +194,11 @@ class AuthService:
                 "lab_group_id": user.lab_group_id,
                 "lab_ids": assigned_lab_ids,
                 "must_reset_password": used_temp_password,
-                "assignedLabs": assigned_lab_codes
-                if assigned_lab_codes
-                else ([user.lab_group.wbs_code] if user.lab_group else []),
+                "assignedLabs": (
+                    assigned_lab_codes
+                    if assigned_lab_codes
+                    else ([user.lab_group.wbs_code] if user.lab_group else [])
+                ),
             },
         }
 
@@ -253,9 +256,11 @@ class AuthService:
             "lab_group_id": user.lab_group_id,
             "lab_ids": assigned_lab_ids,
             "must_reset_password": bool(payload.get("must_reset_password", False)),
-            "assignedLabs": assigned_lab_codes
-            if assigned_lab_codes
-            else ([user.lab_group.wbs_code] if user.lab_group else []),
+            "assignedLabs": (
+                assigned_lab_codes
+                if assigned_lab_codes
+                else ([user.lab_group.wbs_code] if user.lab_group else [])
+            ),
         }
 
     def _send_temp_password_email(
@@ -366,37 +371,64 @@ class AuthService:
 
         password_hash = self._hash_password(password)
 
-        user = self.repository.create_user(
-            db=self.db,
-            role_id=role_id,
-            full_name=full_name,
-            email=normalized_email,
-            password_hash=password_hash,
-            staff_id=staff_id,
-            lab_group_id=lab_group_id,
-        )
-
-        # Process multiple or single lab assignments for Lab IC users
+        # Lab ICs: collect the labs to assign (de-duplicated, sorted so row locks
+        # are always taken in the same order and cannot deadlock).
+        target_lab_ids: List[int] = []
         if role_name == "labic":
-            # Collect lab IDs to assign (supporting both list and single lab_id)
-            target_lab_ids = set(lab_ids or [])
-            if lab_id is not None:
-                target_lab_ids.add(lab_id)
+            requested = [*(lab_ids or []), lab_id, primary_lab_id]
+            target_lab_ids = sorted({lid for lid in requested if lid is not None})
 
-            # Determine primary lab (fallback to first lab if not explicitly provided)
-            effective_primary_id = primary_lab_id or (
-                next(iter(target_lab_ids)) if target_lab_ids else None
+        # User and lab assignments are written in ONE transaction: if any step
+        # fails nothing is saved, so no half-created user is left behind.
+        try:
+            # Validate labs before writing anything. Locking each lab row means two
+            # admins adding ICs to the same lab cannot both become its primary.
+            for target_lab_id in target_lab_ids:
+                if not self.repository.get_lab_by_id(
+                    self.db, target_lab_id, for_update=True
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Lab {target_lab_id} not found.",
+                    )
+
+            user = self.repository.create_user(
+                db=self.db,
+                role_id=role_id,
+                full_name=full_name,
+                email=normalized_email,
+                password_hash=password_hash,
+                staff_id=staff_id,
+                lab_group_id=lab_group_id,
+                commit=False,
             )
 
             for target_lab_id in target_lab_ids:
-                is_primary = target_lab_id == effective_primary_id
+                # Only an explicit primary_lab_id forces primary. Otherwise the
+                # repository decides: primary if the lab has none, else secondary.
                 self.repository.assign_lab_to_user(
                     db=self.db,
                     user_id=user.user_id,
                     lab_id=target_lab_id,
-                    is_primary=is_primary,
+                    is_primary=True if target_lab_id == primary_lab_id else None,
                     assigned_by=creator_admin_id,
+                    commit=False,
                 )
+
+            self.db.commit()
+        except HTTPException:
+            self.db.rollback()
+            raise
+        except IntegrityError:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="User could not be created because of a conflicting "
+                "record (for example the email was just taken). Please retry.",
+            )
+        except Exception:
+            self.db.rollback()
+            raise
 
         # Refresh user instance to ensure relationships (like lab_assignments) are loaded
         self.db.refresh(user)
@@ -427,7 +459,7 @@ class AuthService:
                 status_code=400, detail="Only Lab IC users can be assigned to a lab."
             )
 
-        lab = self.repository.get_lab_by_id(self.db, lab_id)
+        lab = self.repository.get_lab_by_id(self.db, lab_id, for_update=True)
         if not lab:
             raise HTTPException(status_code=404, detail="Lab not found.")
 
@@ -529,9 +561,12 @@ class AuthService:
                 "is_active": user.is_active,
             }
 
-        user.is_active = False
-        self.db.commit()
-        self.db.refresh(user)
+        user = self.repository.set_user_activation_status(
+            self.db,
+            user_id,
+            False,
+            acting_admin_id=current_admin_id,
+        )
 
         return {
             "user_id": user.user_id,
@@ -552,13 +587,12 @@ class AuthService:
             )
 
         if not user.is_active:
-            user.is_active = True
-            # Store admin audit reference if your model supports updated_by/activated_by
-            if hasattr(user, "updated_by") and current_admin_id is not None:
-                setattr(user, "updated_by", current_admin_id)
-
-            self.db.commit()
-            self.db.refresh(user)
+            user = self.repository.set_user_activation_status(
+                self.db,
+                user_id,
+                True,
+                acting_admin_id=current_admin_id,
+            )
 
         return {
             "user_id": user.user_id,
@@ -655,9 +689,9 @@ class AuthService:
                 "role": user.role.role_name if user.role else None,
                 "role_id": user.role_id,
                 "lab_group_id": user.lab_group_id,
-                "lab_group_name": user.lab_group.lab_group_name
-                if user.lab_group
-                else None,
+                "lab_group_name": (
+                    user.lab_group.lab_group_name if user.lab_group else None
+                ),
                 "lab_group_code": user.lab_group.wbs_code if user.lab_group else None,
                 "lab_assignments": self._format_user_assignments(user),
                 "is_active": user.is_active,

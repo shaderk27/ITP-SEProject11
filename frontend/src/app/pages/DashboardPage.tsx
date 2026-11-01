@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   DollarSign,
   TrendingUp,
@@ -19,8 +20,10 @@ import {
   Filter,
   ChevronDown,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { KPICard } from "../components/shared/KPICard";
+import { InfoTip } from "../components/shared/InfoTip";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import {
@@ -36,11 +39,13 @@ import {
 } from "../components/ui/popover";
 import { Checkbox } from "../components/ui/checkbox";
 import { FilterBar } from "../components/shared/FilterBar";
-import { DatePickerField } from "../components/shared/DatePickerField";
+import { MonthRangePicker } from "../components/shared/MonthRangePicker";
 import { RoleInfo } from "../components/shared/RoleInfo";
 import { useAuth } from "../context/AuthContext";
-import { format, subDays } from "date-fns";
+import { format, parseISO } from "date-fns";
+import { setAskAiPageContext } from "../services/chatbotService";
 import {
+  exportDashboard,
   getBreakdown,
   getMonthly,
   getSpendingSummary,
@@ -49,6 +54,7 @@ import {
   type MonthlyPoint,
   type Period,
 } from "../services/dashboardService";
+import { toast } from "sonner";
 import type {
   BreakdownLabGroup,
   BreakdownResponse,
@@ -80,7 +86,31 @@ function utilColor(pct: number): string {
 }
 
 // Max entities shown at once in a comparison chart.
-const MAX_COMPARE = 20;
+// Plain-English meaning of each budget figure, shown on the KPI cards and the
+// breakdown table headers. Keep in sync with how backend/app/api/dashboard.py
+// calculates them.
+const TERM_INFO = {
+  totalBudget: "The full-year budget for your current selection.",
+  actualSpend: 'Total of PR lines whose status starts with "Approved".',
+  pending:
+    'Total of PR lines whose status starts with "Pending". This money is committed but not yet approved.',
+  available:
+    "Budget − Actual Spend − Pending. What's left if every pending PR gets approved.",
+  utilisation: "Actual Spend ÷ Budget × 100%.",
+  projected:
+    "(Actual Spend + Pending) ÷ Budget × 100%. Where you'll end up if all pending PRs are approved.",
+};
+
+const MAX_COMPARE = 100;
+// Past this many bars a comparison chart stops squeezing and scrolls instead,
+// giving each bar a fixed slot so labels stay readable.
+const SCROLL_AFTER = 20;
+// Single-chart export: most bars per printed row before the chart is split
+// into several rows (category chart: per block of horizontal bars).
+const EXPORT_ROW_BARS = 20;
+const EXPORT_ROW_BARS_VERTICAL = 25;
+// Export x-axis height that fits a slanted full lab name (see AngledTick).
+const EXPORT_X_AXIS_HEIGHT = 120;
 
 // Value-label font size that scales with how crowded the chart is: fewer bars
 // → larger, more readable text; many bars → smaller so labels don't collide.
@@ -129,12 +159,12 @@ function EntityFilter({
     n.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="mb-3">
+    <div className="mb-3 no-print">
       <Popover>
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm" className="gap-2">
             <Filter className="h-4 w-4" />
-            {label} ({selected.size}/{max})
+            {label}
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-64 p-2">
@@ -240,6 +270,12 @@ const DASHBOARD_CHARTS = [
 // Options offered in each slot's title dropdown.
 const SLOT_OPTIONS = [...DASHBOARD_CHARTS];
 const CHART_IDS = new Set<string>(DASHBOARD_CHARTS.map((c) => c.id));
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  teamlead: "Team Lead",
+  labic: "Lab IC",
+};
 
 // Default slot layout: 6 slots, each showing its original chart.
 const DEFAULT_SLOTS = [
@@ -353,12 +389,105 @@ function AdaptiveBarChart({
   );
 }
 
+// Lets a long comparison chart scroll instead of cramming every bar into the
+// card. Up to SCROLL_AFTER bars render unchanged; past that the chart gets
+// `slotSize` px per bar and a native scrollbar (sideways, or up/down for the
+// horizontal-bar category chart).
+//
+// A printed page can't scroll, so in `exportMode` a long chart is instead
+// split into evenly sized rows (70 bars → 18/18/18/16), each drawn by
+// `children` from its slice of `rows`. Callers pin every row to the same
+// value scale (see exportScale) so bars stay comparable across rows.
+function ChartScroll<T>({
+  rows,
+  slotSize = 110,
+  vertical = false,
+  exportMode = false,
+  children,
+}: {
+  rows: T[];
+  slotSize?: number;
+  vertical?: boolean;
+  exportMode?: boolean;
+  children: (rows: T[]) => ReactNode;
+}) {
+  const bars = rows.length;
+  if (exportMode) {
+    const perRow = vertical ? EXPORT_ROW_BARS_VERTICAL : EXPORT_ROW_BARS;
+    if (bars <= perRow) return <>{children(rows)}</>;
+    const size = Math.ceil(bars / Math.ceil(bars / perRow));
+    const chunks: T[][] = [];
+    for (let i = 0; i < bars; i += size) chunks.push(rows.slice(i, i + size));
+    return (
+      <div className="chart-rows">
+        {chunks.map((chunk, i) => (
+          <div key={i} className="print-keep mb-6">
+            <p className="mb-1 text-xs font-medium text-[#475569]">
+              {i * size + 1}–{i * size + chunk.length} of {bars}
+            </p>
+            {children(chunk)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (bars <= SCROLL_AFTER) return <>{children(rows)}</>;
+  return (
+    <>
+      {vertical ? (
+        <div className="max-h-[460px] overflow-y-auto pr-1">{children(rows)}</div>
+      ) : (
+        <div className="overflow-x-auto pb-2">
+          <div style={{ width: bars * slotSize, minWidth: "100%" }}>
+            {children(rows)}
+          </div>
+        </div>
+      )}
+      <p className="no-print mt-1 text-center text-xs text-muted-foreground">
+        Showing all {bars}. Scroll {vertical ? "down" : "sideways"} to see more.
+      </p>
+    </>
+  );
+}
+
+// Export-only x-axis tick: the full name, slanted, so a row of ~20 bars stays
+// readable on paper (the longest lab name is ~28 chars).
+function AngledTick(props: {
+  x?: number;
+  y?: number;
+  payload?: { value?: string | number };
+}) {
+  const { x = 0, y = 0, payload } = props;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        dy={10}
+        textAnchor="end"
+        transform="rotate(-40)"
+        fill="#374151"
+        fontSize={11}
+      >
+        {trunc(String(payload?.value ?? ""), 32)}
+      </text>
+    </g>
+  );
+}
+
+// Value axis for an exported chart: a fixed 0→top scale with round quarter
+// ticks, so every row of a split chart is drawn against the same scale.
+function exportScale(max: number): { domain: [number, number]; ticks: number[] } {
+  const steps = [1, 1.2, 1.6, 2, 2.4, 3, 4, 5, 6, 8, 10];
+  const mag = 10 ** Math.floor(Math.log10(max > 0 ? max : 1));
+  const top = Number(((steps.find((st) => st * mag >= max) ?? 10) * mag).toPrecision(6));
+  return { domain: [0, top], ticks: [0, top / 4, top / 2, (top * 3) / 4, top] };
+}
+
 export function DashboardPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  // Lab IC is scoped to a single lab: the "By Lab Group" view and the
+  // Lab IC is scoped to their own labs: the "By Lab Group" view and the
   // entity-select filter are meaningless for them, so both are hidden and
-  // only the single lab's chart shows.
+  // only their labs' charts show.
   const isLabIc = user?.role === "labic";
 
   const [labGroups, setLabGroups] = useState<LabGroupSummary[]>([]);
@@ -370,12 +499,11 @@ export function DashboardPage() {
     user?.labGroupId ? String(user.labGroupId) : "all",
   );
   // Fiscal year is the master time scope: it sets the budget year AND the base
-  // spend window (Apr–Mar). The Date Range presets + custom range narrow within.
+  // spend window (Apr–Mar). The custom month range narrows within it.
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedFYPeriodId, setSelectedFYPeriodId] = useState<number | null>(null);
-  // Date Range dropdown: all (whole FY) / 7d / 30d / 90d — a sub-window on spend.
-  const [dateRange, setDateRange] = useState("all");
-  // Custom date range (overrides the preset when either is set).
+  // Custom month range, stored as ISO dates: startDate is the 1st of the From
+  // month, endDate the last day of the To month. Empty = open-ended.
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const customActive = Boolean(startDate || endDate);
@@ -400,6 +528,14 @@ export function DashboardPage() {
         return next;
       });
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  // Chart being exported on its own (PDF). While set, an off-screen copy of
+  // that chart is rendered and the print stylesheet prints only that copy.
+  const [exportChartId, setExportChartId] = useState<string | null>(null);
+  // Whole-dashboard PDF in progress: the chart slots switch to their export
+  // layout (long charts split into rows) until the print dialog closes.
+  const [printingDashboard, setPrintingDashboard] = useState(false);
+  const printBusy = exportChartId !== null || printingDashboard;
   // Track which lab_group / lab rows are expanded in the drilldown table.
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
   const [expandedLabs, setExpandedLabs] = useState<Set<number>>(new Set());
@@ -439,7 +575,7 @@ export function DashboardPage() {
   // Done during render with a previous-value guard (React's "adjust state when
   // a prop changes" pattern) instead of an effect, which would fire an extra
   // cascading render on every identity change.
-  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labId ?? ""}`;
+  const userKey = `${user?.role ?? ""}:${user?.labGroupId ?? ""}:${user?.labIds.join(",") ?? ""}`;
   const [prevUserKey, setPrevUserKey] = useState<string | null>(null);
   if (userKey !== prevUserKey) {
     setPrevUserKey(userKey);
@@ -455,9 +591,10 @@ export function DashboardPage() {
       setSelectedGroupId(String(user.labGroupId));
     } else if (user?.role === "admin") {
       setSelectedGroupId("all");
-    } else if (user?.role === "labic" && user.labId) {
-      // Lab IC is locked to their single assigned lab.
-      setSelectedLabId(String(user.labId));
+    } else if (user?.role === "labic" && user.labIds.length > 0) {
+      // Lab IC starts on their primary lab; the Lab filter lists only their
+      // own labs if they run more than one.
+      setSelectedLabId(String(user.labIds[0]));
     }
   }
 
@@ -548,26 +685,35 @@ export function DashboardPage() {
     }
   }, [slotsStorageKey, slots]);
 
-  // Effective spend window: the selected FY's span, narrowed by a preset/custom.
+  // Selected fiscal year (undefined = "All time").
+  const selectedPeriod = periods.find((p) => p.id === selectedFYPeriodId);
+  const fyStart = selectedPeriod?.start_date ?? "";
+  const fyEnd = selectedPeriod?.end_date ?? "";
+
+  // Effective spend window: the selected FY's span, narrowed by the custom
+  // month range and clamped to the FY (ISO dates sort lexicographically).
   const [effStart, effEnd] = useMemo(() => {
-    const period = periods.find((p) => p.id === selectedFYPeriodId);
-    const fyStart = period?.start_date ?? "";
-    const fyEnd = period?.end_date ?? "";
-    let rawStart = "";
-    let rawEnd = "";
-    if (startDate || endDate) {
-      rawStart = startDate;
-      rawEnd = endDate;
-    } else if (dateRange === "7d" || dateRange === "30d" || dateRange === "90d") {
-      const days = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 90;
-      rawStart = format(subDays(new Date(), days), "yyyy-MM-dd");
-      rawEnd = format(new Date(), "yyyy-MM-dd");
-    }
-    // Clamp the sub-window to the FY span (ISO dates sort lexicographically).
-    const s = !rawStart ? fyStart : rawStart > fyStart ? rawStart : fyStart;
-    const e = !rawEnd ? fyEnd : rawEnd < fyEnd ? rawEnd : fyEnd;
+    const s = !startDate ? fyStart : startDate > fyStart ? startDate : fyStart;
+    const e = !endDate ? fyEnd : !fyEnd || endDate < fyEnd ? endDate : fyEnd;
     return [s, e] as const;
-  }, [periods, selectedFYPeriodId, dateRange, startDate, endDate]);
+  }, [fyStart, fyEnd, startDate, endDate]);
+
+  // The window is narrower than the whole fiscal year (or than all time), so
+  // spend covers only part of the period the Total Budget is for.
+  const windowNarrowed = selectedPeriod
+    ? effStart !== fyStart || effEnd !== fyEnd
+    : Boolean(effStart || effEnd);
+
+  // Ask AI answers for the same period as the dashboard while it is open.
+  useEffect(() => {
+    if (selectedFYPeriodId == null) return;
+    setAskAiPageContext({
+      periodId: selectedFYPeriodId,
+      startDate: effStart,
+      endDate: effEnd,
+    });
+    return () => setAskAiPageContext(null);
+  }, [selectedFYPeriodId, effStart, effEnd]);
 
   useEffect(() => {
     let cancelled = false;
@@ -626,14 +772,26 @@ export function DashboardPage() {
 
   // Total Budget = raw System Config number, scoped by the Lab Group dropdown.
   // Always shows the full configured budget (not adjusted for spend/pending).
+  // A Lab IC's labs sit in Lab Groups that also hold labs they don't run, so
+  // their Total Budget is the sum of their own labs, not the group budgets.
   const totalBudget = useMemo(() => {
     if (selectedLab) return Number(selectedLab.budget_sgd) || 0;
+    if (isLabIc) {
+      return (breakdown?.lab_groups ?? [])
+        .filter(
+          (g) =>
+            selectedGroupId === "all" ||
+            String(g.lab_group_id) === selectedGroupId,
+        )
+        .flatMap((g) => g.labs)
+        .reduce((sum, l) => sum + (Number(l.budget_sgd) || 0), 0);
+    }
     if (selectedGroupId === "all") {
       return labGroups.reduce((sum, g) => sum + g.budget, 0);
     }
     const match = labGroups.find((g) => String(g.id) === selectedGroupId);
     return match ? match.budget : 0;
-  }, [labGroups, selectedGroupId, selectedLab]);
+  }, [breakdown, isLabIc, labGroups, selectedGroupId, selectedLab]);
 
   // Actual Spend = sum of Approved lines only. Backend role-filters; Team
   // Lead only ever gets their own group's numbers.
@@ -936,13 +1094,28 @@ export function DashboardPage() {
 
   // Render the body (chart-specific controls + chart) for a given chart id.
   // Any slot can render any chart, so this lives in one place.
-  function renderChartBody(chartId: string): ReactNode {
+  // `exportMode` renders the copy used by the single-chart export: no scroll
+  // box, and no animation so the chart is fully drawn when it is printed.
+  function renderChartBody(chartId: string, exportMode = false): ReactNode {
+    const animate = !exportMode;
+    // Export swaps the wrapped x-axis names for slanted full ones, which need
+    // a taller axis (the chart grows by the same amount so the plot keeps its
+    // size) and some room on the left for the first name.
+    const xAxisHeight = exportMode ? EXPORT_X_AXIS_HEIGHT : 42;
+    const chartHeight = (h: number) => h + xAxisHeight - 42;
+    const xTick = (maxChars: number) =>
+      exportMode ? <AngledTick /> : <WrapTick charsPerLine={maxChars} />;
+    const exportLeft = exportMode ? { left: 48 } : {};
+    // Export pins the value axis so every row of a split chart shares a scale.
+    const valueScale = (max: number) => (exportMode ? exportScale(max) : {});
+    const maxOf = (rows: Array<Record<string, unknown>>, keys: string[]) =>
+      Math.max(0, ...rows.flatMap((r) => keys.map((k) => Number(r[k] ?? 0))));
     switch (chartId) {
       case "utilisation":
         return (
           <>
             {!isLabIc && (
-              <div className="flex justify-end mb-3">
+              <div className="flex justify-end mb-3 no-print">
                 <select
                   value={utilViewBy}
                   onChange={(e) =>
@@ -974,18 +1147,29 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <AdaptiveBarChart height={300} bars={utilVisible.length}>
+              <ChartScroll exportMode={exportMode} rows={utilVisible}>
+              {(rows) => (
+              <AdaptiveBarChart height={chartHeight(300)} bars={rows.length}>
                 {(maxChars) => (
-                  <BarChart data={utilVisible} barCategoryGap="25%" margin={{ top: 18 }}>
+                  <BarChart
+                    data={rows}
+                    barCategoryGap="25%"
+                    margin={{ top: 18, ...exportLeft }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      height={42}
-                      tick={<WrapTick charsPerLine={maxChars} />}
+                      height={xAxisHeight}
+                      tick={xTick(maxChars)}
                     />
-                    <YAxis stroke="#6b7280" domain={[0, 100]} unit="%" />
+                    <YAxis
+                      stroke="#6b7280"
+                      domain={[0, 100]}
+                      unit="%"
+                      {...valueScale(Math.max(100, maxOf(utilVisible, ["util"])))}
+                    />
                     <Tooltip formatter={(v: number) => `${v}%`} />
                     <ReferenceLine
                       y={50}
@@ -1005,15 +1189,20 @@ export function DashboardPage() {
                       strokeDasharray="4 4"
                       label={{ value: "95%", position: "right", fill: "#f87171", fontSize: 11 }}
                     />
-                    <Bar dataKey="util" name="Utilisation %" radius={[4, 4, 0, 0]}>
-                      {utilVisible.map((d, i) => (
+                    <Bar
+                      dataKey="util"
+                      name="Utilisation %"
+                      radius={[4, 4, 0, 0]}
+                      isAnimationActive={animate}
+                    >
+                      {rows.map((d, i) => (
                         <Cell key={i} fill={utilColor(d.util)} />
                       ))}
                       <LabelList
                         dataKey="util"
                         position="top"
                         formatter={(v: number) => `${Number(v).toFixed(1)}%`}
-                        fontSize={labelFontSize(utilVisible.length)}
+                        fontSize={labelFontSize(rows.length)}
                         fontWeight={600}
                         fill="#111827"
                       />
@@ -1021,6 +1210,8 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              )}
+              </ChartScroll>
             )}
           </>
         );
@@ -1028,7 +1219,7 @@ export function DashboardPage() {
         return (
           <>
             {!isLabIc && (
-              <div className="flex justify-end mb-3">
+              <div className="flex justify-end mb-3 no-print">
                 <select
                   value={avbViewBy}
                   onChange={(e) => setAvbViewBy(e.target.value as "group" | "lab")}
@@ -1057,46 +1248,65 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <AdaptiveBarChart height={300} bars={avbVisible.length}>
+              <ChartScroll exportMode={exportMode} rows={avbVisible} slotSize={130}>
+              {(rows) => (
+              <AdaptiveBarChart height={chartHeight(300)} bars={rows.length}>
                 {(maxChars) => (
                   <BarChart
-                    data={avbVisible}
+                    data={rows}
                     barGap={8}
                     barCategoryGap="20%"
-                    margin={{ top: 24, left: 12, right: 8 }}
+                    margin={{ top: 24, left: 12, right: 8, ...exportLeft }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      height={42}
-                      tick={<WrapTick charsPerLine={maxChars} />}
+                      height={xAxisHeight}
+                      tick={xTick(maxChars)}
                     />
-                    <YAxis stroke="#6b7280" />
+                    <YAxis
+                      stroke="#6b7280"
+                      {...valueScale(maxOf(avbVisible, ["budget", "actual"]))}
+                    />
                     <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
                     <Legend />
-                    <Bar dataKey="budget" fill="#1e3a8a" name="Budget" radius={[4, 4, 0, 0]}>
+                    <Bar
+                      dataKey="budget"
+                      fill="#1e3a8a"
+                      name="Budget"
+                      radius={[4, 4, 0, 0]}
+                      isAnimationActive={animate}
+                    >
                       <LabelList
                         dataKey="budget"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={labelFontSize(avbVisible.length, 2, 5)}
+                        fontSize={labelFontSize(rows.length, 2, 5)}
                         fill="#374151"
                       />
                     </Bar>
-                    <Bar dataKey="actual" fill="#3b82f6" name="Actual" radius={[4, 4, 0, 0]}>
+                    <Bar
+                      dataKey="actual"
+                      fill="#3b82f6"
+                      name="Actual"
+                      radius={[4, 4, 0, 0]}
+                      isAnimationActive={animate}
+                    >
                       <LabelList
                         dataKey="actual"
                         position="top"
                         formatter={(v: number) => compactCurrency(Number(v))}
-                        fontSize={labelFontSize(avbVisible.length, 2, 5)}
+                        fontSize={labelFontSize(rows.length, 2, 5)}
                         fill="#374151"
                       />
                     </Bar>
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              )}
+              </ChartScroll>
             )}
           </>
         );
@@ -1120,23 +1330,29 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
+              <ChartScroll exportMode={exportMode} rows={categoryVisible} vertical>
+              {(rows) => (
               <ResponsiveContainer
                 width="100%"
-                height={Math.max(300, categoryVisible.length * 22)}
+                height={Math.max(300, rows.length * 22)}
               >
                 <BarChart
-                  data={categoryVisible}
+                  data={rows}
                   layout="vertical"
                   barCategoryGap="20%"
                   margin={{ right: 64, left: 8 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis type="number" stroke="#6b7280" />
+                  <XAxis
+                    type="number"
+                    stroke="#6b7280"
+                    {...valueScale(maxOf(categoryVisible, ["amount"]))}
+                  />
                   <YAxis
                     dataKey="category"
                     type="category"
                     stroke="#6b7280"
-                    width={110}
+                    width={exportMode ? 200 : 110}
                     interval={0}
                     tick={{ fontSize: 10 }}
                   />
@@ -1151,7 +1367,12 @@ export function DashboardPage() {
                     itemStyle={{ fontSize: 11 }}
                     labelStyle={{ fontSize: 11 }}
                   />
-                  <Bar dataKey="amount" fill="#0d9488" radius={[0, 4, 4, 0]}>
+                  <Bar
+                    dataKey="amount"
+                    fill="#0d9488"
+                    radius={[0, 4, 4, 0]}
+                    isAnimationActive={animate}
+                  >
                     <LabelList
                       dataKey="amount"
                       position="right"
@@ -1162,6 +1383,8 @@ export function DashboardPage() {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              )}
+              </ChartScroll>
             )}
           </>
         );
@@ -1182,6 +1405,7 @@ export function DashboardPage() {
                 strokeWidth={2}
                 name="Actual spend"
                 dot
+                isAnimationActive={animate}
               >
                 <LabelList
                   dataKey="amount"
@@ -1231,7 +1455,7 @@ export function DashboardPage() {
         return (
           <>
             {!isLabIc && (
-              <div className="flex justify-end mb-3">
+              <div className="flex justify-end mb-3 no-print">
                 <select
                   value={stackViewBy}
                   onChange={(e) =>
@@ -1261,22 +1485,27 @@ export function DashboardPage() {
                 )}
               </div>
             ) : (
-              <AdaptiveBarChart height={320} bars={stackVisible.length}>
+              <ChartScroll exportMode={exportMode} rows={stackVisible}>
+              {(rows) => (
+              <AdaptiveBarChart height={chartHeight(320)} bars={rows.length}>
                 {(maxChars) => (
                   <BarChart
-                    data={stackVisible}
+                    data={rows}
                     barCategoryGap="20%"
-                    margin={{ top: 20, left: 8 }}
+                    margin={{ top: 20, left: 8, ...exportLeft }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      height={42}
-                      tick={<WrapTick charsPerLine={maxChars} />}
+                      height={xAxisHeight}
+                      tick={xTick(maxChars)}
                     />
-                    <YAxis stroke="#6b7280" />
+                    <YAxis
+                      stroke="#6b7280"
+                      {...valueScale(maxOf(stackVisible, ["__total"]))}
+                    />
                     <Tooltip formatter={(v: number) => `$${Number(v).toLocaleString()}`} />
                     <Legend />
                     {stackedCategory.categories.map((cat, i) => (
@@ -1286,13 +1515,14 @@ export function DashboardPage() {
                         stackId="spend"
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         name={cat}
+                        isAnimationActive={animate}
                       >
                         {i === stackedCategory.categories.length - 1 && (
                           <LabelList
                             dataKey="__total"
                             position="top"
                             formatter={(v: number) => compactCurrency(Number(v))}
-                            fontSize={labelFontSize(stackVisible.length)}
+                            fontSize={labelFontSize(rows.length)}
                             fontWeight={600}
                             fill="#374151"
                           />
@@ -1302,13 +1532,15 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              )}
+              </ChartScroll>
             )}
           </>
         );
       case "yoy":
         return (
           <>
-            <div className="flex flex-wrap items-center justify-end mb-3 gap-2">
+            <div className="flex flex-wrap items-center justify-end mb-3 gap-2 no-print">
               <label className="text-sm text-muted-foreground">Month</label>
               <select
                 value={yoyMonth}
@@ -1367,22 +1599,31 @@ export function DashboardPage() {
                     emptyChartMessage(false, "")}
               </div>
             ) : (
-              <AdaptiveBarChart height={300} bars={yoyVisible.length}>
+              <ChartScroll
+                exportMode={exportMode}
+                rows={yoyVisible}
+                slotSize={Math.max(110, yoySelectedYears.length * 36 + 40)}
+              >
+              {(rows) => (
+              <AdaptiveBarChart height={chartHeight(300)} bars={rows.length}>
                 {(maxChars) => (
                   <BarChart
-                    data={yoyVisible}
+                    data={rows}
                     barCategoryGap="20%"
-                    margin={{ top: 24 }}
+                    margin={{ top: 24, ...exportLeft }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis
                       dataKey="name"
                       stroke="#6b7280"
                       interval={0}
-                      height={42}
-                      tick={<WrapTick charsPerLine={maxChars} />}
+                      height={xAxisHeight}
+                      tick={xTick(maxChars)}
                     />
-                    <YAxis stroke="#6b7280" />
+                    <YAxis
+                      stroke="#6b7280"
+                      {...valueScale(maxOf(yoyVisible, yoySelectedYears))}
+                    />
                     <Tooltip
                       formatter={(v: number) => `$${Number(v).toLocaleString()}`}
                     />
@@ -1394,6 +1635,7 @@ export function DashboardPage() {
                         name={yn}
                         fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
                         radius={[4, 4, 0, 0]}
+                        isAnimationActive={animate}
                       >
                         <LabelList
                           dataKey={yn}
@@ -1402,7 +1644,7 @@ export function DashboardPage() {
                             v ? compactCurrency(Number(v)) : ""
                           }
                           fontSize={labelFontSize(
-                            yoyVisible.length,
+                            rows.length,
                             Math.max(1, yoySelectedYears.length),
                           )}
                           fill="#374151"
@@ -1412,6 +1654,8 @@ export function DashboardPage() {
                   </BarChart>
                 )}
               </AdaptiveBarChart>
+              )}
+              </ChartScroll>
             )}
           </>
         );
@@ -1430,7 +1674,7 @@ export function DashboardPage() {
     const current = SLOT_OPTIONS.find((o) => o.id === chartId);
     return (
       <Card key={index} className="p-6 bg-white border-border">
-        <div className="mb-2">
+        <div className="mb-2 flex items-start justify-between gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -1449,32 +1693,197 @@ export function DashboardPage() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="no-print gap-2 shrink-0"
+                disabled={printBusy}
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem
+                onSelect={() => setExportChartId(chartId)}
+                className="flex-col items-start gap-0.5 py-2"
+              >
+                <span className="text-sm font-medium">Export chart as PDF</span>
+                <span className="text-xs text-muted-foreground">
+                  This chart only, with the current filters
+                </span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-        {renderChartBody(chartId)}
+        {renderChartBody(chartId, printingDashboard)}
       </Card>
     );
   }
 
+  // ── Export ──────────────────────────────────────────────────────────
+  const selectedGroupName =
+    selectedGroupId === "all"
+      ? "All Lab Groups"
+      : (labGroups.find((g) => String(g.id) === selectedGroupId)?.name ??
+        selectedGroupId);
+  const selectedLabName =
+    selectedLabId === "all" ? "All labs" : (selectedLab?.lab_name ?? "All labs");
+  const monthLabel = (iso: string) => (iso ? format(parseISO(iso), "MMM yyyy") : "");
+  const dateRangeLabel = customActive
+    ? `${monthLabel(startDate) || "Start"} to ${monthLabel(endDate) || "end"}`
+    : "Whole year";
+
+  /** Filter context stamped onto the printed page, mirroring the .xlsx cover. */
+  const printContext: [string, string][] = [
+    ["Generated", new Date().toLocaleString("en-SG")],
+    ["Generated by", `${user?.fullName ?? user?.email ?? ""} (${ROLE_LABELS[user?.role ?? ""] ?? ""})`],
+    ["Fiscal Year", selectedPeriod?.name ?? "All time"],
+    ["Date Range", dateRangeLabel],
+    ["Lab Group", selectedGroupName],
+    ["Lab", selectedLabName],
+  ];
+
+  /** Chart-specific settings that only live in on-screen controls (hidden on paper). */
+  function chartExportNotes(chartId: string): [string, string][] {
+    const viewBy = (v: "group" | "lab"): [string, string][] =>
+      isLabIc ? [] : [["View", v === "lab" ? "By Lab" : "By Lab Group"]];
+    switch (chartId) {
+      case "utilisation":
+        return viewBy(utilViewBy);
+      case "actualVsBudget":
+        return viewBy(avbViewBy);
+      case "categoryMix":
+        return viewBy(stackViewBy);
+      case "yoy":
+        return [
+          ["Month", FISCAL_MONTHS.find((m) => m.value === yoyMonth)?.label ?? ""],
+          ["Years", yoySelectedYears.join(", ") || "None"],
+          ...viewBy(yoyViewBy),
+        ];
+      default:
+        return [];
+    }
+  }
+
+  const exportNotes = exportChartId ? chartExportNotes(exportChartId) : [];
+  const exportBody = exportChartId ? renderChartBody(exportChartId, true) : null;
+
+  // Single-chart PDF: once the off-screen copy has rendered, flag the body so
+  // print.css hides the app and prints only that copy, then clear it after the
+  // print dialog closes (afterprint fires on Cancel too).
+  useEffect(() => {
+    if (!exportChartId) return;
+    document.body.classList.add("print-single-chart");
+    const done = () => {
+      document.body.classList.remove("print-single-chart");
+      setExportChartId(null);
+    };
+    window.addEventListener("afterprint", done, { once: true });
+    // Give the dropdown time to close and ResponsiveContainer time to measure.
+    const timer = setTimeout(() => window.print(), 400);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("afterprint", done);
+      document.body.classList.remove("print-single-chart");
+    };
+  }, [exportChartId]);
+
+  // The browser's own print pipeline renders the PDF: the charts are inline
+  // SVG so they stay vector, text stays selectable, and nothing has to be
+  // rasterised by a canvas library (which would also choke on the oklch()
+  // colours in theme.css).
+  //
+  // A scrolling chart would print only the slice in view, so the slots are
+  // first re-rendered in their export layout (see ChartScroll), then printed,
+  // then switched back once the dialog closes (afterprint fires on Cancel too).
+  const handleExportPdf = () => setPrintingDashboard(true);
+
+  useEffect(() => {
+    if (!printingDashboard) return;
+    const done = () => setPrintingDashboard(false);
+    window.addEventListener("afterprint", done, { once: true });
+    // Let the dropdown close and the re-laid-out charts measure and draw.
+    const timer = setTimeout(() => window.print(), 400);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("afterprint", done);
+    };
+  }, [printingDashboard]);
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const filename = await exportDashboard({
+        startDate: effStart,
+        endDate: effEnd,
+        dateRange: "all",
+        periodId: selectedFYPeriodId,
+        labGroupId: selectedGroupId === "all" ? null : Number(selectedGroupId),
+        labId: selectedLabId === "all" ? null : Number(selectedLabId),
+        customStart: startDate,
+        customEnd: endDate,
+      });
+      toast.success("Export complete", {
+        description: `${filename} saved to your downloads folder.`,
+      });
+    } catch (err) {
+      toast.error("Export failed", {
+        description:
+          err instanceof Error ? err.message : "Could not generate the report.",
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-auto bg-[#f8f9fa]">
       {/* Filters */}
+      <div className="no-print">
       <FilterBar
         searchPlaceholder="Search dashboard..."
+        showExport
+        exportDisabled={exporting || printBusy}
+        exportOptions={[
+          {
+            id: "pdf",
+            label: "Export as PDF",
+            description: "Visual snapshot — KPIs, charts and breakdown",
+          },
+          {
+            id: "excel",
+            label: "Export as Excel",
+            description: "KPIs, breakdown table and monthly trend",
+          },
+        ]}
+        onExportOption={(id) =>
+          id === "pdf" ? handleExportPdf() : void handleExportExcel()
+        }
         onFilterChange={(filterId, value) => {
-          if (filterId === "Fiscal Year")
-            setSelectedFYPeriodId(value === "all" ? 0 : Number(value));
+          if (filterId === "Fiscal Year") {
+            const id = value === "all" ? 0 : Number(value);
+            setSelectedFYPeriodId(id);
+            // Drop sub-window choices that don't fit the new year, rather than
+            // silently clamping them into an empty or partial window.
+            const next = periods.find((p) => p.id === id);
+            if (next) {
+              const inYear = (d: string) =>
+                !d || (next.start_date <= d && d <= next.end_date);
+              if (!inYear(startDate) || !inYear(endDate)) {
+                setStartDate("");
+                setEndDate("");
+              }
+            }
+          }
           if (filterId === "Lab Group") {
             setSelectedGroupId(value);
             // Lab list depends on the group, so reset the lab focus.
             setSelectedLabId("all");
           }
           if (filterId === "Lab") setSelectedLabId(value);
-          if (filterId === "Date Range") {
-            // Picking a preset clears any custom range so the preset applies.
-            setDateRange(value);
-            setStartDate("");
-            setEndDate("");
-          }
         }}
         filters={[
           {
@@ -1488,16 +1897,6 @@ export function DashboardPage() {
             options: [
               { value: "all", label: "All time" },
               ...periods.map((p) => ({ value: String(p.id), label: p.name })),
-            ],
-          },
-          {
-            label: "Date Range",
-            value: dateRange,
-            options: [
-              { value: "all", label: "Whole year" },
-              { value: "7d", label: "Last 7 days" },
-              { value: "30d", label: "Last 30 days" },
-              { value: "90d", label: "Last 90 days" },
             ],
           },
           // Lab IC is scoped to a single lab and has no group choice, so the
@@ -1519,47 +1918,60 @@ export function DashboardPage() {
         ]}
       />
 
-      {/* Custom date range — overrides the preset when set. */}
+      {/* Custom month range — narrows the spend window within the fiscal year. */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-border text-sm">
         <span className="text-muted-foreground">Custom range:</span>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">From</span>
-          <DatePickerField
-            value={startDate}
-            maxDate={endDate || undefined}
-            onChange={setStartDate}
-          />
-        </label>
-        <label className="flex items-center gap-1.5">
-          <span className="text-muted-foreground">To</span>
-          <DatePickerField
-            value={endDate}
-            minDate={startDate || undefined}
-            onChange={setEndDate}
-          />
-        </label>
-        {customActive && (
-          <>
-            <span className="text-xs text-blue-600">
-              Custom range active — preset ignored
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setStartDate("");
-                setEndDate("");
-              }}
-            >
-              Clear
-            </Button>
-          </>
+        <MonthRangePicker
+          periods={selectedPeriod ? [selectedPeriod] : periods}
+          startDate={startDate}
+          endDate={endDate}
+          onStartChange={setStartDate}
+          onEndChange={setEndDate}
+        />
+        {selectedPeriod && (
+          <span className="text-xs text-muted-foreground">
+            Within {selectedPeriod.name}. For another year, change Fiscal Year
+            (or pick All time).
+          </span>
         )}
+        {customActive && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setStartDate("");
+              setEndDate("");
+            }}
+          >
+            Clear
+          </Button>
+        )}
+      </div>
       </div>
 
       <div className="p-6 space-y-6">
+        {/* Printed cover block. Hidden on screen; replaces the filter bar and
+            role banner on paper so the PDF records what it is a snapshot of. */}
+        <div className="print-only print-keep mb-4">
+          <h1 className="text-xl font-bold text-[#1e3a8a]">
+            Lab Budget Monitoring System
+          </h1>
+          <p className="text-sm text-[#475569]">Dashboard Report</p>
+          <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1 text-xs text-[#475569]">
+            {printContext.map(([label, value]) => (
+              <div key={label} className="flex gap-2">
+                <dt className="font-semibold">{label}:</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <hr className="mt-3 border-[#e5e7eb]" />
+        </div>
+
         {/* Role Info */}
-        <RoleInfo />
+        <div className="no-print">
+          <RoleInfo />
+        </div>
 
         {loadError && (
           <Card className="p-4 bg-[#fef2f2] border-[#fecaca]">
@@ -1567,40 +1979,62 @@ export function DashboardPage() {
           </Card>
         )}
 
+        {/* Spend covers a shorter window than the budget it is compared with;
+            say so, or a 30-day slice reads as a low utilisation. */}
+        {windowNarrowed && (
+          <Card className="print-keep p-3 bg-[#eff6ff] border-[#bfdbfe]">
+            <p className="text-sm text-[#1e3a8a]">
+              Spend is for {effStart ? formatIsoDate(effStart) : "the start"} to{" "}
+              {effEnd ? formatIsoDate(effEnd) : "today"}. Total Budget is the{" "}
+              {selectedPeriod
+                ? `full ${selectedPeriod.name} budget`
+                : "total across all fiscal years"}
+              , so Utilisation and Available Balance compare this shorter
+              period's spend against the whole budget.
+            </p>
+          </Card>
+        )}
+
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6">
+        <div className="print-keep grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-6">
           <KPICard
             title="Total Budget"
+            description={TERM_INFO.totalBudget}
             value={formatCurrency(totalBudget)}
             icon={DollarSign}
             status="info"
           />
           <KPICard
             title="Actual Spend"
+            description={TERM_INFO.actualSpend}
             value={formatCurrency(actualSpend)}
             icon={TrendingUp}
             status="info"
           />
           <KPICard
             title="Pending Amount"
+            description={TERM_INFO.pending}
             value={formatCurrency(pendingSpend)}
             icon={Clock}
             status="info"
           />
           <KPICard
             title="Available Balance"
+            description={TERM_INFO.available}
             value={formatCurrency(availableBalance)}
             icon={Wallet}
             status="info"
           />
           <KPICard
             title="Utilisation %"
+            description={TERM_INFO.utilisation}
             value={`${utilizationPct.toFixed(1)}%`}
             icon={Percent}
             status={utilizationPct >= 95 ? "error" : utilizationPct >= 80 ? "warning" : "info"}
           />
           <KPICard
             title="Projected Utilisation %"
+            description={TERM_INFO.projected}
             value={`${projectedUtilizationPct.toFixed(1)}%`}
             icon={Activity}
             status={
@@ -1634,8 +2068,18 @@ export function DashboardPage() {
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Actual Spend</th>
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Pending</th>
                     <th className="text-right p-3 text-xs font-medium text-muted-foreground">Available</th>
-                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Util %</th>
-                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">Proj %</th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        Util %
+                        <InfoTip label="Utilisation %" text={TERM_INFO.utilisation} />
+                      </span>
+                    </th>
+                    <th className="text-right p-3 text-xs font-medium text-muted-foreground">
+                      <span className="inline-flex items-center gap-1">
+                        Proj %
+                        <InfoTip label="Projected Utilisation %" text={TERM_INFO.projected} />
+                      </span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1724,6 +2168,37 @@ export function DashboardPage() {
         {renderSlot(4)}
         {renderSlot(5)}
       </div>
+
+      {/* Off-screen copy of the chart being exported on its own. Rendered
+          outside #root so print.css can hide the whole app and print just this. */}
+      {exportChartId &&
+        createPortal(
+          <div className="chart-export" aria-hidden="true">
+            <h1 className="text-xl font-bold text-[#1e3a8a]">
+              {SLOT_OPTIONS.find((o) => o.id === exportChartId)?.label ?? "Chart"}
+            </h1>
+            <p className="text-sm text-[#475569]">
+              Lab Budget Monitoring System · Dashboard chart
+            </p>
+            <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-1 text-xs text-[#475569]">
+              {printContext.map(([label, value]) => (
+                <div key={label} className="flex gap-2">
+                  <dt className="font-semibold">{label}:</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+              {exportNotes.map(([label, value]) => (
+                <div key={label} className="flex gap-2">
+                  <dt className="font-semibold">{label}:</dt>
+                  <dd>{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <hr className="mt-3 mb-4 border-[#e5e7eb]" />
+            {exportBody}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -1755,4 +2230,9 @@ function pctColor(pct: number): string {
   if (pct >= 95) return "text-[#dc2626]";
   if (pct >= 80) return "text-[#d97706]";
   return "text-foreground";
+}
+
+/** "2026-04-01" → "1 Apr 2026" (same style as the Ask AI period label). */
+function formatIsoDate(iso: string): string {
+  return iso ? format(parseISO(iso), "d MMM yyyy") : "";
 }

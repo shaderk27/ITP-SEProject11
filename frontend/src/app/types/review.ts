@@ -55,6 +55,7 @@ export interface LabGroupOption {
 
 export interface LabOption {
   lab_id: number;
+  lab_code: string | null;
   lab_name: string;
   lab_group_id: number;
   is_general: boolean;
@@ -129,4 +130,5 @@ export interface CommitResponse {
   prs_updated: number;
   lines_created: number;
   pr_ids: number[];
+  status_regressions_skipped?: number;
 }

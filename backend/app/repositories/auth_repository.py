@@ -35,10 +35,6 @@ class AuthRepository:
             .scalar_one_or_none()
         )
 
-    def get_user_by_staff_id(self, db: Session, staff_id: str) -> Optional[User]:
-        """Fetch a user by their unique institutional staff identifier."""
-        return db.query(User).filter(User.staff_id == staff_id).first()
-
     def create_user(
         self,
         db: Session,
@@ -51,8 +47,13 @@ class AuthRepository:
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
         creator_admin_id: Optional[int] = None,
+        commit: bool = True,
     ) -> User:
-        """Create and persist a new user in the system with lab assignments."""
+        """Create and persist a new user in the system with lab assignments.
+
+        With commit=False the rows are only flushed, so the caller can add more
+        changes (e.g. lab assignments) and commit or roll back everything at once.
+        """
         db_user = User(
             role_id=role_id,
             full_name=full_name,
@@ -80,8 +81,11 @@ class AuthRepository:
             )
             db.add(assignment)
 
-        db.commit()
-        db.refresh(db_user)
+        if commit:
+            db.commit()
+            db.refresh(db_user)
+        else:
+            db.flush()
         return db_user
 
     def set_user_activation_status(
@@ -229,9 +233,6 @@ class AuthRepository:
     def get_role_by_id(self, db: Session, role_id: int) -> Optional[Role]:
         return db.query(Role).filter(Role.role_id == role_id).first()
 
-    def get_role_by_name(self, db: Session, role_name: str) -> Optional[Role]:
-        return db.query(Role).filter(Role.role_name == role_name).first()
-
     def get_all_roles(self, db: Session) -> Sequence[Role]:
         return db.query(Role).all()
 
@@ -247,18 +248,6 @@ class AuthRepository:
             .all()
         )
 
-    def get_users_by_role_id(
-        self, db: Session, role_id: int, active_only: bool = True
-    ) -> List[User]:
-        query = (
-            db.query(User)
-            .options(joinedload(User.lab_assignments).joinedload(LabIcAssignment.lab))
-            .filter(User.role_id == role_id)
-        )
-        if active_only:
-            query = query.filter(User.is_active.is_(True))
-        return query.all()
-
     def get_users_by_role(self, db: Session, role_name: str) -> List[User]:
         """Fetch all users assigned to a given role name."""
         stmt = (
@@ -268,8 +257,16 @@ class AuthRepository:
         )
         return list(db.execute(stmt).unique().scalars().all())
 
-    def get_lab_by_id(self, db: Session, lab_id: int) -> Optional[Lab]:
-        return db.query(Lab).filter(Lab.lab_id == lab_id).first()
+    def get_lab_by_id(
+        self, db: Session, lab_id: int, for_update: bool = False
+    ) -> Optional[Lab]:
+        """Fetch a lab. With for_update=True the lab row is locked until the
+        transaction ends, so concurrent primary-IC decisions for it are serialised.
+        """
+        query = db.query(Lab).filter(Lab.lab_id == lab_id)
+        if for_update:
+            query = query.with_for_update(of=Lab)
+        return query.first()
 
     def get_lab_group_by_id(self, db: Session, lab_group_id: int) -> Optional[LabGroup]:
         return db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
@@ -282,18 +279,6 @@ class AuthRepository:
             .filter(User.role_id == role_id, User.lab_group_id == lab_group_id)
             .filter(User.is_active.is_(True))
             .first()
-        )
-
-    def get_users_by_role_and_lab(
-        self, db: Session, role_id: int, lab_id: int
-    ) -> List[User]:
-        """Fetch all users assigned as IC for a specific lab."""
-        return (
-            db.query(User)
-            .join(LabIcAssignment, LabIcAssignment.user_id == User.user_id)
-            .filter(User.role_id == role_id, LabIcAssignment.lab_id == lab_id)
-            .filter(User.is_active.is_(True))
-            .all()
         )
 
     def get_assignments(self, db: Session) -> list[dict]:
@@ -331,20 +316,6 @@ class AuthRepository:
             }
             for row in rows
         ]
-
-    # Password reset helpers
-    def get_active_reset_token(
-        self, db: Session, user_id: int
-    ) -> Optional[PasswordResetToken]:
-        return (
-            db.query(PasswordResetToken)
-            .filter(
-                PasswordResetToken.user_id == user_id,
-                ~PasswordResetToken.used,
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
-            )
-            .first()
-        )
 
     def invalidate_reset_tokens(self, db: Session, user_id: int) -> None:
         db.query(PasswordResetToken).filter(
