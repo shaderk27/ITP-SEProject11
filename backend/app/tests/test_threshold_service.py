@@ -12,6 +12,7 @@ from app.api.alerts import _find_threshold_crossing
 from app.repositories.persistence_repository import (
     _build_lab_matcher_patterns,
     _detect_labs_in_line,
+    _resolve_category_id,
     _split_amount_equally,
 )
 from app.services.threshold_service import (
@@ -487,6 +488,7 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
 
 
 # ─── Automated Multi-Lab Spending Distribution Tests ─────────────────────
+# ─── Automated Multi-Lab Spending Distribution Tests ─────────────────────
 def test_multi_lab_detection_and_equal_spending_distribution():
     lab1 = Lab(
         lab_id=101,
@@ -552,6 +554,29 @@ def test_multi_lab_detection_and_equal_spending_distribution():
     shares_odd = _split_amount_equally(Decimal("100.00"), len(detected))
     assert shares_odd == [Decimal("33.34"), Decimal("33.33"), Decimal("33.33")]
     assert sum(shares_odd) == Decimal("100.00")
+
+    # 3. Conflicting categories in Req Type ("Maintenance, Consumables") remain flagged (None)
+    cats_map = {"general": 1, "maintenance": 2, "consumables": 3}
+    conflict_cat_id, conflict_reason = _resolve_category_id(
+        item_pr_category=None,
+        item_req_type="Maintenance, Consumables",
+        classifier_category_id=None,
+        classifier_reason=None,
+        categories_by_name=cats_map,
+        general_cat_id=1,
+    )
+    assert conflict_cat_id is None
+    assert conflict_reason is not None and "Conflicting categories" in conflict_reason
+
+    valid_cat_id, _ = _resolve_category_id(
+        item_pr_category=None,
+        item_req_type="Maintenance",
+        classifier_category_id=None,
+        classifier_reason=None,
+        categories_by_name=cats_map,
+        general_cat_id=1,
+    )
+    assert valid_cat_id == 2
 
 
 # ─── Lab Group Creation Guard & Focused Rebudgeting Tests ────────────────
