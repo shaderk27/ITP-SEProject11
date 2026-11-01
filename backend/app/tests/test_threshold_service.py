@@ -131,6 +131,71 @@ def test_check_and_notify_lab_thresholds_80_percent(
 
 @patch("app.services.threshold_service.SessionLocal")
 @patch("app.services.threshold_service.send_threshold_alert")
+def test_check_and_notify_lab_thresholds_50_percent_unlatches_from_higher_bracket(
+    mock_send_email, mock_session_local
+):
+    """
+    Proves that if a Lab previously hit 100% (all notified_* flags True) and its
+    budget is increased so utilization drops into the 50% bracket ($5,000 / $10,000),
+    notified_50 unlatches and fires the 50% threshold email.
+    """
+    mock_db = MagicMock()
+    mock_session_local.return_value.__enter__.return_value = mock_db
+
+    fake_lab = Lab(
+        lab_id=1,
+        lab_group_id=10,
+        lab_name="Embedded Systems Lab",
+        lab_code="E2-02-02",
+        notified_50=True,
+        notified_80=True,
+        notified_95=True,
+        notified_100=True,
+        alert_period_id=1,
+    )
+
+    fake_period = BudgetPeriod(
+        period_id=1, start_date=date(2020, 1, 1), end_date=date(2099, 12, 31)
+    )
+
+    fake_primary_ic = User(email="labic@test.com", role_id=3, is_active=True)
+    fake_lead = User(email="lead@test.com", role_id=2, is_active=True)
+
+    # Budget increased to 10,000, Spent is 5,000 (50.0%)
+    scalar_mock = MagicMock(side_effect=[10000, 5000])
+
+    def mock_query_side_effect(*args, **kwargs):
+        query_mock = MagicMock()
+        model = args[0]
+        if model is Lab:
+            query_mock.filter.return_value.first.return_value = fake_lab
+        elif model is BudgetPeriod:
+            query_mock.filter.return_value.first.return_value = fake_period
+        elif model is User:
+            query_mock.join.return_value.filter.return_value.all.return_value = [
+                fake_primary_ic
+            ]
+            query_mock.filter.return_value.all.return_value = [fake_lead]
+        else:
+            query_mock.filter.return_value.scalar = scalar_mock
+            query_mock.join.return_value.filter.return_value.scalar = scalar_mock
+        return query_mock
+
+    mock_db.query.side_effect = mock_query_side_effect
+
+    check_and_notify_lab_thresholds(1)
+
+    assert fake_lab.notified_50 is True
+    assert fake_lab.notified_80 is False
+    assert fake_lab.notified_95 is False
+    assert fake_lab.notified_100 is False
+    mock_send_email.assert_called_once()
+    args, _ = mock_send_email.call_args
+    assert "50%" in args[1]
+
+
+@patch("app.services.threshold_service.SessionLocal")
+@patch("app.services.threshold_service.send_threshold_alert")
 def test_check_and_notify_lab_group_thresholds_95_percent(
     mock_send_email, mock_session_local
 ):
@@ -487,7 +552,6 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
     app.dependency_overrides.clear()
 
 
-# ─── Automated Multi-Lab Spending Distribution Tests ─────────────────────
 # ─── Automated Multi-Lab Spending Distribution Tests ─────────────────────
 def test_multi_lab_detection_and_equal_spending_distribution():
     lab1 = Lab(
