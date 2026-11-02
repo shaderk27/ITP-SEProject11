@@ -5,11 +5,11 @@ Endpoints for Team Leads and Admins to see batches with unresolved
 auto-classifications. Frontend's Review Queue page reads from here.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.services.threshold_service import (
@@ -20,7 +20,7 @@ from app.services.knowledge_service import index_pr_lines_in_background
 from app.services.duplicate_service import is_status_regression
 from app.database import get_db
 from app.dependencies.auth import get_current_user
-from app.models.config import Lab, LabGroup, SpendingCategory
+from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     AuditLog,
     PRVersion,
@@ -681,6 +681,22 @@ def commit_batch(
             f"Batch {batch_id} has no staging headers to commit.",
         )
 
+    # Pre-scan staging lines to sync pre-commit notification flags before adding new spend
+    pre_lab_ids: set[int] = set()
+    pre_group_ids: set[int] = set()
+    for header in headers:
+        staging_lines = (
+            db.query(StagingPRLine)
+            .filter(StagingPRLine.staging_header_id == header.staging_header_id)
+            .all()
+        )
+        for s_line in staging_lines:
+            if s_line.suggested_lab_id:
+                pre_lab_ids.add(s_line.suggested_lab_id)
+            if s_line.suggested_lab_group_id:
+                pre_group_ids.add(s_line.suggested_lab_group_id)
+    _sync_pre_commit_threshold_flags(db, pre_lab_ids, pre_group_ids)
+
     pr_ids: list[int] = []
     prs_created_count = 0
     prs_updated_count = 0
@@ -940,6 +956,133 @@ def commit_batch(
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
+def _sync_pre_commit_threshold_flags(
+    db: Session, lab_ids: set[int], group_ids: set[int]
+) -> None:
+    """
+    Syncs notification flags with actual pre-commit utilization before new PR lines
+    are committed, so stale `notified_50=True` flags (e.g. after deleting test PRs)
+    are cleared if pre-commit utilization was below the threshold.
+    """
+    try:
+        today = date.today()
+        current_period = (
+            db.query(BudgetPeriod)
+            .filter(BudgetPeriod.start_date <= today, BudgetPeriod.end_date >= today)
+            .first()
+        )
+        if not isinstance(current_period, BudgetPeriod):
+            return
+
+        active_status_filter = or_(
+            PurchaseRequestLine.pr_status.is_(None),
+            and_(
+                PurchaseRequestLine.pr_status.not_ilike("%reject%"),
+                PurchaseRequestLine.pr_status.not_ilike("%cancel%"),
+            ),
+        )
+
+        for lid in lab_ids:
+            lab = db.query(Lab).filter(Lab.lab_id == lid).first()
+            if not isinstance(lab, Lab):
+                continue
+            if lab.lab_group_id:
+                group_ids.add(lab.lab_group_id)
+
+            total_budget = float(
+                db.query(func.sum(Budget.budget_amount))
+                .filter(
+                    Budget.lab_id == lid,
+                    Budget.period_id == current_period.period_id,
+                )
+                .scalar()
+                or 0
+            )
+            if total_budget <= 0:
+                lab.notified_50 = False
+                lab.notified_80 = False
+                lab.notified_95 = False
+                lab.notified_100 = False
+                continue
+
+            pre_spent = float(
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(
+                    PurchaseRequest,
+                    PurchaseRequest.pr_id == PurchaseRequestLine.pr_id,
+                )
+                .filter(
+                    PurchaseRequestLine.lab_id == lid,
+                    PurchaseRequest.request_date >= current_period.start_date,
+                    PurchaseRequest.request_date <= current_period.end_date,
+                    active_status_filter,
+                )
+                .scalar()
+                or 0
+            )
+            pre_util = (pre_spent / total_budget) * 100
+            if pre_util < 100:
+                lab.notified_100 = False
+            if pre_util < 95:
+                lab.notified_95 = False
+            if pre_util < 80:
+                lab.notified_80 = False
+            if pre_util < 50:
+                lab.notified_50 = False
+
+        for gid in group_ids:
+            group = db.query(LabGroup).filter(LabGroup.lab_group_id == gid).first()
+            if not isinstance(group, LabGroup):
+                continue
+
+            env_budget = float(
+                db.query(func.sum(Budget.budget_amount))
+                .filter(
+                    Budget.lab_group_id == gid,
+                    Budget.lab_id.is_(None),
+                    Budget.period_id == current_period.period_id,
+                )
+                .scalar()
+                or 0
+            )
+            if env_budget <= 0:
+                group.notified_50 = False
+                group.notified_80 = False
+                group.notified_95 = False
+                group.notified_100 = False
+                continue
+
+            pre_group_spent = float(
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .join(
+                    PurchaseRequest,
+                    PurchaseRequest.pr_id == PurchaseRequestLine.pr_id,
+                )
+                .join(Lab, Lab.lab_id == PurchaseRequestLine.lab_id)
+                .filter(
+                    Lab.lab_group_id == gid,
+                    PurchaseRequest.request_date >= current_period.start_date,
+                    PurchaseRequest.request_date <= current_period.end_date,
+                    active_status_filter,
+                )
+                .scalar()
+                or 0
+            )
+            pre_group_util = (pre_group_spent / env_budget) * 100
+            if pre_group_util < 100:
+                group.notified_100 = False
+            if pre_group_util < 95:
+                group.notified_95 = False
+            if pre_group_util < 80:
+                group.notified_80 = False
+            if pre_group_util < 50:
+                group.notified_50 = False
+
+        db.flush()
+    except Exception:
+        pass
+
+
 def _load_queue_item_or_404(db: Session, review_queue_id: int):
     row = (
         db.query(ReviewQueueItem, StagingPRLine, StagingPRHeader, UploadBatch)

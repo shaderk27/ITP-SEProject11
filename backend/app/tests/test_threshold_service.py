@@ -12,6 +12,7 @@ from app.api.alerts import _find_threshold_crossing
 from app.repositories.persistence_repository import (
     _build_lab_matcher_patterns,
     _detect_labs_in_line,
+    _resolve_category_id,
     _split_amount_equally,
 )
 from app.services.threshold_service import (
@@ -126,6 +127,71 @@ def test_check_and_notify_lab_thresholds_80_percent(
     assert "labic2@test.com" in recipients
     assert "lead@test.com" in recipients
     assert "80%" in args[1]
+
+
+@patch("app.services.threshold_service.SessionLocal")
+@patch("app.services.threshold_service.send_threshold_alert")
+def test_check_and_notify_lab_thresholds_50_percent_unlatches_from_higher_bracket(
+    mock_send_email, mock_session_local
+):
+    """
+    Proves that if a Lab previously hit 100% (all notified_* flags True) and its
+    budget is increased so utilization drops into the 50% bracket ($5,000 / $10,000),
+    notified_50 unlatches and fires the 50% threshold email.
+    """
+    mock_db = MagicMock()
+    mock_session_local.return_value.__enter__.return_value = mock_db
+
+    fake_lab = Lab(
+        lab_id=1,
+        lab_group_id=10,
+        lab_name="Embedded Systems Lab",
+        lab_code="E2-02-02",
+        notified_50=True,
+        notified_80=True,
+        notified_95=True,
+        notified_100=True,
+        alert_period_id=1,
+    )
+
+    fake_period = BudgetPeriod(
+        period_id=1, start_date=date(2020, 1, 1), end_date=date(2099, 12, 31)
+    )
+
+    fake_primary_ic = User(email="labic@test.com", role_id=3, is_active=True)
+    fake_lead = User(email="lead@test.com", role_id=2, is_active=True)
+
+    # Budget increased to 10,000, Spent is 5,000 (50.0%)
+    scalar_mock = MagicMock(side_effect=[10000, 5000])
+
+    def mock_query_side_effect(*args, **kwargs):
+        query_mock = MagicMock()
+        model = args[0]
+        if model is Lab:
+            query_mock.filter.return_value.first.return_value = fake_lab
+        elif model is BudgetPeriod:
+            query_mock.filter.return_value.first.return_value = fake_period
+        elif model is User:
+            query_mock.join.return_value.filter.return_value.all.return_value = [
+                fake_primary_ic
+            ]
+            query_mock.filter.return_value.all.return_value = [fake_lead]
+        else:
+            query_mock.filter.return_value.scalar = scalar_mock
+            query_mock.join.return_value.filter.return_value.scalar = scalar_mock
+        return query_mock
+
+    mock_db.query.side_effect = mock_query_side_effect
+
+    check_and_notify_lab_thresholds(1)
+
+    assert fake_lab.notified_50 is True
+    assert fake_lab.notified_80 is False
+    assert fake_lab.notified_95 is False
+    assert fake_lab.notified_100 is False
+    mock_send_email.assert_called_once()
+    args, _ = mock_send_email.call_args
+    assert "50%" in args[1]
 
 
 @patch("app.services.threshold_service.SessionLocal")
@@ -552,6 +618,29 @@ def test_multi_lab_detection_and_equal_spending_distribution():
     shares_odd = _split_amount_equally(Decimal("100.00"), len(detected))
     assert shares_odd == [Decimal("33.34"), Decimal("33.33"), Decimal("33.33")]
     assert sum(shares_odd) == Decimal("100.00")
+
+    # 3. Conflicting categories in Req Type ("Maintenance, Consumables") remain flagged (None)
+    cats_map = {"general": 1, "maintenance": 2, "consumables": 3}
+    conflict_cat_id, conflict_reason = _resolve_category_id(
+        item_pr_category=None,
+        item_req_type="Maintenance, Consumables",
+        classifier_category_id=None,
+        classifier_reason=None,
+        categories_by_name=cats_map,
+        general_cat_id=1,
+    )
+    assert conflict_cat_id is None
+    assert conflict_reason is not None and "Conflicting categories" in conflict_reason
+
+    valid_cat_id, _ = _resolve_category_id(
+        item_pr_category=None,
+        item_req_type="Maintenance",
+        classifier_category_id=None,
+        classifier_reason=None,
+        categories_by_name=cats_map,
+        general_cat_id=1,
+    )
+    assert valid_cat_id == 2
 
 
 # ─── Lab Group Creation Guard & Focused Rebudgeting Tests ────────────────

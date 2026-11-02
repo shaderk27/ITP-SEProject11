@@ -38,6 +38,11 @@ def check_and_notify_lab_thresholds(lab_id: int):
         )
 
         if total_budget <= 0:
+            lab.notified_50 = False
+            lab.notified_80 = False
+            lab.notified_95 = False
+            lab.notified_100 = False
+            db.commit()
             return
 
         # 3. FY-Aware & Status-Aware Spent Math
@@ -71,14 +76,27 @@ def check_and_notify_lab_thresholds(lab_id: int):
             lab.alert_period_id = current_period.period_id
 
         # Secondary Reset: if an admin manually increases the budget later
-        if utilization_pct < 100 and getattr(lab, "notified_100", False):
+        was_100 = bool(getattr(lab, "notified_100", False))
+        was_95 = bool(lab.notified_95)
+        was_80 = bool(lab.notified_80)
+
+        if utilization_pct < 100 and was_100:
             lab.notified_100 = False
-        if utilization_pct < 95 and lab.notified_95:
+        if utilization_pct < 95 and was_95:
             lab.notified_95 = False
-        if utilization_pct < 80 and lab.notified_80:
+        if utilization_pct < 80 and was_80:
             lab.notified_80 = False
         if utilization_pct < 50 and lab.notified_50:
             lab.notified_50 = False
+
+        # If a budget increase dropped utilization from a higher bracket (>=80/95/100%)
+        # down into a lower bracket (e.g. 50%..79.9%), unlatch that bracket's flag.
+        if (was_100 or was_95 or was_80) and 50 <= utilization_pct < 80:
+            lab.notified_50 = False
+        elif (was_100 or was_95) and 80 <= utilization_pct < 95:
+            lab.notified_80 = False
+        elif was_100 and 95 <= utilization_pct < 100:
+            lab.notified_95 = False
         # ----------------------
 
         threshold_hit = None
@@ -223,6 +241,11 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
         )
 
         if total_budget <= 0:
+            group.notified_50 = False
+            group.notified_80 = False
+            group.notified_95 = False
+            group.notified_100 = False
+            db.commit()
             return
 
         # 3. FY-Aware & Status-Aware Spent Math (Sum of ALL labs in this group)
@@ -257,14 +280,25 @@ def check_and_notify_lab_group_thresholds(lab_group_id: int):
             group.alert_period_id = current_period.period_id
 
         # Secondary Reset: if an admin manually increases the budget envelope later
-        if utilization_pct < 100 and getattr(group, "notified_100", False):
+        was_100 = bool(getattr(group, "notified_100", False))
+        was_95 = bool(group.notified_95)
+        was_80 = bool(group.notified_80)
+
+        if utilization_pct < 100 and was_100:
             group.notified_100 = False
-        if utilization_pct < 95 and group.notified_95:
+        if utilization_pct < 95 and was_95:
             group.notified_95 = False
-        if utilization_pct < 80 and group.notified_80:
+        if utilization_pct < 80 and was_80:
             group.notified_80 = False
         if utilization_pct < 50 and group.notified_50:
             group.notified_50 = False
+
+        if (was_100 or was_95 or was_80) and 50 <= utilization_pct < 80:
+            group.notified_50 = False
+        elif (was_100 or was_95) and 80 <= utilization_pct < 95:
+            group.notified_80 = False
+        elif was_100 and 95 <= utilization_pct < 100:
+            group.notified_95 = False
         # ----------------------
 
         threshold_hit = None
