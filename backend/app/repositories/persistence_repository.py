@@ -32,6 +32,7 @@ from app.models.staging import (
 )
 from app.models.upload import PRLineItem, UploadMetadata
 from app.models.auth import User
+from app.services.duplicate_service import is_status_regression
 
 
 def persist_upload_to_db(
@@ -39,7 +40,7 @@ def persist_upload_to_db(
     metadata: UploadMetadata,
     classified_items: list[dict[str, Any]],
     current_user: User,
-) -> dict[str, int]:
+) -> dict[str, int | dict[int, str]]:
     # ─── Cache lookups for fallback values ────────────────────────────────
     general_group = (
         db.query(LabGroup).filter(LabGroup.lab_group_name == "General").first()
@@ -100,6 +101,8 @@ def persist_upload_to_db(
     headers_inserted = 0
     lines_inserted = 0
     queue_items_inserted = 0
+    # Source row -> accepted final status for rows that commit will skip.
+    status_regression_rows: dict[int, str] = {}
 
     # ─── 3. For each unique PR: write header + its lines ──────────────────
     for pr_number, pr_items in items_by_pr.items():
@@ -206,6 +209,15 @@ def persist_upload_to_db(
                             "lab/category; only source status may update on commit."
                         )
 
+                    duplicate_status = "unchecked"
+                    if existing_final_line and is_status_regression(
+                        existing_final_line.pr_status, item.pr_status
+                    ):
+                        duplicate_status = "status_regression"
+                        status_regression_rows[item.row_number] = (
+                            existing_final_line.pr_status
+                        )
+
                     any_fallback = (
                         used_fallback_group
                         or used_fallback_lab
@@ -245,7 +257,7 @@ def persist_upload_to_db(
                         suggested_lab_id=final_lab_id,
                         suggested_category_id=final_category_id,
                         classification_status=classification_status,
-                        duplicate_status="unchecked",
+                        duplicate_status=duplicate_status,
                         review_status=review_status,
                         match_reason=split_reason,
                         raw_line_json=raw_json,
@@ -323,6 +335,13 @@ def persist_upload_to_db(
             classification_status = "unclear" if any_fallback else "confident"
             review_status = "pending_review" if any_fallback else "not_required"
 
+            duplicate_status = "unchecked"
+            if existing_final_line and is_status_regression(
+                existing_final_line.pr_status, item.pr_status
+            ):
+                duplicate_status = "status_regression"
+                status_regression_rows[item.row_number] = existing_final_line.pr_status
+
             line = StagingPRLine(
                 staging_header_id=header.staging_header_id,
                 source_line_no=item.row_number,
@@ -336,7 +355,7 @@ def persist_upload_to_db(
                 suggested_lab_id=final_lab_id,
                 suggested_category_id=final_category_id,
                 classification_status=classification_status,
-                duplicate_status="unchecked",
+                duplicate_status=duplicate_status,
                 review_status=review_status,
                 match_reason=classification_reason or None,
                 raw_line_json=item.to_dict(),
@@ -388,6 +407,7 @@ def persist_upload_to_db(
         "headers_inserted": headers_inserted,
         "lines_inserted": lines_inserted,
         "queue_items_inserted": queue_items_inserted,
+        "status_regression_rows": status_regression_rows,
     }
 
 
@@ -513,6 +533,7 @@ def _find_labs_in_text(
 def _detect_labs_in_line(
     item: PRLineItem,
     lab_patterns: list[tuple[str, re.Pattern[str], Lab]],
+    header_item: PRLineItem | None = None,
 ) -> list[Lab]:
     """
     Detect labs referenced on a PR line strictly from that row's own fields:
@@ -521,6 +542,7 @@ def _detect_labs_in_line(
       2. Checks `item_details` for collective multi-lab purchases. If `item_details`
          itself references >= 2 labs, merges them with any location field lab.
     """
+    _ = header_item
     loc_text = " | ".join(
         part
         for part in (item.lab, item.purpose, item.instruction_to_vendor)
