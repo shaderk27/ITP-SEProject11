@@ -572,12 +572,10 @@ def _resolve_line_amount(item: PRLineItem) -> Decimal:
     """
     if item.amount_gst is not None:
         amt = Decimal(str(item.amount_gst))
-        if amt > 0:
-            return amt.quantize(Decimal("0.01"))
+        return amt.quantize(Decimal("0.01"))
     if item.quantity is not None and item.unit_rate is not None:
         calc = Decimal(str(item.quantity)) * Decimal(str(item.unit_rate))
-        if calc > 0:
-            return calc.quantize(Decimal("0.01"))
+        return calc.quantize(Decimal("0.01"))
     if item.grand_total_sgd is not None:
         return Decimal(str(item.grand_total_sgd)).quantize(Decimal("0.01"))
     return Decimal("0.00")
