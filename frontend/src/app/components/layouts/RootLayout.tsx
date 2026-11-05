@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import {
   LayoutDashboard,
@@ -145,117 +145,128 @@ export function RootLayout() {
 
   const seenStorageKey = user ? `seen_alerts_user_${user.id}` : "";
 
-  const syncAlertNotifications = useCallback(async () => {
+  useEffect(() => {
     if (!user || user.mustResetPassword || !seenStorageKey) return;
 
-    try {
-      const [groupsRes, labsRes] = await Promise.all([
-        fetch(`${CONFIG_API_BASE}/api/config/labgroups`, {
-          credentials: "include",
-        }),
-        fetch(`${CONFIG_API_BASE}/api/config/labs`, {
-          credentials: "include",
-        }),
-      ]);
-      if (!groupsRes.ok || !labsRes.ok) return;
+    let isCancelled = false;
 
-      const labGroups = await groupsRes.json();
-      const labs = await labsRes.json();
-      if (!Array.isArray(labGroups) || !Array.isArray(labs)) return;
+    const pollAlertNotifications = async () => {
+      try {
+        const [groupsRes, labsRes] = await Promise.all([
+          fetch(`${CONFIG_API_BASE}/api/config/labgroups`, {
+            credentials: "include",
+          }),
+          fetch(`${CONFIG_API_BASE}/api/config/labs`, {
+            credentials: "include",
+          }),
+        ]);
+        if (!groupsRes.ok || !labsRes.ok || isCancelled) return;
 
-      const currentKeys: string[] = [];
+        const labGroups = await groupsRes.json();
+        const labs = await labsRes.json();
+        if (!Array.isArray(labGroups) || !Array.isArray(labs) || isCancelled) {
+          return;
+        }
 
-      const groupsToProcess = labGroups.filter((g: any) => {
-        if (user.role === "admin") return true;
-        if (user.role === "teamlead") return g.id === user.labGroupId;
-        if (user.role === "labic") {
-          return labs.some(
-            (l: any) => l.group_id === g.id && user.labIds.includes(l.id),
+        const currentKeys: string[] = [];
+
+        const groupsToProcess = labGroups.filter((g: any) => {
+          if (user.role === "admin") return true;
+          if (user.role === "teamlead") return g.id === user.labGroupId;
+          if (user.role === "labic") {
+            return labs.some(
+              (l: any) => l.group_id === g.id && user.labIds.includes(l.id),
+            );
+          }
+          return false;
+        });
+
+        groupsToProcess.forEach((group: any) => {
+          const isLabIC = user.role === "labic";
+          const groupBudget = Number(group.budget || 0);
+          const groupSpent = Number(group.spent || 0);
+          const groupUtil =
+            !isLabIC && groupBudget > 0 ? (groupSpent / groupBudget) * 100 : 0;
+          const groupThreshold = getThresholdLevel(groupUtil);
+
+          let groupLabs = labs.filter(
+            (l: any) =>
+              l.group_id === group.id &&
+              (Number(l.budget || 0) > 0 || Number(l.spent || 0) > 0),
           );
-        }
-        return false;
-      });
+          if (isLabIC) {
+            groupLabs = groupLabs.filter((l: any) =>
+              user.labIds.includes(l.id),
+            );
+          }
 
-      groupsToProcess.forEach((group: any) => {
-        const isLabIC = user.role === "labic";
-        const groupBudget = Number(group.budget || 0);
-        const groupSpent = Number(group.spent || 0);
-        const groupUtil =
-          !isLabIC && groupBudget > 0 ? (groupSpent / groupBudget) * 100 : 0;
-        const groupThreshold = getThresholdLevel(groupUtil);
+          let anyLabAdded = false;
+          groupLabs.forEach((lab: any) => {
+            const budget = Number(lab.budget || 0);
+            const spent = Number(lab.spent || 0);
+            const util =
+              budget > 0 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
+            const labThreshold = getThresholdLevel(util);
 
-        let groupLabs = labs.filter(
-          (l: any) =>
-            l.group_id === group.id &&
-            (Number(l.budget || 0) > 0 || Number(l.spent || 0) > 0),
-        );
-        if (isLabIC) {
-          groupLabs = groupLabs.filter((l: any) => user.labIds.includes(l.id));
-        }
+            if (labThreshold > 0 || groupThreshold > 0) {
+              anyLabAdded = true;
+              currentKeys.push(
+                `lab:${lab.id}:t${labThreshold}:gt${groupThreshold}:s${spent.toFixed(2)}`,
+              );
+            }
+          });
 
-        let anyLabAdded = false;
-        groupLabs.forEach((lab: any) => {
-          const budget = Number(lab.budget || 0);
-          const spent = Number(lab.spent || 0);
-          const util =
-            budget > 0 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
-          const labThreshold = getThresholdLevel(util);
-
-          if (labThreshold > 0 || groupThreshold > 0) {
-            anyLabAdded = true;
+          if (!anyLabAdded && groupThreshold > 0) {
             currentKeys.push(
-              `lab:${lab.id}:t${labThreshold}:gt${groupThreshold}:s${spent.toFixed(2)}`,
+              `group:${group.id}:gt${groupThreshold}:s${groupSpent.toFixed(2)}`,
             );
           }
         });
 
-        if (!anyLabAdded && groupThreshold > 0) {
-          currentKeys.push(
-            `group:${group.id}:gt${groupThreshold}:s${groupSpent.toFixed(2)}`,
-          );
+        let storedSeen: string[] = [];
+        try {
+          const raw = localStorage.getItem(seenStorageKey);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) storedSeen = parsed;
+          }
+        } catch {
+          storedSeen = [];
         }
-      });
 
-      setActiveAlertKeys(currentKeys);
-
-      let storedSeen: string[] = [];
-      try {
-        const raw = localStorage.getItem(seenStorageKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) storedSeen = parsed;
+        if (location.pathname.startsWith("/alerts")) {
+          localStorage.setItem(seenStorageKey, JSON.stringify(currentKeys));
+          setActiveAlertKeys(currentKeys);
+          setUnreadAlertCount(0);
+          return;
         }
-      } catch {
-        storedSeen = [];
-      }
 
-      // If the user is currently on /alerts, mark all current alerts as seen immediately
-      if (location.pathname.startsWith("/alerts")) {
-        localStorage.setItem(seenStorageKey, JSON.stringify(currentKeys));
-        setUnreadAlertCount(0);
-        return;
-      }
+        // Prune stale keys that are no longer active so future re-crossings count as new
+        const activeSet = new Set(currentKeys);
+        const validSeen = storedSeen.filter((k) => activeSet.has(k));
+        if (validSeen.length !== storedSeen.length) {
+          localStorage.setItem(seenStorageKey, JSON.stringify(validSeen));
+        }
 
-      // Prune stale keys that are no longer active so future re-crossings count as new
-      const activeSet = new Set(currentKeys);
-      const validSeen = storedSeen.filter((k) => activeSet.has(k));
-      if (validSeen.length !== storedSeen.length) {
-        localStorage.setItem(seenStorageKey, JSON.stringify(validSeen));
+        const seenSet = new Set(validSeen);
+        const newCount = currentKeys.filter((k) => !seenSet.has(k)).length;
+        setActiveAlertKeys(currentKeys);
+        setUnreadAlertCount(newCount);
+      } catch (err) {
+        console.error("Failed to check alert notifications:", err);
       }
+    };
 
-      const seenSet = new Set(validSeen);
-      const newCount = currentKeys.filter((k) => !seenSet.has(k)).length;
-      setUnreadAlertCount(newCount);
-    } catch (err) {
-      console.error("Failed to check alert notifications:", err);
-    }
+    void pollAlertNotifications();
+    const intervalId = window.setInterval(() => {
+      void pollAlertNotifications();
+    }, 15000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
   }, [user, seenStorageKey, location.pathname, CONFIG_API_BASE]);
-
-  useEffect(() => {
-    syncAlertNotifications();
-    const intervalId = window.setInterval(syncAlertNotifications, 15000);
-    return () => window.clearInterval(intervalId);
-  }, [syncAlertNotifications]);
 
   // Clear badge immediately when navigating to /alerts
   const handleNavClick = (path: string) => {
