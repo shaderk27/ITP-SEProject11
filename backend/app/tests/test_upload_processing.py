@@ -1,11 +1,22 @@
 from io import BytesIO
 from pathlib import Path
 import tempfile
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd  # type: ignore[import-untyped]
 
 from app.repositories.upload_repository import UploadRepository
 from app.services.upload_service import UploadService
+
+
+STRICT_NAMESPACES = {
+    b"http://schemas.openxmlformats.org/spreadsheetml/2006/main": (
+        b"http://purl.oclc.org/ooxml/spreadsheetml/main"
+    ),
+    b"http://schemas.openxmlformats.org/officeDocument/2006/relationships": (
+        b"http://purl.oclc.org/ooxml/officeDocument/relationships"
+    ),
+}
 
 
 def _sample_csv(amount: str = "650.00") -> bytes:
@@ -59,6 +70,109 @@ def _fy2025_style_csv() -> bytes:
     buffer = BytesIO()
     data.to_csv(buffer, index=False)
     return buffer.getvalue()
+
+
+def _strict_xlsx_with_continuation_row() -> bytes:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR2600002605",
+                "PR Status": "Approved (SVP)",
+                "PR Sub Date": "2026-09-07",
+                "Requestor": "mingze.chai",
+                "Purpose": "Carbonation consumables",
+                "Grand Total in SGD": "70.00",
+                "Item Details": "PURE CO2 30KG",
+                "Qty": "1",
+                "Unit Rate": "60.00",
+                "WBS": "A-ASTAR-CTIL-0001-OOE",
+            },
+            {
+                "PR": None,
+                "PR Status": None,
+                "PR Sub Date": None,
+                "Requestor": None,
+                "Purpose": None,
+                "Grand Total in SGD": None,
+                "Item Details": "TRANSPORT CHARGES",
+                "Qty": "1",
+                "Unit Rate": "10.00",
+                "WBS": "A-ASTAR-CTIL-0001-OOE",
+            },
+            {
+                "PR": None,
+                "PR Status": None,
+                "PR Sub Date": None,
+                "Requestor": None,
+                "Purpose": None,
+                "Grand Total in SGD": None,
+                "Item Details": None,
+                "Qty": None,
+                "Unit Rate": None,
+                "WBS": "A-ASTAR-CTIL-0001-OOE",
+            },
+        ]
+    )
+    standard = BytesIO()
+    dataframe.to_excel(standard, index=False)
+    standard.seek(0)
+
+    strict = BytesIO()
+    with ZipFile(standard) as source, ZipFile(strict, "w", ZIP_DEFLATED) as output:
+        for member in source.infolist():
+            data = source.read(member.filename)
+            if member.filename.endswith((".xml", ".rels")):
+                for standard_uri, strict_uri in STRICT_NAMESPACES.items():
+                    data = data.replace(standard_uri, strict_uri)
+            output.writestr(member, data)
+    return strict.getvalue()
+
+
+def _html_xls_with_continuation_row() -> bytes:
+    headers = [
+        "PR",
+        "PR Status",
+        "PR Sub Date",
+        "Requestor",
+        "Purpose",
+        "Grand Total in SGD",
+        "Item Details",
+        "Qty",
+        "Unit Rate",
+        "WBS",
+    ]
+    rows = [
+        [
+            "PR2600002605",
+            "Approved (SVP)",
+            "07-09-2026",
+            "mingze.chai",
+            "Carbonation consumables",
+            "70.00",
+            "PURE CO2 30KG",
+            "1",
+            "60.00",
+            "A-ASTAR-CTIL-0001-OOE",
+        ],
+        [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "TRANSPORT CHARGES",
+            "1",
+            "10.00",
+            "A-ASTAR-CTIL-0001-OOE",
+        ],
+        ["", "", "", "", "", "", "", "", "", "A-ASTAR-CTIL-0001-OOE"],
+    ]
+    header_html = "".join(f"<td>{value}</td>" for value in headers)
+    row_html = "".join(
+        f"<tr>{''.join(f'<td>{value}</td>' for value in row)}</tr>" for row in rows
+    )
+    return f"<table><tr>{header_html}</tr>{row_html}</table>".encode("utf-16")
 
 
 def test_duplicate_and_reupload_detection() -> None:
@@ -115,3 +229,40 @@ def test_fy2025_export_format_derives_amount_and_preserves_status() -> None:
     assert line["po_number"] == "1000048709"
     assert line["po_status"] == "COMP"
     assert line["amount_gst"] == "350.00"
+
+
+def test_strict_xlsx_expands_pr_headers_and_ignores_formatting_rows() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        repo = UploadRepository(Path(directory) / "store.json")
+        service = UploadService(repo)
+
+        result = service.process_upload(
+            filename="strict-export.xlsx",
+            content=_strict_xlsx_with_continuation_row(),
+            uploader_email="admin@sit.edu.sg",
+            uploader_name="Admin",
+            uploader_role="admin",
+        )
+
+    lines = [record["line"] for record in result["records"]["inserted"]]
+    assert result["success"] is True
+    assert result["counts"]["accepted"] == 2
+    assert [line["pr_number"] for line in lines] == ["PR2600002605"] * 2
+    assert [line["amount_gst"] for line in lines] == ["60.00", "10.00"]
+
+
+def test_html_xls_export_is_supported() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        repo = UploadRepository(Path(directory) / "store.json")
+        service = UploadService(repo)
+
+        result = service.process_upload(
+            filename="source-export.xls",
+            content=_html_xls_with_continuation_row(),
+            uploader_email="admin@sit.edu.sg",
+            uploader_name="Admin",
+            uploader_role="admin",
+        )
+
+    assert result["success"] is True
+    assert result["counts"]["accepted"] == 2

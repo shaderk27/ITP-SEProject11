@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { ValidationErrors } from "../components/shared/ValidationErrors";
 import { processUploadBatch } from "../services/uploadService";
 
-const ACCEPTED_EXTENSIONS = ["xlsx", "csv"];
+const ACCEPTED_EXTENSIONS = ["xls", "xlsx", "csv"];
 
 function validateUploadFiles(files: File[]) {
   return files.filter((file) => {
@@ -62,7 +62,7 @@ export function UploadPage() {
       setValidationErrors([
         {
           field: "File Format",
-          message: `Invalid file format: ${invalidFiles.map((file) => file.name).join(", ")}. Upload Excel (.xlsx) or CSV (.csv) files only.`,
+          message: `Invalid file format: ${invalidFiles.map((file) => file.name).join(", ")}. Upload Excel (.xls or .xlsx) or CSV (.csv) files only.`,
           severity: "error",
         },
       ]);
@@ -77,7 +77,7 @@ export function UploadPage() {
         setValidationErrors([
           {
             field: "File Format",
-            message: `Invalid file format: ${invalidFiles.map((file) => file.name).join(", ")}. Upload Excel (.xlsx) or CSV (.csv) files only.`,
+            message: `Invalid file format: ${invalidFiles.map((file) => file.name).join(", ")}. Upload Excel (.xls or .xlsx) or CSV (.csv) files only.`,
             severity: "error",
           },
         ]);
@@ -99,7 +99,7 @@ export function UploadPage() {
 
     const invalidFiles = validateUploadFiles(files);
     if (invalidFiles.length > 0) {
-      alert("Invalid file format. Please upload Excel (.xlsx) or CSV (.csv) files only.");
+      alert("Invalid file format. Please upload Excel (.xls or .xlsx) or CSV (.csv) files only.");
       return;
     }
 
@@ -158,12 +158,12 @@ export function UploadPage() {
                 {files.length > 0 ? `${files.length} file${files.length === 1 ? "" : "s"} selected` : "Drag and drop your files here"}
               </p>
               <p className="text-sm text-muted-foreground">
-                or click to browse for Excel (.xlsx) or CSV files
+                or click to browse for Excel (.xls or .xlsx) or CSV files
               </p>
             </div>
             <input
               type="file"
-              accept=".xlsx,.csv"
+              accept=".xls,.xlsx,.csv"
               multiple
               onChange={handleFileSelect}
               className="hidden"

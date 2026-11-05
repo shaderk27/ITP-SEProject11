@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from html.parser import HTMLParser
 from io import BytesIO
+from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 import hashlib
 import re
 
@@ -33,14 +35,163 @@ CRITICAL_COLUMNS = [
     "Item Details",
 ]
 
+PR_LEVEL_COLUMNS = [
+    "PR",
+    "PO",
+    "PR Status",
+    "PO Status",
+    "PR Sub Date",
+    "Requestor",
+    "Purpose",
+    "Grand Total in SGD",
+    "Req Type",
+    "PR Category",
+]
+
+_STRICT_OPEN_XML_NAMESPACES = {
+    b"http://purl.oclc.org/ooxml/spreadsheetml/main": (
+        b"http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    ),
+    b"http://purl.oclc.org/ooxml/officeDocument/relationships": (
+        b"http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    ),
+}
+
+
+class _HtmlTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell_parts: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        if tag.lower() == "tr":
+            self._row = []
+        elif tag.lower() in {"td", "th"} and self._row is not None:
+            self._cell_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell_parts is not None:
+            self._cell_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in {"td", "th"} and self._cell_parts is not None:
+            if self._row is not None:
+                self._row.append("".join(self._cell_parts).strip())
+            self._cell_parts = None
+        elif tag.lower() == "tr" and self._row is not None:
+            if self._row:
+                self.rows.append(self._row)
+            self._row = None
+
 
 def read_upload_dataframe(filename: str, content: bytes) -> pd.DataFrame:
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if extension == "csv":
-        return pd.read_csv(BytesIO(content), dtype=object)
+        dataframe = pd.read_csv(BytesIO(content), dtype=object)
+    elif extension == "xls":
+        dataframe = _read_legacy_xls(content)
     if extension == "xlsx":
-        return pd.read_excel(BytesIO(content), dtype=object)
-    raise ValueError("Invalid file format. Upload a .csv or .xlsx file.")
+        dataframe = pd.read_excel(_normalise_strict_xlsx(content), dtype=object)
+    elif extension not in {"csv", "xls"}:
+        raise ValueError("Invalid file format. Upload a .csv, .xls, or .xlsx file.")
+
+    return _prepare_source_rows(dataframe)
+
+
+def _read_legacy_xls(content: bytes) -> pd.DataFrame:
+    text = _decode_html_xls(content)
+    if text is None:
+        return pd.read_excel(BytesIO(content), dtype=object, engine="xlrd")
+
+    parser = _HtmlTableParser()
+    parser.feed(text)
+    if len(parser.rows) < 2:
+        raise ValueError("The .xls HTML export does not contain a data table.")
+
+    headers = parser.rows[0]
+    width = len(headers)
+    rows = [row[:width] + [""] * max(0, width - len(row)) for row in parser.rows[1:]]
+    return pd.DataFrame(rows, columns=headers, dtype=object)
+
+
+def _decode_html_xls(content: bytes) -> str | None:
+    if content.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = content.decode("utf-16")
+    else:
+        sample = content[:512].lstrip().lower()
+        if not sample.startswith((b"<table", b"<html", b"<!doctype")):
+            return None
+        text = content.decode("utf-8-sig")
+
+    lowered = text.lstrip().lower()
+    return text if lowered.startswith(("<table", "<html", "<!doctype")) else None
+
+
+def _normalise_strict_xlsx(content: bytes) -> BytesIO:
+    """Convert Strict Open XML namespaces for openpyxl without changing the upload."""
+    source = BytesIO(content)
+    try:
+        with ZipFile(source) as archive:
+            workbook_xml = archive.read("xl/workbook.xml")
+            if not any(uri in workbook_xml for uri in _STRICT_OPEN_XML_NAMESPACES):
+                source.seek(0)
+                return source
+
+            converted = BytesIO()
+            with ZipFile(converted, "w", ZIP_DEFLATED) as output:
+                for member in archive.infolist():
+                    data = archive.read(member.filename)
+                    if member.filename.endswith((".xml", ".rels")):
+                        for (
+                            strict_uri,
+                            standard_uri,
+                        ) in _STRICT_OPEN_XML_NAMESPACES.items():
+                            data = data.replace(strict_uri, standard_uri)
+                    output.writestr(member, data)
+            converted.seek(0)
+            return converted
+    except (BadZipFile, KeyError) as error:
+        raise ValueError("The .xlsx file is not a valid Excel workbook.") from error
+
+
+def _prepare_source_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Remove export formatting rows and expand merged PR headers over line items."""
+    normalised_columns = {
+        normalize_text(column): column for column in dataframe.columns
+    }
+    item_column = normalised_columns.get("Item Details")
+    quantity_column = normalised_columns.get("Qty")
+    rate_column = normalised_columns.get("Unit Rate")
+    amount_column = normalised_columns.get("Amount + GST")
+
+    line_columns = [
+        column
+        for column in (item_column, quantity_column, rate_column, amount_column)
+        if column is not None
+    ]
+    if line_columns:
+        meaningful_line = (
+            dataframe[line_columns]
+            .apply(lambda column: column.map(lambda value: bool(normalize_text(value))))
+            .any(axis=1)
+        )
+        dataframe = dataframe.loc[meaningful_line].copy()
+
+    columns_to_fill = [
+        normalised_columns[column]
+        for column in PR_LEVEL_COLUMNS
+        if column in normalised_columns
+    ]
+    if columns_to_fill:
+        with pd.option_context("future.no_silent_downcasting", True):
+            dataframe[columns_to_fill] = (
+                dataframe[columns_to_fill].replace(r"^\s*$", pd.NA, regex=True).ffill()
+            )
+
+    return dataframe.reset_index(drop=True)
 
 
 def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
