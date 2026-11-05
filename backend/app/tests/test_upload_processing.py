@@ -9,6 +9,7 @@ import pandas as pd  # type: ignore[import-untyped]
 from app.repositories.upload_repository import UploadRepository
 from app.repositories.persistence_repository import _resolve_line_amount
 from app.processors.upload_parser import (
+    generate_content_hash,
     parse_line_items,
     read_upload_dataframe,
     validate_dataframe,
@@ -427,6 +428,142 @@ def test_repeated_identical_lines_are_distinct_and_duplicate_on_reupload() -> No
     assert len(set(identities)) == 2
     assert identities[1].endswith("::occurrence_2")
     assert second["counts"]["duplicate_skipped"] == 2
+
+
+def test_repeated_allocated_item_is_counted_once() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-SPLIT",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Split freight",
+                "Grand Total in SGD": "180",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.4",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.3",
+                "WBS": "WBS-2",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    prepared = read_upload_dataframe("split.xlsx", buffer.getvalue())
+    lines = parse_line_items(prepared)
+
+    assert len(prepared) == 1
+    assert len(lines) == 1
+    assert lines[0].wbs == "WBS-1"
+    assert lines[0].amount_gst == Decimal("180.00")
+
+
+def test_repeat_is_kept_when_both_rows_are_not_allocated() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-MIXED-REPEAT",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Separate purchases",
+                "Grand Total in SGD": "360",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "Unit Rate": "180",
+                "Allocatn": "33.4",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "Unit Rate": "180",
+                "Allocatn": "",
+                "WBS": "WBS-1",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    lines = parse_line_items(
+        read_upload_dataframe("mixed-repeat.xlsx", buffer.getvalue())
+    )
+
+    assert len(lines) == 2
+    assert lines[1].line_identity_key.endswith("::occurrence_2")
+
+
+def test_sgd_hash_uses_unrounded_amount_while_saved_amount_is_rounded() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-HASH",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Hash compatibility",
+                "Grand Total in SGD": "504.9",
+                "Item Details": "Equipment",
+                "Qty": "1",
+                "Unit Rate": "504.9",
+                "WBS": "WBS-1",
+            }
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    line = parse_line_items(read_upload_dataframe("hash.xlsx", buffer.getvalue()))[0]
+    legacy_hash = generate_content_hash(
+        {
+            "pr_number": "PR-HASH",
+            "pr_status": "Approved",
+            "po_number": "",
+            "po_status": "",
+            "pr_sub_date": "2026-05-01",
+            "requestor": "alice",
+            "purpose": "Hash compatibility",
+            "grand_total_sgd": "504.9",
+            "item_details": "Equipment",
+            "quantity": "1",
+            "unit_rate": "504.9",
+            "wbs": "WBS-1",
+            "instruction_to_vendor": "",
+            "req_type": "",
+            "pr_category": "",
+            "lab": "",
+            "amount_gst": "504.9",
+        }
+    )
+
+    assert line.amount_gst == Decimal("504.90")
+    assert line.content_hash == legacy_hash
 
 
 def test_foreign_currency_lines_reconcile_to_sgd_total() -> None:

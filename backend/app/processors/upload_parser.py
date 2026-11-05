@@ -212,7 +212,48 @@ def _prepare_source_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
                 parent[has_parent].astype(int), column
             ].to_numpy()
 
-    return dataframe
+    return _drop_repeated_allocation_copies(dataframe, normalised_columns)
+
+
+def _drop_repeated_allocation_copies(
+    dataframe: pd.DataFrame,
+    column_map: dict[str, str],
+) -> pd.DataFrame:
+    """Count an allocation-split item once until exact WBS allocation is supported."""
+    allocation_column = column_map.get("Allocatn")
+    if allocation_column is None:
+        return dataframe
+
+    comparison_columns = [
+        column_map[column]
+        for column in (
+            "Item Details",
+            "Qty",
+            "UOM",
+            "Unit Rate",
+            "Delivery Date",
+            "Amount + GST",
+        )
+        if column in column_map
+    ]
+    seen_allocated_items: set[tuple[str, ...]] = set()
+    keep_rows: list[bool] = []
+
+    for _, row in dataframe.iterrows():
+        allocation = normalize_text(row[allocation_column])
+        if not allocation:
+            keep_rows.append(True)
+            continue
+
+        item_key = (
+            _identifier_text(row[column_map["PR"]]),
+            *(normalize_key_part(row[column]) for column in comparison_columns),
+        )
+        is_repeated_allocation = item_key in seen_allocated_items
+        keep_rows.append(not is_repeated_allocation)
+        seen_allocated_items.add(item_key)
+
+    return dataframe.loc[keep_rows].copy()
 
 
 def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
@@ -343,7 +384,11 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
             "req_type": req_type,
             "pr_category": pr_category,  # RESTORED
             "lab": lab,
-            "amount_gst": _decimal_to_text(amount_gst),
+            "amount_gst": _decimal_to_text(
+                _resolve_amount(row, column_map)
+                if money.source_currency == "SGD"
+                else amount_gst
+            ),
         }
         if money.source_currency != "SGD":
             hash_fields.update(

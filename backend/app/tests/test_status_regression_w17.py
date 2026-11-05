@@ -103,6 +103,41 @@ def _pending_then_approved(db, user, tmp_path, store=None):
     _upload_commit(db, user, tmp_path, [_row(PR_A, "Approved")], store)
 
 
+def test_allocation_split_copy_commits_once(db, admin_user, tmp_path):
+    rows = [
+        {
+            **_row("PR-W17-ALLOC-SPLIT", "Approved", "Freight"),
+            "Grand Total in SGD": 180,
+            "Unit Rate": 180,
+            "UOM": "EA",
+            "Delivery Date": "10/06/2026",
+            "Allocatn": 33.4,
+            "WBS": "WBS-W17-1",
+        },
+        {
+            **_row("", "", "Freight"),
+            "PR Sub Date": "",
+            "Requestor": "",
+            "Purpose": "",
+            "Grand Total in SGD": "",
+            "Unit Rate": 180,
+            "UOM": "EA",
+            "Delivery Date": "10/06/2026",
+            "Allocatn": 33.3,
+            "WBS": "WBS-W17-2",
+        },
+    ]
+
+    upload = _upload(db, admin_user, tmp_path, rows)
+    response, _ = _commit(db, admin_user, upload)
+    pr = _pr(db, "PR-W17-ALLOC-SPLIT")
+
+    assert upload["counts"]["total_lines"] == 1
+    assert response.lines_created == 1
+    assert len(pr.lines) == 1
+    assert pr.lines[0].amount_gst == 180
+
+
 # ─── Helper ──────────────────────────────────────────────────────────────
 
 
