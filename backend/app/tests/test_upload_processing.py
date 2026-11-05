@@ -2,10 +2,17 @@ from io import BytesIO
 from pathlib import Path
 import tempfile
 from zipfile import ZIP_DEFLATED, ZipFile
+from decimal import Decimal
 
 import pandas as pd  # type: ignore[import-untyped]
 
 from app.repositories.upload_repository import UploadRepository
+from app.repositories.persistence_repository import _resolve_line_amount
+from app.processors.upload_parser import (
+    parse_line_items,
+    read_upload_dataframe,
+    validate_dataframe,
+)
 from app.services.upload_service import UploadService
 
 
@@ -266,3 +273,228 @@ def test_html_xls_export_is_supported() -> None:
 
     assert result["success"] is True
     assert result["counts"]["accepted"] == 2
+
+
+def test_new_pr_does_not_inherit_blank_required_fields_or_po() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR1",
+                "PO": "1000057916",
+                "PR Status": "Approved",
+                "PO Status": "OPEN",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "First purchase",
+                "Grand Total in SGD": "10",
+                "Item Details": "First item",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "PR2",
+                "PO": "",
+                "PR Status": "Rejected",
+                "PO Status": "",
+                "PR Sub Date": "2026-05-02",
+                "Requestor": "",
+                "Purpose": "Second purchase",
+                "Grand Total in SGD": "20",
+                "Item Details": "Second item",
+                "Qty": "1",
+                "Unit Rate": "20",
+                "WBS": "WBS-2",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    prepared = read_upload_dataframe("new-pr.xlsx", buffer.getvalue())
+    errors = validate_dataframe(prepared)
+
+    assert pd.isna(prepared.iloc[1]["Requestor"])
+    assert pd.isna(prepared.iloc[1]["PO"])
+    assert any(error["field"] == "Row 3 - Requestor" for error in errors)
+
+
+def test_numeric_po_is_stable_and_blank_po_does_not_leak() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR1",
+                "PO": 1000055022,
+                "PR Status": "Approved",
+                "PO Status": "OPEN",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "First purchase",
+                "Grand Total in SGD": 10,
+                "Item Details": "First item",
+                "Qty": 1,
+                "Unit Rate": 10,
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "PR2",
+                "PO": None,
+                "PR Status": "Rejected",
+                "PO Status": None,
+                "PR Sub Date": "2026-05-02",
+                "Requestor": "bob",
+                "Purpose": "Second purchase",
+                "Grand Total in SGD": 20,
+                "Item Details": "Second item",
+                "Qty": 1,
+                "Unit Rate": 20,
+                "WBS": "WBS-2",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+    csv_buffer = BytesIO()
+    dataframe.to_csv(csv_buffer, index=False)
+
+    prepared = read_upload_dataframe("numeric-po.xlsx", buffer.getvalue())
+    lines = parse_line_items(prepared)
+    csv_lines = parse_line_items(
+        read_upload_dataframe("numeric-po.csv", csv_buffer.getvalue())
+    )
+
+    assert lines[0].po_number == "1000055022"
+    assert lines[1].po_number == ""
+    assert [line.content_hash for line in lines] == [
+        line.content_hash for line in csv_lines
+    ]
+
+
+def test_repeated_identical_lines_are_distinct_and_duplicate_on_reupload() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-DUP",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Repeated supplies",
+                "Grand Total in SGD": "20",
+                "Item Details": "Identical item",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Identical item",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+    content = buffer.getvalue()
+
+    with tempfile.TemporaryDirectory() as directory:
+        service = UploadService(UploadRepository(Path(directory) / "store.json"))
+        first = service.process_upload(
+            filename="repeated.xlsx",
+            content=content,
+            uploader_email="admin@sit.edu.sg",
+            uploader_name="Admin",
+            uploader_role="admin",
+        )
+        second = service.process_upload(
+            filename="repeated.xlsx",
+            content=content,
+            uploader_email="admin@sit.edu.sg",
+            uploader_name="Admin",
+            uploader_role="admin",
+        )
+
+    identities = [
+        record["line"]["line_identity_key"] for record in first["records"]["inserted"]
+    ]
+    assert first["counts"]["accepted"] == 2
+    assert len(set(identities)) == 2
+    assert identities[1].endswith("::occurrence_2")
+    assert second["counts"]["duplicate_skipped"] == 2
+
+
+def test_foreign_currency_lines_reconcile_to_sgd_total() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-USD",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Imported equipment",
+                "Grand Total in SGD": "40.50",
+                "Curr": "USD",
+                "Item Details": "Part A",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Curr": "",
+                "Item Details": "Part B",
+                "Qty": "2",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    prepared = read_upload_dataframe("usd.xlsx", buffer.getvalue())
+    lines = parse_line_items(prepared)
+
+    assert [line.source_currency for line in lines] == ["USD", "USD"]
+    assert [line.source_amount for line in lines] == [Decimal("10"), Decimal("20")]
+    assert [line.amount_gst for line in lines] == [Decimal("13.50"), Decimal("27.00")]
+    assert sum((line.amount_gst for line in lines), Decimal("0")) == Decimal("40.50")
+
+
+def test_zero_value_line_does_not_fall_back_to_pr_total() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-FREE",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Free sample",
+                "Grand Total in SGD": "100",
+                "Item Details": "Complimentary item",
+                "Qty": "1",
+                "Unit Rate": "0",
+                "WBS": "WBS-1",
+            }
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    line = parse_line_items(read_upload_dataframe("free-item.xlsx", buffer.getvalue()))[
+        0
+    ]
+
+    assert line.amount_gst == Decimal("0.00")
+    assert _resolve_line_amount(line) == Decimal("0.00")

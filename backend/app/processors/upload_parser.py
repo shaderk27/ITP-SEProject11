@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from html.parser import HTMLParser
 from io import BytesIO
 from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
@@ -44,6 +45,7 @@ PR_LEVEL_COLUMNS = [
     "Requestor",
     "Purpose",
     "Grand Total in SGD",
+    "Curr",
     "Req Type",
     "PR Category",
 ]
@@ -56,6 +58,18 @@ _STRICT_OPEN_XML_NAMESPACES = {
         b"http://schemas.openxmlformats.org/officeDocument/2006/relationships"
     ),
 }
+
+_CENT = Decimal("0.01")
+
+
+@dataclass(frozen=True)
+class _ResolvedMoney:
+    amount_sgd: Decimal
+    unit_rate_sgd: Decimal | None
+    source_currency: str
+    source_unit_rate: Decimal | None
+    source_amount: Decimal
+    conversion_rate: Decimal
 
 
 class _HtmlTableParser(HTMLParser):
@@ -186,12 +200,19 @@ def _prepare_source_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
         if column in normalised_columns
     ]
     if columns_to_fill:
-        with pd.option_context("future.no_silent_downcasting", True):
-            dataframe[columns_to_fill] = (
-                dataframe[columns_to_fill].replace(r"^\s*$", pd.NA, regex=True).ffill()
-            )
+        blank = dataframe[columns_to_fill].apply(
+            lambda column: column.map(lambda value: not normalize_text(value))
+        )
+        is_continuation = blank.all(axis=1)
+        parent = dataframe.index.to_series().where(~is_continuation).ffill()
+        has_parent = is_continuation & parent.notna()
+        for column in columns_to_fill:
+            dataframe[column] = dataframe[column].astype(object)
+            dataframe.loc[has_parent, column] = dataframe.loc[
+                parent[has_parent].astype(int), column
+            ].to_numpy()
 
-    return dataframe.reset_index(drop=True)
+    return dataframe
 
 
 def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
@@ -245,18 +266,31 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
                 }
             )
 
+    try:
+        _resolve_money_by_row(df, normalised_columns)
+    except ValueError as error:
+        errors.append(
+            {
+                "field": "Currency conversion",
+                "message": str(error),
+                "severity": "error",
+            }
+        )
+
     return errors
 
 
 def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
     column_map = {normalize_text(column): column for column in df.columns}
     items: list[PRLineItem] = []
+    money_by_row = _resolve_money_by_row(df, column_map)
+    identity_occurrences: dict[str, int] = {}
 
     for index, row in df.iterrows():
         row_number = int(index) + 2
-        pr_number = normalize_text(row[column_map["PR"]])
+        pr_number = _identifier_text(row[column_map["PR"]])
         pr_status = normalize_text(row[column_map["PR Status"]])
-        po_number = _optional_text(row, column_map, "PO")
+        po_number = _optional_identifier_text(row, column_map, "PO")
         po_status = _optional_text(row, column_map, "PO Status")
         requestor = normalize_text(row[column_map["Requestor"]])
         purpose = normalize_text(row[column_map["Purpose"]])
@@ -271,40 +305,55 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
         pr_sub_date = _format_date(row[column_map["PR Sub Date"]])
         grand_total = parse_decimal(row[column_map["Grand Total in SGD"]])
         quantity = parse_decimal(row[column_map["Qty"]])
-        unit_rate = parse_decimal(row[column_map["Unit Rate"]])
-        amount_gst = _resolve_amount(row, column_map)
+        money = money_by_row.get(int(index))
 
-        if amount_gst is None:
+        if money is None:
             continue
+        unit_rate = money.unit_rate_sgd
+        amount_gst = money.amount_sgd
 
-        identity_key = generate_line_identity_key(
+        base_identity_key = generate_line_identity_key(
             pr_number=pr_number,
             item_details=item_details,
             wbs=wbs,
             requestor=requestor,
             purpose=purpose,
         )
-        content_hash = generate_content_hash(
-            {
-                "pr_number": pr_number,
-                "pr_status": pr_status,
-                "po_number": po_number,
-                "po_status": po_status,
-                "pr_sub_date": pr_sub_date,
-                "requestor": requestor,
-                "purpose": purpose,
-                "grand_total_sgd": _decimal_to_text(grand_total),
-                "item_details": item_details,
-                "quantity": _decimal_to_text(quantity),
-                "unit_rate": _decimal_to_text(unit_rate),
-                "wbs": wbs,
-                "instruction_to_vendor": instruction,
-                "req_type": req_type,
-                "pr_category": pr_category,  # RESTORED
-                "lab": lab,
-                "amount_gst": _decimal_to_text(amount_gst),
-            }
+        occurrence = identity_occurrences.get(base_identity_key, 0) + 1
+        identity_occurrences[base_identity_key] = occurrence
+        identity_key = (
+            base_identity_key
+            if occurrence == 1
+            else f"{base_identity_key}::occurrence_{occurrence}"
         )
+        hash_fields = {
+            "pr_number": pr_number,
+            "pr_status": pr_status,
+            "po_number": po_number,
+            "po_status": po_status,
+            "pr_sub_date": pr_sub_date,
+            "requestor": requestor,
+            "purpose": purpose,
+            "grand_total_sgd": _decimal_to_text(grand_total),
+            "item_details": item_details,
+            "quantity": _decimal_to_text(quantity),
+            "unit_rate": _decimal_to_text(unit_rate),
+            "wbs": wbs,
+            "instruction_to_vendor": instruction,
+            "req_type": req_type,
+            "pr_category": pr_category,  # RESTORED
+            "lab": lab,
+            "amount_gst": _decimal_to_text(amount_gst),
+        }
+        if money.source_currency != "SGD":
+            hash_fields.update(
+                {
+                    "source_currency": money.source_currency,
+                    "source_unit_rate": _decimal_to_text(money.source_unit_rate),
+                    "source_amount": _decimal_to_text(money.source_amount),
+                }
+            )
+        content_hash = generate_content_hash(hash_fields)
 
         items.append(
             PRLineItem(
@@ -328,6 +377,10 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                 amount_gst=amount_gst,
                 line_identity_key=identity_key,
                 content_hash=content_hash,
+                source_currency=money.source_currency,
+                source_unit_rate=money.source_unit_rate,
+                source_amount=money.source_amount,
+                conversion_rate=money.conversion_rate,
             )
         )
 
@@ -412,6 +465,26 @@ def _optional_text(
     return normalize_text(row[source_column])
 
 
+def _optional_identifier_text(
+    row: pd.Series,
+    column_map: dict[str, str],
+    column_name: str,
+) -> str:
+    source_column = column_map.get(column_name)
+    if source_column is None:
+        return ""
+    return _identifier_text(row[source_column])
+
+
+def _identifier_text(value: object) -> str:
+    text = normalize_text(value)
+    if not text:
+        return ""
+    if re.fullmatch(r"\d+\.0+", text):
+        return text.split(".", 1)[0]
+    return text
+
+
 def _resolve_amount(
     row: pd.Series,
     column_map: dict[str, str],
@@ -427,3 +500,193 @@ def _resolve_amount(
     if quantity is None or unit_rate is None:
         return None
     return quantity * unit_rate
+
+
+def _resolve_money_by_row(
+    dataframe: pd.DataFrame,
+    column_map: dict[str, str],
+) -> dict[int, _ResolvedMoney]:
+    amount_column = column_map.get("Amount + GST")
+    currency_column = column_map.get("Curr")
+    rows_by_pr: dict[str, list[dict[str, object]]] = {}
+
+    for index, row in dataframe.iterrows():
+        pr_number = _identifier_text(row[column_map["PR"]])
+        source_currency = (
+            normalize_text(row[currency_column]).upper() if currency_column else "SGD"
+        ) or "SGD"
+        quantity = parse_decimal(row[column_map["Qty"]])
+        source_unit_rate = parse_decimal(row[column_map["Unit Rate"]])
+        source_amount = (
+            quantity * source_unit_rate
+            if quantity is not None and source_unit_rate is not None
+            else None
+        )
+        explicit_sgd = (
+            parse_decimal(row[amount_column]) if amount_column is not None else None
+        )
+        grand_total_sgd = parse_decimal(row[column_map["Grand Total in SGD"]])
+
+        if explicit_sgd is None and source_amount is None:
+            continue
+
+        rows_by_pr.setdefault(pr_number, []).append(
+            {
+                "index": int(index),
+                "currency": source_currency,
+                "source_unit_rate": source_unit_rate,
+                "source_amount": source_amount,
+                "explicit_sgd": explicit_sgd,
+                "grand_total_sgd": grand_total_sgd,
+            }
+        )
+
+    resolved: dict[int, _ResolvedMoney] = {}
+    for pr_number, entries in rows_by_pr.items():
+        currencies = {str(entry["currency"]) for entry in entries}
+        if len(currencies) != 1:
+            raise ValueError(
+                f"PR {pr_number} contains mixed source currencies: "
+                f"{', '.join(sorted(currencies))}."
+            )
+        currency = next(iter(currencies))
+
+        if currency == "SGD":
+            for entry in entries:
+                source_amount = _entry_source_amount(entry)
+                amount_sgd = _entry_base_amount(entry).quantize(
+                    _CENT, rounding=ROUND_HALF_UP
+                )
+                source_unit_rate = _entry_decimal(entry, "source_unit_rate")
+                resolved[int(entry["index"])] = _ResolvedMoney(
+                    amount_sgd=amount_sgd,
+                    unit_rate_sgd=source_unit_rate,
+                    source_currency=currency,
+                    source_unit_rate=source_unit_rate,
+                    source_amount=source_amount,
+                    conversion_rate=Decimal("1"),
+                )
+            continue
+
+        grand_total_sgd = _first_decimal(entries, "grand_total_sgd")
+        if grand_total_sgd is None:
+            raise ValueError(
+                f"PR {pr_number} uses {currency} but has no Grand Total in SGD."
+            )
+
+        explicit_total = sum(
+            (
+                _entry_decimal(entry, "explicit_sgd") or Decimal("0")
+                for entry in entries
+            ),
+            Decimal("0"),
+        )
+        convertible = [
+            entry for entry in entries if _entry_decimal(entry, "explicit_sgd") is None
+        ]
+        convertible_source_total = sum(
+            (_entry_source_amount(entry) for entry in convertible), Decimal("0")
+        )
+        source_total = sum(
+            (_entry_source_amount(entry) for entry in entries), Decimal("0")
+        )
+        target_convertible_sgd = grand_total_sgd - explicit_total
+
+        if target_convertible_sgd < 0:
+            raise ValueError(
+                f"PR {pr_number} has explicit SGD line amounts above its SGD total."
+            )
+        if (
+            convertible
+            and convertible_source_total == 0
+            and target_convertible_sgd != 0
+        ):
+            raise ValueError(
+                f"PR {pr_number} cannot derive an SGD conversion from zero-valued "
+                f"{currency} lines."
+            )
+        if not convertible and explicit_total != grand_total_sgd:
+            raise ValueError(
+                f"PR {pr_number} line amounts do not reconcile with Grand Total in SGD."
+            )
+
+        if convertible_source_total != 0:
+            conversion_rate = target_convertible_sgd / convertible_source_total
+        elif source_total != 0:
+            conversion_rate = grand_total_sgd / source_total
+        else:
+            conversion_rate = Decimal("1")
+
+        converted_indexes: list[int] = []
+        for entry in entries:
+            source_amount = _entry_source_amount(entry)
+            explicit_sgd = _entry_decimal(entry, "explicit_sgd")
+            amount_sgd = (
+                explicit_sgd
+                if explicit_sgd is not None
+                else source_amount * conversion_rate
+            ).quantize(_CENT, rounding=ROUND_HALF_UP)
+            source_unit_rate = _entry_decimal(entry, "source_unit_rate")
+            unit_rate_sgd = (
+                (source_unit_rate * conversion_rate).quantize(
+                    _CENT, rounding=ROUND_HALF_UP
+                )
+                if source_unit_rate is not None
+                else None
+            )
+            index = int(entry["index"])
+            resolved[index] = _ResolvedMoney(
+                amount_sgd=amount_sgd,
+                unit_rate_sgd=unit_rate_sgd,
+                source_currency=currency,
+                source_unit_rate=source_unit_rate,
+                source_amount=source_amount,
+                conversion_rate=conversion_rate,
+            )
+            if explicit_sgd is None:
+                converted_indexes.append(index)
+
+        rounded_total = sum(
+            (resolved[int(entry["index"])].amount_sgd for entry in entries),
+            Decimal("0"),
+        )
+        rounding_difference = grand_total_sgd - rounded_total
+        if rounding_difference and converted_indexes:
+            final_index = converted_indexes[-1]
+            final = resolved[final_index]
+            resolved[final_index] = _ResolvedMoney(
+                amount_sgd=final.amount_sgd + rounding_difference,
+                unit_rate_sgd=final.unit_rate_sgd,
+                source_currency=final.source_currency,
+                source_unit_rate=final.source_unit_rate,
+                source_amount=final.source_amount,
+                conversion_rate=final.conversion_rate,
+            )
+
+    return resolved
+
+
+def _entry_decimal(entry: dict[str, object], key: str) -> Decimal | None:
+    value = entry.get(key)
+    return value if isinstance(value, Decimal) else None
+
+
+def _entry_source_amount(entry: dict[str, object]) -> Decimal:
+    value = _entry_decimal(entry, "source_amount")
+    return value if value is not None else Decimal("0")
+
+
+def _entry_base_amount(entry: dict[str, object]) -> Decimal:
+    explicit_sgd = _entry_decimal(entry, "explicit_sgd")
+    return explicit_sgd if explicit_sgd is not None else _entry_source_amount(entry)
+
+
+def _first_decimal(entries: list[dict[str, object]], key: str) -> Decimal | None:
+    return next(
+        (
+            value
+            for entry in entries
+            if (value := _entry_decimal(entry, key)) is not None
+        ),
+        None,
+    )

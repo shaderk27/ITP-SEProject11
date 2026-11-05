@@ -60,10 +60,22 @@ class PRLineItem:
     lab: str = "Unassigned Lab"
     lab_group: str = "Pending Lab Group"
     category: str = "General"
+    source_currency: str = "SGD"
+    source_unit_rate: Decimal | None = None
+    source_amount: Decimal | None = None
+    conversion_rate: Decimal | None = None
 
     def to_dict(self) -> dict:
         data = asdict(self)
-        for key in ("grand_total_sgd", "quantity", "unit_rate", "amount_gst"):
+        for key in (
+            "grand_total_sgd",
+            "quantity",
+            "unit_rate",
+            "amount_gst",
+            "source_unit_rate",
+            "source_amount",
+            "conversion_rate",
+        ):
             value = data[key]
             data[key] = None if value is None else str(value)
         return data
