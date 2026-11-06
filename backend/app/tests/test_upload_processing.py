@@ -276,6 +276,124 @@ def test_html_xls_export_is_supported() -> None:
     assert result["counts"]["accepted"] == 2
 
 
+def test_allocation_export_without_pr_column_reports_missing_column() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Equipment",
+                "Grand Total in SGD": "10",
+                "Item Details": "Part",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+                "Allocatn": "100",
+            }
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    errors = validate_dataframe(
+        read_upload_dataframe("missing-pr.xlsx", buffer.getvalue())
+    )
+
+    assert errors == [
+        {
+            "field": "PR",
+            "message": "Required column is missing.",
+            "severity": "error",
+        }
+    ]
+
+
+def test_cp1252_csv_export_is_supported() -> None:
+    content = (
+        _sample_csv()
+        .decode("utf-8")
+        .replace("Workshop materials", "Workshop – materials")
+        .encode("cp1252")
+    )
+
+    dataframe = read_upload_dataframe("fy2025.csv", content)
+
+    assert validate_dataframe(dataframe) == []
+    assert dataframe.iloc[0]["Purpose"] == "Workshop – materials"
+
+
+def test_formula_like_item_text_is_recovered_from_xlsx() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR-FORMULA-TEXT",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Delivery",
+                "Grand Total in SGD": "10",
+                "Item Details": "=-Small Order Delivery Charges",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            }
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    prepared = read_upload_dataframe("formula-text.xlsx", buffer.getvalue())
+
+    assert validate_dataframe(prepared) == []
+    assert prepared.iloc[0]["Item Details"] == "-Small Order Delivery Charges"
+
+
+def test_all_foreign_prs_without_sgd_total_are_reported_with_rows() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "P1",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Imported part",
+                "Grand Total in SGD": "",
+                "Curr": "USD",
+                "Item Details": "Part A",
+                "Qty": "1",
+                "Unit Rate": "10",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "P2",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-02",
+                "Requestor": "bob",
+                "Purpose": "Imported part",
+                "Grand Total in SGD": "",
+                "Curr": "EUR",
+                "Item Details": "Part B",
+                "Qty": "1",
+                "Unit Rate": "20",
+                "WBS": "WBS-2",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    errors = validate_dataframe(
+        read_upload_dataframe("missing-sgd-total.xlsx", buffer.getvalue())
+    )
+    currency_error = next(
+        error for error in errors if error["field"] == "Currency conversion"
+    )
+
+    assert "PR P1 (source row(s) 2)" in currency_error["message"]
+    assert "PR P2 (source row(s) 3)" in currency_error["message"]
+
+
 def test_new_pr_does_not_inherit_blank_required_fields_or_po() -> None:
     dataframe = pd.DataFrame(
         [
