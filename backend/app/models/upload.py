@@ -1,6 +1,7 @@
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ class PRLineItem:
     wbs: str
     instruction_to_vendor: str
     req_type: str
-    pr_category: str  # RESTORED
+    pr_category: str
     amount_gst: Decimal
     line_identity_key: str
     content_hash: str
@@ -60,10 +61,12 @@ class PRLineItem:
     lab: str = "Unassigned Lab"
     lab_group: str = "Pending Lab Group"
     category: str = "General"
+    wbs_allocations: tuple[dict[str, Any], ...] = ()
 
     def to_dict(self) -> dict:
         data = asdict(self)
         for key in ("grand_total_sgd", "quantity", "unit_rate", "amount_gst"):
             value = data[key]
             data[key] = None if value is None else str(value)
+        data["wbs_allocations"] = [dict(alloc) for alloc in self.wbs_allocations]
         return data
