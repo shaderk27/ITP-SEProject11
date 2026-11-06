@@ -104,15 +104,47 @@ class _HtmlTableParser(HTMLParser):
 def read_upload_dataframe(filename: str, content: bytes) -> pd.DataFrame:
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if extension == "csv":
-        dataframe = pd.read_csv(BytesIO(content), dtype=object)
+        dataframe = _read_csv(content)
     elif extension == "xls":
         dataframe = _read_legacy_xls(content)
     if extension == "xlsx":
-        dataframe = pd.read_excel(_normalise_strict_xlsx(content), dtype=object)
+        dataframe = _read_xlsx(content)
     elif extension not in {"csv", "xls"}:
         raise ValueError("Invalid file format. Upload a .csv, .xls, or .xlsx file.")
 
     return _prepare_source_rows(dataframe)
+
+
+def _read_csv(content: bytes) -> pd.DataFrame:
+    try:
+        return pd.read_csv(BytesIO(content), dtype=object, encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        return pd.read_csv(BytesIO(content), dtype=object, encoding="cp1252")
+
+
+def _read_xlsx(content: bytes) -> pd.DataFrame:
+    workbook = _normalise_strict_xlsx(content)
+    dataframe = pd.read_excel(workbook, dtype=object)
+
+    # Some source exports store leading-hyphen text as an Excel formula, for
+    # example ``=-Small Order Delivery Charges``. With no cached formula value,
+    # openpyxl returns a blank cell. Recover only that narrow text pattern so
+    # genuine spreadsheet formulas continue to use their cached values.
+    workbook.seek(0)
+    formulas = pd.read_excel(
+        workbook,
+        dtype=object,
+        engine_kwargs={"data_only": False},
+    )
+    shared_columns = dataframe.columns.intersection(formulas.columns)
+    for column in shared_columns:
+        blank_values = dataframe[column].map(lambda value: not normalize_text(value))
+        formula_text = formulas[column].map(normalize_text)
+        recoverable = blank_values & formula_text.str.match(r"^=-[A-Za-z]")
+        if recoverable.any():
+            dataframe.loc[recoverable, column] = formula_text.loc[recoverable].str[1:]
+
+    return dataframe
 
 
 def _read_legacy_xls(content: bytes) -> pd.DataFrame:
@@ -221,7 +253,7 @@ def _drop_repeated_allocation_copies(
 ) -> pd.DataFrame:
     """Count an allocation-split item once until exact WBS allocation is supported."""
     allocation_column = column_map.get("Allocatn")
-    if allocation_column is None:
+    if allocation_column is None or "PR" not in column_map:
         return dataframe
 
     comparison_columns = [
@@ -587,13 +619,17 @@ def _resolve_money_by_row(
         )
 
     resolved: dict[int, _ResolvedMoney] = {}
+    resolution_errors: list[str] = []
     for pr_number, entries in rows_by_pr.items():
+        source_rows = ", ".join(str(int(entry["index"]) + 2) for entry in entries)
+        pr_context = f"PR {pr_number} (source row(s) {source_rows})"
         currencies = {str(entry["currency"]) for entry in entries}
         if len(currencies) != 1:
-            raise ValueError(
-                f"PR {pr_number} contains mixed source currencies: "
+            resolution_errors.append(
+                f"{pr_context} contains mixed source currencies: "
                 f"{', '.join(sorted(currencies))}."
             )
+            continue
         currency = next(iter(currencies))
 
         if currency == "SGD":
@@ -615,9 +651,10 @@ def _resolve_money_by_row(
 
         grand_total_sgd = _first_decimal(entries, "grand_total_sgd")
         if grand_total_sgd is None:
-            raise ValueError(
-                f"PR {pr_number} uses {currency} but has no Grand Total in SGD."
+            resolution_errors.append(
+                f"{pr_context} uses {currency} but has no Grand Total in SGD."
             )
+            continue
 
         explicit_total = sum(
             (
@@ -638,22 +675,25 @@ def _resolve_money_by_row(
         target_convertible_sgd = grand_total_sgd - explicit_total
 
         if target_convertible_sgd < 0:
-            raise ValueError(
-                f"PR {pr_number} has explicit SGD line amounts above its SGD total."
+            resolution_errors.append(
+                f"{pr_context} has explicit SGD line amounts above its SGD total."
             )
+            continue
         if (
             convertible
             and convertible_source_total == 0
             and target_convertible_sgd != 0
         ):
-            raise ValueError(
-                f"PR {pr_number} cannot derive an SGD conversion from zero-valued "
+            resolution_errors.append(
+                f"{pr_context} cannot derive an SGD conversion from zero-valued "
                 f"{currency} lines."
             )
+            continue
         if not convertible and explicit_total != grand_total_sgd:
-            raise ValueError(
-                f"PR {pr_number} line amounts do not reconcile with Grand Total in SGD."
+            resolution_errors.append(
+                f"{pr_context} line amounts do not reconcile with Grand Total in SGD."
             )
+            continue
 
         if convertible_source_total != 0:
             conversion_rate = target_convertible_sgd / convertible_source_total
@@ -707,6 +747,9 @@ def _resolve_money_by_row(
                 source_amount=final.source_amount,
                 conversion_rate=final.conversion_rate,
             )
+
+    if resolution_errors:
+        raise ValueError(" ".join(resolution_errors))
 
     return resolved
 
