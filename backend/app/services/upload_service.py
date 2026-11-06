@@ -200,9 +200,8 @@ class UploadService:
 
             if decision.status != "duplicate":
                 if (
-                    assigned_lab == "Unassigned Lab"
+                    assigned_lab in ("Unassigned Lab", "General")
                     or not assigned_lab
-                    or assigned_category == "General"
                 ):
                     needs_review_count += 1
                 classified_items.append(
@@ -260,6 +259,9 @@ class UploadService:
             self._move_status_regressions(
                 records, persistence_counts.pop("status_regression_rows", {})
             )
+            self._attach_review_issues(
+                records, persistence_counts.pop("review_issues", {})
+            )
 
         return {
             "success": True,
@@ -301,6 +303,17 @@ class UploadService:
                 "status_regression": [],
             },
         }
+
+    @staticmethod
+    def _attach_review_issues(
+        records: dict[str, list[dict]], issue_by_row: dict[int, str]
+    ) -> None:
+        """Give the summary the same review message the queue stores."""
+        for bucket in ("inserted", "updated"):
+            for record in records[bucket]:
+                issue = issue_by_row.get(record["line"].get("row_number"))
+                if issue:
+                    record["line"]["review_issue"] = issue
 
     @staticmethod
     def _move_status_regressions(

@@ -214,7 +214,7 @@ export function ReviewDetailsPage() {
                   <StatusBadge status={item.is_lab_general ? "general" : "info"}>
                     Lab: {item.current_lab}
                   </StatusBadge>
-                  <StatusBadge status={item.is_category_general ? "general" : "info"}>
+                  <StatusBadge status="info">
                     Category: {item.current_category}
                   </StatusBadge>
                 </div>
