@@ -44,6 +44,20 @@ export async function listPeriods(): Promise<Period[]> {
   return response.json();
 }
 
+// The fiscal year containing today (local date), so adding a future year such
+// as FY2027 doesn't change which year pages open on. ISO dates sort lexically.
+export function findCurrentPeriod<T extends { start_date: string; end_date: string }>(
+  periods: T[],
+): T | undefined {
+  const now = new Date();
+  const today = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  return periods.find((p) => p.start_date <= today && today <= p.end_date);
+}
+
 function dateRangeQuery(
   dateRange: string,
   startDate: string,
