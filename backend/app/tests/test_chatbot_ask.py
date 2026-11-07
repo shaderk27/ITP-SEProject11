@@ -8,6 +8,7 @@ from app.schemas.chatbot_schema import (
     ChatbotAskRequest,
     ChatbotBudgetContext,
     ChatbotContextResponse,
+    ChatbotLabGroupBudgetContext,
     ChatbotScope,
 )
 from app.services import chatbot_answer_service, llm_client
@@ -35,7 +36,23 @@ def _row(group, lab, category, budget, spend, pending=0) -> ChatbotBudgetContext
     )
 
 
-def _context(role: str, rows: list[ChatbotBudgetContext]) -> ChatbotContextResponse:
+def _envelope(group, envelope) -> ChatbotLabGroupBudgetContext:
+    return ChatbotLabGroupBudgetContext(
+        lab_group_id=hash(group) % 1000,
+        lab_group_name=group,
+        envelope_budget_sgd=str(envelope),
+        allocated_to_labs_sgd="0",
+        unallocated_sgd=str(envelope),
+        approved_spend_sgd="0",
+        utilisation_pct=0.0,
+    )
+
+
+def _context(
+    role: str,
+    rows: list[ChatbotBudgetContext],
+    envelopes: list[ChatbotLabGroupBudgetContext] | None = None,
+) -> ChatbotContextResponse:
     return ChatbotContextResponse(
         query_type="budget_utilisation_summary",
         question=None,
@@ -44,7 +61,7 @@ def _context(role: str, rows: list[ChatbotBudgetContext]) -> ChatbotContextRespo
         ),
         data_sources=[],
         supported_query_types=[],
-        lab_group_budget_context=[],
+        lab_group_budget_context=envelopes or [],
         budget_context=rows,
         purchase_lines=[],
         notes=[],
@@ -102,6 +119,71 @@ def test_focus_only_matches_names_in_scope():
     assert facts["focus"]["matched"] == ["FCB"]
     labs = facts["focus"]["lab_group: FCB"]["labs_by_utilisation"]
     assert [lab["name"] for lab in labs] == ["Food Lab", "Brew Lab"]
+
+
+def test_lab_group_budget_is_its_system_config_total_not_the_lab_sum():
+    """Regression: UAT Group's $12,000 was answered as its lab's $2,000."""
+    rows = [_row("UAT Group", "Uat Test Lab", "Tools", 2000, 1500, pending=200)]
+    facts = _build_facts(
+        _context("admin", rows, [_envelope("UAT Group", 12000)]),
+        "how much is total budget for uat group?",
+        "FY",
+    )
+
+    group = facts["lab_groups_by_spend"][0]
+    assert group["budget"] == 12000.0
+    assert group["allocated_to_labs"] == 2000.0
+    assert group["remaining_after_approved"] == 10500.0
+    assert group["remaining_after_pending"] == 10300.0
+    assert group["utilisation_pct"] == 12.5
+    assert facts["focus"]["lab_group: UAT Group"]["group_totals"] == group
+    # The lab itself keeps its own budget.
+    assert facts["labs_by_spend"][0]["budget"] == 2000.0
+
+
+def test_overall_budget_adds_up_lab_group_totals():
+    rows = [
+        _row("UAT Group", "Uat Test Lab", "Tools", 2000, 1000),
+        _row("FCB", "Food Lab", "Tools", 8000, 0),
+    ]
+    facts = _build_facts(
+        _context("admin", rows, [_envelope("UAT Group", 12000), _envelope("FCB", 50000)]),
+        "what is the total budget?",
+        "FY",
+    )
+
+    assert facts["overall"]["budget"] == 62000.0
+    assert facts["overall"]["allocated_to_labs"] == 10000.0
+    assert facts["overall"]["remaining_after_approved"] == 61000.0
+
+
+def test_lab_group_with_budget_but_no_labs_is_still_listed():
+    facts = _build_facts(
+        _context("admin", [], [_envelope("New Group", 5000)]),
+        "total budget for new group",
+        "FY",
+    )
+
+    group = facts["lab_groups_by_spend"][0]
+    assert (group["name"], group["budget"]) == ("New Group", 5000.0)
+    assert group["allocated_to_labs"] == 0.0
+    assert facts["focus"]["matched"] == ["New Group"]
+
+
+def test_lab_group_without_a_set_budget_uses_the_lab_sum():
+    rows = [_row("FCB", "Food Lab", "Tools", 8000, 0)]
+    facts = _build_facts(_context("teamlead", rows), "budget", "FY")
+
+    assert facts["lab_groups_by_spend"][0]["budget"] == 8000.0
+    assert "allocated_to_labs" not in facts["overall"]
+
+
+def test_lab_ic_budget_is_only_their_own_labs():
+    rows = [_row("ICT", "Embedded Lab", "Tools", 1000, 100)]
+    facts = _build_facts(_context("labic", rows), "total budget for ICT", "FY")
+
+    assert facts["overall"]["budget"] == 1000.0
+    assert facts["focus"]["lab_group: ICT"]["group_totals"] is None
 
 
 def test_lab_ic_gets_no_lab_group_summary():
