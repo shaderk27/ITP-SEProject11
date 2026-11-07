@@ -56,10 +56,16 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "dashboard:view",
     "upload:create",
     "review:view",
+    "review:approve",
     "records:view",
     "reports:view",
     "alerts:view",
+    "audit:view",
+    "config:view",
+    "config:edit",
     "budget:view",
+    "budget:edit",
+    "user:create",
   ],
   labic: [
     "dashboard:view",
@@ -221,7 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const canAccessLabGroup = (labGroupId: number) => {
     if (!user) return false;
-    if (user.role === "admin") return true;
+    if (user.role === "admin"|| user.role === "teamlead") return true;
     return user.labGroupId === labGroupId;
   };
 

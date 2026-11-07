@@ -124,7 +124,7 @@ export const router = createBrowserRouter([
               element: (
                 // Strictly locked to Admins using your allowedRoles logic
                 <ProtectedRoute
-                  allowedRoles={["admin"]}
+                  allowedRoles={["admin","teamlead"]}
                   requiredPermissions={["audit:view"]}
                 >
                   <AuditLogPage />
@@ -137,7 +137,7 @@ export const router = createBrowserRouter([
         path: "config",
         element: (
           <ProtectedRoute
-            allowedRoles={["admin"]}
+            allowedRoles={["admin","teamlead"]}
             requiredPermissions={["config:view"]}
           >
             <SystemConfigPage />
@@ -159,7 +159,7 @@ export const router = createBrowserRouter([
         path: "users/create",
         element: (
           <ProtectedRoute
-            allowedRoles={["admin"]}
+            allowedRoles={["admin","teamlead"]}
             requiredPermissions={["user:create"]}
           >
             <CreateUserPage />
