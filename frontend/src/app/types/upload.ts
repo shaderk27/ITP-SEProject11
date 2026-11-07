@@ -23,6 +23,7 @@ export interface UploadLineItem {
   lab: string;
   lab_group?: string;
   classification_reason?: string;
+  review_issue?: string;
   amount_gst: string;
   line_identity_key: string;
   content_hash: string;

@@ -64,6 +64,10 @@ def persist_upload_to_db(
         lab.lab_group_id: lab.lab_id
         for lab in db.query(Lab).filter(Lab.is_general.is_(True)).all()
     }
+    general_lab_ids = set(general_labs_by_group.values())
+    lab_group_names: dict[int, str] = {
+        group.lab_group_id: group.lab_group_name for group in db.query(LabGroup).all()
+    }
 
     categories_by_name: dict[str, int] = {
         cat.category_name.strip().lower(): cat.category_id
@@ -103,6 +107,8 @@ def persist_upload_to_db(
     queue_items_inserted = 0
     # Source row -> accepted final status for rows that commit will skip.
     status_regression_rows: dict[int, str] = {}
+    # Source row -> what the reviewer needs to fix, for the upload summary.
+    review_issues: dict[int, str] = {}
 
     # ─── 3. For each unique PR: write header + its lines ──────────────────
     for pr_number, pr_items in items_by_pr.items():
@@ -141,6 +147,15 @@ def persist_upload_to_db(
                 categories_by_name=categories_by_name,
                 general_cat_id=general_category.category_id,
             )
+            category_issue = _category_issue(
+                _find_named_categories(
+                    item.pr_category,
+                    item.req_type,
+                    categories_by_name,
+                    general_category.category_id,
+                )[0],
+                classification.get("category_conflicts") or [],
+            )
 
             # ─── 4A. Automated Multi-Lab Spending Distribution ────────────
             if len(detected_labs) > 1:
@@ -176,11 +191,7 @@ def persist_upload_to_db(
                     )
 
                     used_fallback_group = final_group_id == general_group.lab_group_id
-                    used_fallback_lab = False
-                    used_fallback_category = (
-                        classifier_category_id is None
-                        or final_category_id == general_category.category_id
-                    )
+                    used_fallback_category = category_issue is not None
 
                     split_reason = (
                         f"Automated multi-lab spending distribution ({idx + 1}/{num_labs} "
@@ -202,11 +213,11 @@ def persist_upload_to_db(
                             or general_category.category_id
                         )
                         used_fallback_group = False
-                        used_fallback_lab = False
                         used_fallback_category = False
                         split_reason = (
                             "Existing committed split line found. Preserving reviewed "
-                            "lab/category; only source status may update on commit."
+                            "lab/category; only source status and amounts may "
+                            "update on commit."
                         )
 
                     duplicate_status = "unchecked"
@@ -218,11 +229,7 @@ def persist_upload_to_db(
                             existing_final_line.pr_status
                         )
 
-                    any_fallback = (
-                        used_fallback_group
-                        or used_fallback_lab
-                        or used_fallback_category
-                    )
+                    any_fallback = used_fallback_group or used_fallback_category
                     classification_status = "unclear" if any_fallback else "confident"
                     review_status = "pending_review" if any_fallback else "not_required"
 
@@ -267,14 +274,30 @@ def persist_upload_to_db(
                     lines_inserted += 1
 
                     if review_status == "pending_review":
+                        issues = []
+                        if used_fallback_group:
+                            issues.append(
+                                _lab_issue(
+                                    item.wbs,
+                                    None,
+                                    wbs_matched=classification.get("lab_group_id")
+                                    is not None,
+                                )
+                            )
+                        if used_fallback_category:
+                            issues.append(category_issue)
                         queue_item = ReviewQueueItem(
                             staging_line_id=line.staging_line_id,
                             queue_status="open",
                             priority="normal",
-                            review_reason=split_reason,
+                            review_reason=(
+                                f"{' '.join(issues)} This line is split equally "
+                                f"across {detected_labels}."
+                            ),
                         )
                         db.add(queue_item)
                         queue_items_inserted += 1
+                        review_issues[item.row_number] = queue_item.review_reason
 
                 continue
 
@@ -298,15 +321,14 @@ def persist_upload_to_db(
             )
             final_category_id = classifier_category_id or general_category.category_id
 
+            # Category General on its own is a valid result, so only a clash
+            # between categories sends a line to review.
             used_fallback_group = (
                 classifier_group_id is None
                 or final_group_id == general_group.lab_group_id
             )
-            used_fallback_lab = classifier_lab_id is None
-            used_fallback_category = (
-                classifier_category_id is None
-                or final_category_id == general_category.category_id
-            )
+            used_fallback_lab = final_lab_id is None or final_lab_id in general_lab_ids
+            used_fallback_category = category_issue is not None
 
             if existing_final_line:
                 final_lab_id = existing_final_line.lab_id
@@ -325,7 +347,8 @@ def persist_upload_to_db(
                 used_fallback_category = False
                 classification_reason = (
                     "Existing committed line found. Preserving reviewed "
-                    "lab/category; only source status may update on commit."
+                    "lab/category; only source status and amounts may update on "
+                    "commit."
                 )
 
             any_fallback = (
@@ -366,15 +389,29 @@ def persist_upload_to_db(
 
             # ─── 5. Queue for review if needed ────────────────────────────
             if review_status == "pending_review":
+                issues = []
+                if used_fallback_group or used_fallback_lab:
+                    issues.append(
+                        _lab_issue(
+                            item.wbs,
+                            None
+                            if final_group_id == general_group.lab_group_id
+                            else lab_group_names.get(final_group_id),
+                            wbs_matched=classifier_group_id is not None,
+                        )
+                    )
+                if used_fallback_category:
+                    issues.append(category_issue)
+                review_issue = " ".join(issues)
                 queue_item = ReviewQueueItem(
                     staging_line_id=line.staging_line_id,
                     queue_status="open",
                     priority="normal",
-                    review_reason=classification_reason
-                    or "Auto-classifier left one or more fields as General.",
+                    review_reason=review_issue,
                 )
                 db.add(queue_item)
                 queue_items_inserted += 1
+                review_issues[item.row_number] = review_issue
 
     # ─── 6. If nothing needs review, batch is ready to commit straight ────
     if queue_items_inserted == 0:
@@ -408,6 +445,7 @@ def persist_upload_to_db(
         "lines_inserted": lines_inserted,
         "queue_items_inserted": queue_items_inserted,
         "status_regression_rows": status_regression_rows,
+        "review_issues": review_issues,
     }
 
 
@@ -601,35 +639,9 @@ def _resolve_category_id(
          Purpose caused the single-lab classifier to bail out), and step 1 found
          exactly 1 unambiguous category with no upstream conflict reason, use it.
     """
-    combined = " | ".join(
-        str(v).strip()
-        for v in (item_pr_category, item_req_type)
-        if v and str(v).strip()
+    matched_names, matched_ids = _find_named_categories(
+        item_pr_category, item_req_type, categories_by_name, general_cat_id
     )
-
-    matched_names: list[str] = []
-    matched_ids: list[int] = []
-    seen_ids: set[int] = set()
-
-    if combined:
-        sorted_cats = sorted(
-            (
-                (name, cid)
-                for name, cid in categories_by_name.items()
-                if cid != general_cat_id
-            ),
-            key=lambda pair: len(pair[0]),
-            reverse=True,
-        )
-        for cat_name, cat_id in sorted_cats:
-            pattern = re.compile(
-                rf"(?<![A-Za-z0-9]){re.escape(cat_name)}(?![A-Za-z0-9])",
-                re.IGNORECASE,
-            )
-            if pattern.search(combined) and cat_id not in seen_ids:
-                seen_ids.add(cat_id)
-                matched_ids.append(cat_id)
-                matched_names.append(cat_name.title())
 
     # Explicit conflict: 2+ categories found in Req Type / PR Category
     if len(matched_ids) > 1:
@@ -661,6 +673,72 @@ def _resolve_category_id(
         return matched_ids[0], classifier_reason
 
     return None, classifier_reason
+
+
+def _find_named_categories(
+    item_pr_category: str | None,
+    item_req_type: str | None,
+    categories_by_name: dict[str, int],
+    general_cat_id: int,
+) -> tuple[list[str], list[int]]:
+    """Names and ids of the non-General categories named in the source fields."""
+    combined = " | ".join(
+        str(v).strip()
+        for v in (item_pr_category, item_req_type)
+        if v and str(v).strip()
+    )
+
+    matched_names: list[str] = []
+    matched_ids: list[int] = []
+    seen_ids: set[int] = set()
+
+    if combined:
+        sorted_cats = sorted(
+            (
+                (name, cid)
+                for name, cid in categories_by_name.items()
+                if cid != general_cat_id
+            ),
+            key=lambda pair: len(pair[0]),
+            reverse=True,
+        )
+        for cat_name, cat_id in sorted_cats:
+            pattern = re.compile(
+                rf"(?<![A-Za-z0-9]){re.escape(cat_name)}(?![A-Za-z0-9])",
+                re.IGNORECASE,
+            )
+            if pattern.search(combined) and cat_id not in seen_ids:
+                seen_ids.add(cat_id)
+                matched_ids.append(cat_id)
+                matched_names.append(cat_name.title())
+
+    return matched_names, matched_ids
+
+
+def _lab_issue(wbs: str | None, group_name: str | None, *, wbs_matched: bool) -> str:
+    """Tell the reviewer what to pick when a line has no specific lab."""
+    if group_name:
+        return (
+            "Choose a lab. The file doesn't say which "
+            f"{group_name} lab this line is for."
+        )
+    wbs_text = (wbs or "").strip()
+    if not wbs_text:
+        return "Choose a lab group and lab. This line has no WBS."
+    if not wbs_matched:
+        return (
+            f'Choose a lab group and lab. The WBS code "{wbs_text}" '
+            "doesn't match any lab group."
+        )
+    return "Choose a lab group and lab. This line isn't linked to a specific lab group."
+
+
+def _category_issue(named: list[str], classifier_named: list[str]) -> str | None:
+    """Tell the reviewer to pick one when the file names 2+ categories."""
+    names = named if len(named) > 1 else classifier_named
+    if len(names) < 2:
+        return None
+    return f"Choose one category. The file lists more than one: {', '.join(sorted(names))}."
 
 
 def _split_amount_equally(total: Any, count: int) -> list[Decimal]:

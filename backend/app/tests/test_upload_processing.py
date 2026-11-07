@@ -341,7 +341,7 @@ def test_formula_like_item_text_is_recovered_from_xlsx() -> None:
         ]
     )
     buffer = BytesIO()
-    dataframe.to_excel(buffer, index=False)
+    dataframe.to_excel(buffer, index=False, engine="openpyxl")
 
     prepared = read_upload_dataframe("formula-text.xlsx", buffer.getvalue())
 
