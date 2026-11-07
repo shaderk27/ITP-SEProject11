@@ -59,6 +59,7 @@ def get_current_user_allow_reset(
 ) -> dict:
     return service.get_current_user_allow_reset(access_token)
 
+
 def _ensure_can_manage(service: AuthService, actor: dict, user_id: int):
     """Admins can manage anyone. Team leads can manage team leads and
     lab ICs, but never admins. Returns the target user."""
@@ -72,6 +73,8 @@ def _ensure_can_manage(service: AuthService, actor: dict, user_id: int):
             detail="Team leads cannot manage admin accounts.",
         )
     return target
+
+
 @router.post("/login")
 async def login(
     payload: LoginRequest,
@@ -165,6 +168,7 @@ async def create_user(
         lab_ids=payload.lab_ids,
         primary_lab_id=payload.primary_lab_id,
         creator_admin_id=admin.get("id"),
+        creator_role=admin.get("role"),
     )
     log_audit_action(
         db=service.db,

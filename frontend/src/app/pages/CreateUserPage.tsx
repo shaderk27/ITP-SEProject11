@@ -68,7 +68,7 @@ export function CreateUserPage() {
     lab_group_id: "",
     lab_id: "",
   });
-
+  const [currentRole, setCurrentRole] = useState<string | null>(null);
   useEffect(() => {
     fetch(`${API}/auth/roles`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : ROLES))
@@ -84,7 +84,10 @@ export function CreateUserPage() {
       .then((r) => (r.ok ? r.json() : []))
       .then(setLabs)
       .catch(() => setLabs([]));
-
+    fetch(`${API}/auth/me`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((me) => setCurrentRole(me?.role?.toLowerCase() ?? null))
+      .catch(() => setCurrentRole(null));
     fetchLabicUsers().then(setLabicUsers);
     fetchTeamLeadUsers().then(setTeamLeadUsers);
   }, []);
@@ -130,6 +133,9 @@ export function CreateUserPage() {
     if (selectedRoleName === "labic" && !form.lab_id) {
       errors.lab_id = "Lab is required for Lab IC.";
     }
+    if (!form.role_id) errors.role_id = "Role is required.";
+    else if (currentRole === "teamlead" && selectedRoleName === "admin")
+      errors.role_id = "Team Leads cannot create admin accounts.";
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -223,6 +229,11 @@ export function CreateUserPage() {
   const selectedRoleName = selectedRole?.role_name.toLowerCase();
   const showLabGroup = selectedRoleName === "teamlead";
   const showLab = selectedRoleName === "labic";
+  const assignableRoles =
+    currentRole === "admin"
+      ? roles
+      : roles.filter((r) => r.role_name.toLowerCase() !== "admin");
+    
 
   // Mirrors the backend duplicate check: only ACTIVE team leads own a lab group.
   function getTeamLeadForGroup(groupId: number) {
@@ -359,7 +370,7 @@ export function CreateUserPage() {
               }`}
             >
               <option value="">Select a role...</option>
-              {roles.map((r) => (
+              {assignableRoles.map((r) => (
                 <option key={r.role_id} value={r.role_id}>
                   {r.role_name}
                 </option>

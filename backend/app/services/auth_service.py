@@ -321,6 +321,7 @@ class AuthService:
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
         creator_admin_id: Optional[int] = None,
+        creator_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new user account and process lab assignments."""
         normalized_email = email.strip().lower()
@@ -347,6 +348,11 @@ class AuthService:
             )
 
         role_name = role.role_name.lower()
+        if (creator_role or "").lower() != "admin" and role_name == "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can create admin accounts.",
+            )
         if role_name == "teamlead" and lab_group_id is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
