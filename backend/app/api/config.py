@@ -157,11 +157,11 @@ def get_lab_groups(
     budget_period_filter = [] if all_periods else [Budget.period_id == pid]
 
     query = db.query(LabGroup)
-    if role_name == "teamlead":
-        if not current_user.lab_group_id:
-            return []
-        query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
-    elif role_name == "labic":
+    # if role_name == "teamlead":
+    #     if not current_user.lab_group_id:
+    #         return []
+    #     query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
+    if role_name == "labic":
         user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
         if not user_lab_ids:
             return []
@@ -175,7 +175,7 @@ def get_lab_groups(
         if not group_ids:
             return []
         query = query.filter(LabGroup.lab_group_id.in_(group_ids))
-    elif role_name != "admin":
+    elif role_name not in ("admin", "teamlead"):
         return []
 
     groups = query.all()
