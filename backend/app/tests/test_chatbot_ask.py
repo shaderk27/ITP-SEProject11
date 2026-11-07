@@ -36,13 +36,13 @@ def _row(group, lab, category, budget, spend, pending=0) -> ChatbotBudgetContext
     )
 
 
-def _envelope(group, envelope) -> ChatbotLabGroupBudgetContext:
+def _envelope(group, envelope, allocated=0) -> ChatbotLabGroupBudgetContext:
     return ChatbotLabGroupBudgetContext(
         lab_group_id=hash(group) % 1000,
         lab_group_name=group,
         envelope_budget_sgd=str(envelope),
-        allocated_to_labs_sgd="0",
-        unallocated_sgd=str(envelope),
+        allocated_to_labs_sgd=str(allocated),
+        unallocated_sgd=str(envelope - allocated),
         approved_spend_sgd="0",
         utilisation_pct=0.0,
     )
@@ -155,6 +155,45 @@ def test_overall_budget_adds_up_lab_group_totals():
     assert facts["overall"]["budget"] == 62000.0
     assert facts["overall"]["allocated_to_labs"] == 10000.0
     assert facts["overall"]["remaining_after_approved"] == 61000.0
+
+
+def test_unallocated_is_budget_not_given_to_labs_not_budget_left():
+    """Regression: UAT Group's unallocated $10,000 was answered as $10,300."""
+    rows = [
+        _row("UAT Group", "Uat Test Lab", "Tools", 2000, 1700),
+        _row("FCB", "Food Lab", "Tools", 8000, 0),
+    ]
+    facts = _build_facts(
+        _context(
+            "admin",
+            rows,
+            [_envelope("UAT Group", 12000, 2000), _envelope("FCB", 50000, 8000)],
+        ),
+        "unallocated balance for uat group",
+        "FY",
+    )
+
+    uat = next(g for g in facts["lab_groups_by_spend"] if g["name"] == "UAT Group")
+    assert uat["unallocated"] == 10000.0
+    assert uat["remaining_after_approved"] == 10300.0
+    assert facts["focus"]["lab_group: UAT Group"]["group_totals"]["unallocated"] == 10000.0
+    assert facts["overall"]["unallocated"] == 52000.0
+
+
+def test_no_unallocated_figure_without_a_set_budget():
+    rows = [_row("FCB", "Food Lab", "Tools", 8000, 0)]
+    facts = _build_facts(_context("teamlead", rows), "unallocated", "FY")
+
+    assert "unallocated" not in facts["lab_groups_by_spend"][0]
+    assert "unallocated" not in facts["overall"]
+
+
+def test_lab_ic_gets_no_unallocated_figure():
+    rows = [_row("ICT", "Embedded Lab", "Tools", 1000, 100)]
+    facts = _build_facts(_context("labic", rows), "unallocated for ICT", "FY")
+
+    assert "unallocated" not in facts["overall"]
+    assert facts["focus"]["lab_group: ICT"]["group_totals"] is None
 
 
 def test_lab_group_with_budget_but_no_labs_is_still_listed():
