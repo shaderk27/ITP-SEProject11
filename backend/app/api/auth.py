@@ -40,15 +40,15 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(repository=AuthRepository(), db=db)
 
 
-def require_admin_or_teamlead(#allow manager too
+def require_admin_or_teamlead(  # allow manager too
     access_token: str | None = Cookie(None),
     service: AuthService = Depends(get_auth_service),
 ) -> dict:
     current_user = service.get_current_user(access_token)
-    if (current_user.get("role") != "admin" or current_user.get("role") != "teamlead"):
+    if current_user.get("role") not in ("admin", "teamlead"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access is required.",
+            detail="Admin or team lead access is required.",
         )
     return current_user
 
@@ -190,8 +190,8 @@ async def get_all_users(
     service: AuthService = Depends(get_auth_service),
     _admin: dict = Depends(require_admin_or_teamlead),
 ):
-    if role:
-        return service.get_users_by_role(role)
+    # if role:
+    #     return service.get_users_by_role(role)
     return service.get_all_users()
 
 
