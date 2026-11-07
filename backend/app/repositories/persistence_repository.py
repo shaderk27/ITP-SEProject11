@@ -216,7 +216,8 @@ def persist_upload_to_db(
                         used_fallback_category = False
                         split_reason = (
                             "Existing committed split line found. Preserving reviewed "
-                            "lab/category; only source status may update on commit."
+                            "lab/category; only source status and amounts may "
+                            "update on commit."
                         )
 
                     duplicate_status = "unchecked"
@@ -346,7 +347,8 @@ def persist_upload_to_db(
                 used_fallback_category = False
                 classification_reason = (
                     "Existing committed line found. Preserving reviewed "
-                    "lab/category; only source status may update on commit."
+                    "lab/category; only source status and amounts may update on "
+                    "commit."
                 )
 
             any_fallback = (
