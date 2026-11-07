@@ -199,10 +199,7 @@ class UploadService:
             decision = self.duplicate_service.decide(item, existing)
 
             if decision.status != "duplicate":
-                if (
-                    assigned_lab in ("Unassigned Lab", "General")
-                    or not assigned_lab
-                ):
+                if assigned_lab in ("Unassigned Lab", "General") or not assigned_lab:
                     needs_review_count += 1
                 classified_items.append(
                     {

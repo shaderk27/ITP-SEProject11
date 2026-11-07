@@ -117,7 +117,9 @@ def test_category_general_with_a_named_lab_passes(db, setup, tmp_path) -> None:
 def test_general_lab_asks_for_a_lab_in_the_group(db, setup, tmp_path) -> None:
     result, queue_item = _upload(db, setup, tmp_path)
 
-    expected = "Choose a lab. The file doesn't say which Review Group lab this line is for."
+    expected = (
+        "Choose a lab. The file doesn't say which Review Group lab this line is for."
+    )
     assert queue_item.review_reason == expected
     assert _summary_issue(result) == expected
     assert result["counts"]["needs_review"] == 1

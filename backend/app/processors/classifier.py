@@ -44,7 +44,9 @@ def classify_line_item(
     scoped_labs = _filter_labs_by_group(labs, matched_group)
     # A General lab is the fallback, not something a row can name. Row text can
     # contain the word "General" from placeholder fields, so never match on it.
-    specific_labs = [lab for lab in scoped_labs if not getattr(lab, "is_general", False)]
+    specific_labs = [
+        lab for lab in scoped_labs if not getattr(lab, "is_general", False)
+    ]
 
     lab_match = None
     lab_reason = ""

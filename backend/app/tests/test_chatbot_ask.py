@@ -147,7 +147,9 @@ def test_overall_budget_adds_up_lab_group_totals():
         _row("FCB", "Food Lab", "Tools", 8000, 0),
     ]
     facts = _build_facts(
-        _context("admin", rows, [_envelope("UAT Group", 12000), _envelope("FCB", 50000)]),
+        _context(
+            "admin", rows, [_envelope("UAT Group", 12000), _envelope("FCB", 50000)]
+        ),
         "what is the total budget?",
         "FY",
     )
@@ -176,7 +178,9 @@ def test_unallocated_is_budget_not_given_to_labs_not_budget_left():
     uat = next(g for g in facts["lab_groups_by_spend"] if g["name"] == "UAT Group")
     assert uat["unallocated"] == 10000.0
     assert uat["remaining_after_approved"] == 10300.0
-    assert facts["focus"]["lab_group: UAT Group"]["group_totals"]["unallocated"] == 10000.0
+    assert (
+        facts["focus"]["lab_group: UAT Group"]["group_totals"]["unallocated"] == 10000.0
+    )
     assert facts["overall"]["unallocated"] == 52000.0
 
 
