@@ -40,12 +40,12 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(repository=AuthRepository(), db=db)
 
 
-def require_admin(
+def require_admin_or_teamlead(#allow manager too
     access_token: str | None = Cookie(None),
     service: AuthService = Depends(get_auth_service),
 ) -> dict:
     current_user = service.get_current_user(access_token)
-    if current_user.get("role") != "admin":
+    if (current_user.get("role") != "admin" or current_user.get("role") != "teamlead"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access is required.",
@@ -141,7 +141,7 @@ async def create_user(
     payload: CreateUserRequest,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     res = service.create_user(
         full_name=payload.full_name,
@@ -188,7 +188,7 @@ async def forgot_password(
 async def get_all_users(
     role: Optional[str] = Query(None),
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_admin_or_teamlead),
 ):
     if role:
         return service.get_users_by_role(role)
@@ -198,7 +198,7 @@ async def get_all_users(
 @router.get("/assignments")
 async def get_assignments(
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_admin_or_teamlead),
 ):
     return service.get_assignments()
 
@@ -209,7 +209,7 @@ async def assign_lab_ic(
     payload: AssignLabSchema,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     res = service.assign_lab_to_user(
         user_id=user_id,
@@ -238,7 +238,7 @@ async def assign_team_lead(
     payload: AssignLabGroupSchema,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     res = service.assign_labgroup_to_user(user_id, payload.lab_group_id)
     log_audit_action(
@@ -258,7 +258,7 @@ async def unassign_user_scope(
     user_id: int,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     res = service.unassign_user_scope(user_id)
     log_audit_action(
@@ -279,7 +279,7 @@ async def unassign_lab_from_user(
     lab_id: int,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     res = service.unassign_lab_from_user(user_id, lab_id)
     log_audit_action(
@@ -299,7 +299,7 @@ async def unassign_lab_from_user(
 async def deactivate_user(
     user_id: int,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     # Canonical audit log is written inside auth_repository.set_user_activation_status
     return service.deactivate_user(user_id, current_admin_id=admin["id"])
@@ -309,7 +309,7 @@ async def deactivate_user(
 async def activate_user(
     user_id: int,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     # Canonical audit log is written inside auth_repository.set_user_activation_status
     return service.activate_user(user_id, current_admin_id=admin.get("id"))
@@ -334,7 +334,7 @@ async def admin_send_reset(
     user_id: int,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     user = service.repository.get_user_by_id(service.db, user_id)
     if not user:

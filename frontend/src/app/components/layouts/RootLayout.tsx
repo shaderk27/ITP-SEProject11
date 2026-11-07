@@ -72,7 +72,7 @@ const navigation: NavItem[] = [
           name: "Audit Log",
           path: "/audit",
           icon: FileSearch,
-          roles: ["admin"] as UserRole[],
+          roles: ["admin","teamlead"] as UserRole[],
         },
       ]
     : []),
@@ -80,7 +80,7 @@ const navigation: NavItem[] = [
     name: "Create User",
     path: "/users/create",
     icon: UserPlus,
-    roles: ["admin"],
+    roles: ["admin","teamlead"],
   },
   ...(FEATURES.chatbot
     ? [
@@ -92,7 +92,7 @@ const navigation: NavItem[] = [
         },
       ]
     : []),
-  { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
+  { name: "System Config", path: "/config", icon: Settings, roles: ["admin","teamlead"] },
 ];
 
 export function RootLayout() {
