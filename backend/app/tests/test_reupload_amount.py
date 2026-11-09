@@ -151,9 +151,36 @@ def test_blocked_approved_to_pending_line_keeps_its_amount(db, save) -> None:
 
     save([_row("Pending Support", amount=150)])
 
-    line = _pr(db).lines[0]
+    pr = _pr(db)
+    line = pr.lines[0]
     assert line.pr_status == "Approved (SVP)"
     assert line.amount_gst == Decimal("100.00")
+    assert pr.grand_total_sgd == Decimal("100.00")
+
+
+def test_blocked_line_keeps_pr_total_in_line_with_saved_lines(db, save) -> None:
+    def rows(status_b, amount_a, amount_b):
+        total = amount_a + amount_b
+        return [
+            _row(
+                item="Line A",
+                **{"Grand Total in SGD": total, "Unit Rate": amount_a},
+            ),
+            _row(
+                status_b,
+                item="Line B",
+                **{"Grand Total in SGD": total, "Unit Rate": amount_b},
+            ),
+        ]
+
+    save(rows("Approved (SVP)", 100, 200))
+
+    save(rows("Rejected", 120, 250))
+
+    pr = _pr(db)
+    amounts = {line.item_description: line.amount_gst for line in pr.lines}
+    assert amounts == {"Line A": Decimal("120.00"), "Line B": Decimal("200.00")}
+    assert pr.grand_total_sgd == Decimal("320.00")
 
 
 def test_reviewed_lab_and_category_stay_when_amount_changes(

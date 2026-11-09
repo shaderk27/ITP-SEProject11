@@ -873,6 +873,15 @@ def commit_batch(
             lines_created += 1
 
         db.flush()
+        # A blocked line keeps its old amount, so the file's total no longer
+        # matches. Rebuild the PR total from the saved lines instead.
+        if regressions_skipped:
+            pr.grand_total_sgd = (
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .filter(PurchaseRequestLine.pr_id == pr.pr_id)
+                .scalar()
+            )
+            db.flush()
         final_line_count = (
             db.query(func.count(PurchaseRequestLine.pr_line_id))
             .filter(PurchaseRequestLine.pr_id == pr.pr_id)
