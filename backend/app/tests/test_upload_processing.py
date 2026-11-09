@@ -595,6 +595,77 @@ def test_repeated_allocated_item_is_counted_once() -> None:
     assert lines[0].amount_gst == Decimal("180.00")
 
 
+def test_percentage_allocated_repeated_item_splits_and_absorbs_remainder() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR2600002702",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Split freight",
+                "Grand Total in SGD": "180",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.4",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.3",
+                "WBS": "WBS-2",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.3",
+                "WBS": "WBS-3",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    prepared = read_upload_dataframe("split-pct.xlsx", buffer.getvalue())
+    lines = parse_line_items(prepared)
+
+    assert len(prepared) == 1
+    assert len(lines) == 1
+    assert lines[0].amount_gst == Decimal("180.00")
+    assert [a["wbs"] for a in lines[0].wbs_allocations] == [
+        "WBS-1",
+        "WBS-2",
+        "WBS-3",
+    ]
+    assert [a["amount_gst"] for a in lines[0].wbs_allocations] == [
+        "60.12",
+        "59.94",
+        "59.94",
+    ]
+
+
 def test_repeat_is_kept_when_both_rows_are_not_allocated() -> None:
     dataframe = pd.DataFrame(
         [

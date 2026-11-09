@@ -16,6 +16,7 @@ import {
   User as UserIcon,
   Lock,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
 import type { User, UserRole } from "../../context/AuthContext";
@@ -29,8 +30,21 @@ import { AskAiWidget } from "../shared/AskAiWidget";
 interface NavItem {
   name: string;
   path: string;
-  icon: any;
+  icon: LucideIcon;
   roles: UserRole[];
+}
+
+interface AlertLabGroupSummary {
+  id: number;
+  budget?: number;
+  spent?: number;
+}
+
+interface AlertLabSummary {
+  id: number;
+  group_id?: number;
+  budget?: number;
+  spent?: number;
 }
 
 const navigation: NavItem[] = [
@@ -103,7 +117,7 @@ const navigation: NavItem[] = [
   { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
 ];
 
-export const getThresholdLevel = (util: number): number => {
+const getThresholdLevel = (util: number): number => {
   if (util >= 100) return 100;
   if (util >= 95) return 95;
   if (util >= 80) return 80;
@@ -116,25 +130,25 @@ export const getThresholdLevel = (util: number): number => {
  *   - `lab:{lab_id}:threshold:{threshold_level}`
  *   - `lab-group:{lab_group_id}:threshold:{threshold_level}`
  */
-export function buildAlertNotificationKeys(
-  labGroups: any[],
-  labs: any[],
+function buildAlertNotificationKeys(
+  labGroups: AlertLabGroupSummary[],
+  labs: AlertLabSummary[],
   user: Pick<User, "role" | "labGroupId" | "labIds">,
 ): string[] {
   const currentKeys: string[] = [];
 
-  const groupsToProcess = labGroups.filter((g: any) => {
+  const groupsToProcess = labGroups.filter((g) => {
     if (user.role === "admin") return true;
     if (user.role === "teamlead") return g.id === user.labGroupId;
     if (user.role === "labic") {
       return labs.some(
-        (l: any) => l.group_id === g.id && user.labIds.includes(l.id),
+        (lab) => lab.group_id === g.id && user.labIds.includes(lab.id),
       );
     }
     return false;
   });
 
-  groupsToProcess.forEach((group: any) => {
+  groupsToProcess.forEach((group) => {
     const isLabIC = user.role === "labic";
     const groupBudget = Number(group.budget || 0);
     const groupSpent = Number(group.spent || 0);
@@ -143,16 +157,16 @@ export function buildAlertNotificationKeys(
     const groupThreshold = getThresholdLevel(groupUtil);
 
     let groupLabs = labs.filter(
-      (l: any) =>
-        l.group_id === group.id &&
-        (Number(l.budget || 0) > 0 || Number(l.spent || 0) > 0),
+      (lab) =>
+        lab.group_id === group.id &&
+        (Number(lab.budget || 0) > 0 || Number(lab.spent || 0) > 0),
     );
     if (isLabIC) {
-      groupLabs = groupLabs.filter((l: any) => user.labIds.includes(l.id));
+      groupLabs = groupLabs.filter((lab) => user.labIds.includes(lab.id));
     }
 
     let anyLabThresholdAdded = false;
-    groupLabs.forEach((lab: any) => {
+    groupLabs.forEach((lab) => {
       const budget = Number(lab.budget || 0);
       const spent = Number(lab.spent || 0);
       const util =
@@ -179,7 +193,7 @@ export function buildAlertNotificationKeys(
  *    escalated to a different threshold so future crossings count as new.
  *  - Returns { unreadCount, nextSeenKeys }.
  */
-export function computeUnreadAlertState(
+function computeUnreadAlertState(
   currentKeys: string[],
   storedSeen: string[],
   isOnAlertsPage: boolean,
@@ -253,20 +267,28 @@ export function RootLayout() {
         ]);
         if (!groupsRes.ok || !labsRes.ok || isCancelled) return;
 
-        const labGroups = await groupsRes.json();
-        const labs = await labsRes.json();
+        const labGroups: unknown = await groupsRes.json();
+        const labs: unknown = await labsRes.json();
         if (!Array.isArray(labGroups) || !Array.isArray(labs) || isCancelled) {
           return;
         }
 
-        const currentKeys = buildAlertNotificationKeys(labGroups, labs, user);
+        const currentKeys = buildAlertNotificationKeys(
+          labGroups as AlertLabGroupSummary[],
+          labs as AlertLabSummary[],
+          user,
+        );
 
         let storedSeen: string[] = [];
         try {
           const raw = localStorage.getItem(seenStorageKey);
           if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) storedSeen = parsed;
+            const parsed: unknown = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              storedSeen = parsed.filter(
+                (item): item is string => typeof item === "string",
+              );
+            }
           }
         } catch {
           storedSeen = [];

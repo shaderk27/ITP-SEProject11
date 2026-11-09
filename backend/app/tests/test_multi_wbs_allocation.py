@@ -1,15 +1,21 @@
 """
-Automated tests for the Multi-WBS Transaction-Allocation Workflow.
+Automated tests for the Multi-WBS Transaction-Allocation Workflow (PR66).
 
-Covers all acceptance criteria in multi-wbs-allocation-workflow-change_3.md:
+Covers all acceptance criteria in multi-wbs-allocation-workflow-change_3.md
+and all review requirements in pr66-multi-wbs-review.md:
   1. One PR header with several ordinary item rows creates one header and the correct number of staging lines.
   2. PR-level blank continuation cells inherit only the correct preceding PR information.
-  3. WBS/allocation-only rows are linked to the correct preceding purchase line.
+  3. WBS/allocation-only rows (both blank-Item-Details and repeated-Item-Details rows such as PR2500002163, PR2600001152, PR2600002702) are grouped onto the preceding purchase line without double-counting.
   4. Same-WBS quantity continuation rows collapse cleanly into the parent purchase line.
-  5. Exact supplied multi-WBS allocations (e.g. PR2600002644: $50,000 + $31,000 = $81,000) are preserved and sent to Review Queue without equal splitting or creating a false extra purchase item.
-  6. Missing allocation amounts and invalid/non-reconciling allocation totals are flagged and blocked from resolving/committing until reconciled.
-  7. PR grand total reconciliation guard blocks commit when multi-WBS PR line totals do not reconcile with PR Grand Total in SGD.
-  8. Re-uploading the same allocation is treated as a duplicate; changing an allocation updates in place, records PRVersion/AuditLog history without duplicating spend, and reconciles across Dashboard, Alerts, Records, and Chatbot.
+  5. Percentage allocations (e.g. $180 split 33.4% / 33.3% / 33.3% -> $60.12, $59.94, $59.94) calculate exact monetary portions with final-portion remainder absorption.
+  6. Exact supplied multi-WBS allocations (e.g. PR2600002644: $50,000 + $31,000 = $81,000) are preserved and sent to Review Queue without equal splitting or creating a false extra purchase item.
+  7. Existing upload identity format (`base_hash` and `base_hash::occurrence_N`) is preserved for duplicate compatibility.
+  8. Team Lead budget authorization:
+     - Team Lead can view/edit a multi-WBS line ONLY when every allocation belongs to that Team Lead's Lab Group.
+     - Cross-Lab-Group multi-WBS lines require Admin review (403 for Team Lead).
+     - Team Lead Lab Group / Lab selectors are scoped strictly to the Team Lead's Lab Group.
+  9. Missing allocation amounts, non-reconciling allocation totals, and PR grand total mismatches are blocked until reconciled.
+  10. Re-uploading the same allocation is treated as a duplicate; changing an allocation updates in place, records PRVersion/AuditLog history without duplicating spend, and reconciles across Dashboard, Alerts, Records, and Chatbot.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from io import BytesIO
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pandas as pd
@@ -33,7 +40,9 @@ from app.api.review import (
     correct_queue_item,
     get_batch_detail,
     get_queue_item,
+    list_batches,
 )
+from app.models.auth import Role, User
 from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     PRVersion,
@@ -43,7 +52,12 @@ from app.models.staging import (
     StagingPRHeader,
     StagingPRLine,
 )
-from app.processors.upload_parser import parse_line_items, validate_dataframe
+from app.processors.upload_parser import (
+    generate_line_identity_key,
+    parse_line_items,
+    read_upload_dataframe,
+    validate_dataframe,
+)
 from app.repositories.upload_repository import UploadRepository
 from app.schemas.chatbot_schema import ChatbotContextRequest
 from app.services.chatbot_service import build_chatbot_context
@@ -66,12 +80,15 @@ def _base_row(
     grand_total: str | float | int | None = "",
     item_details: str = "",
     qty: str | float | int | None = "",
+    uom: str = "LOT",
     unit_rate: str | float | int | None = "",
+    delivery_date: str = "30-11-2026",
     mca: str = "",
     allocatn: str | float | int | None = "",
     wbs: str = "",
     req_type: str = "",
     instruction: str = "",
+    curr: str = "SGD",
 ) -> dict:
     return {
         "PR": pr,
@@ -82,10 +99,13 @@ def _base_row(
         "PR Sub Date": pr_sub_date,
         "Requestor": requestor,
         "Purpose": purpose,
+        "Curr": curr if pr else "",
         "Grand Total in SGD": grand_total,
         "Item Details": item_details,
         "Qty": qty,
+        "UOM": uom if item_details else "",
         "Unit Rate": unit_rate,
+        "Delivery Date": delivery_date if item_details else "",
         "MCA": mca,
         "Allocatn": allocatn,
         "WBS": wbs,
@@ -95,7 +115,7 @@ def _base_row(
 
 @pytest.fixture
 def multi_wbs_seed(db):
-    """Creates two Lab Groups (EQT and OOE), Labs, Categories, and FY2026 budgets."""
+    """Creates two Lab Groups (EQT and OOE), Labs, Categories, Team Leads, and FY budgets."""
     today = date.today()
     fy_year = today.year if today.month >= 4 else today.year - 1
     period = db.query(BudgetPeriod).filter(BudgetPeriod.year_no == fy_year).first()
@@ -128,6 +148,13 @@ def multi_wbs_seed(db):
         venue="E6 05-03",
         is_general=False,
     )
+    lab_eqt_2 = Lab(
+        lab_group_id=group_eqt.lab_group_id,
+        lab_code="E6-05-04A",
+        lab_name="Chiller Testbed Lab",
+        venue="E6 05-04",
+        is_general=False,
+    )
     lab_ooe = Lab(
         lab_group_id=group_ooe.lab_group_id,
         lab_code="E6-05-03B",
@@ -135,7 +162,7 @@ def multi_wbs_seed(db):
         venue="E6-05-03B",
         is_general=False,
     )
-    db.add_all([lab_eqt, lab_ooe])
+    db.add_all([lab_eqt, lab_eqt_2, lab_ooe])
     db.flush()
 
     cat_equip = SpendingCategory(
@@ -192,14 +219,40 @@ def multi_wbs_seed(db):
     )
     db.flush()
 
+    tl_role = db.query(Role).filter(Role.role_name == "teamlead").first()
+    role_id = tl_role.role_id if tl_role else 2
+    teamlead_eqt = User(
+        user_id=99001,
+        role_id=role_id,
+        role=tl_role or MagicMock(role_name="teamlead"),
+        full_name="EQT Team Lead",
+        email=f"tl.eqt.{uuid4().hex[:6]}@sit.edu.sg",
+        password_hash="placeholder",
+        lab_group_id=group_eqt.lab_group_id,
+        is_active=True,
+    )
+    teamlead_ooe = User(
+        user_id=99002,
+        role_id=role_id,
+        role=tl_role or MagicMock(role_name="teamlead"),
+        full_name="OOE Team Lead",
+        email=f"tl.ooe.{uuid4().hex[:6]}@sit.edu.sg",
+        password_hash="placeholder",
+        lab_group_id=group_ooe.lab_group_id,
+        is_active=True,
+    )
+
     return {
         "period": period,
         "group_eqt": group_eqt,
         "group_ooe": group_ooe,
         "lab_eqt": lab_eqt,
+        "lab_eqt_2": lab_eqt_2,
         "lab_ooe": lab_ooe,
         "cat_equip": cat_equip,
         "cat_services": cat_services,
+        "teamlead_eqt": teamlead_eqt,
+        "teamlead_ooe": teamlead_ooe,
         "req_date_str": (period.start_date or date(2026, 9, 8)).strftime("%d-%m-%Y"),
         "req_date": period.start_date or date(2026, 9, 8),
     }
@@ -214,7 +267,6 @@ def test_parser_handles_continuation_items_same_wbs_qty_and_multi_wbs_allocation
         stay attached to the preceding item without creating a false extra item.
     """
     rows = [
-        # PR 1: Same-WBS MCA=Quantity continuation rows (2 units x $90 = $180)
         _base_row(
             pr="PR2600002636",
             pr_status="Approved (SVP)",
@@ -240,7 +292,6 @@ def test_parser_handles_continuation_items_same_wbs_qty_and_multi_wbs_allocation
             allocatn="1.000",
             wbs="A-TI3-P502-CI01-OOE",
         ),
-        # PR 2: PR2600002644 with multi-WBS ($50,000 + $31,000 = $81,000) + $5,000 + $2,000 = $88,000
         _base_row(
             pr="PR2600002644",
             pr_status="Approved (Procurement)",
@@ -280,13 +331,11 @@ def test_parser_handles_continuation_items_same_wbs_qty_and_multi_wbs_allocation
     assert errors == []
 
     items = parse_line_items(df)
-    # 2 genuine items in PR2600002636 + 3 genuine items in PR2600002644 = 5 items
     assert len(items) == 5
 
     pr1_items = [it for it in items if it.pr_number == "PR2600002636"]
     assert len(pr1_items) == 2
     assert pr1_items[1].amount_gst == Decimal("180.00")
-    # Same-WBS quantity continuation rows collapsed cleanly
     assert pr1_items[1].wbs_allocations == ()
 
     pr2_items = [it for it in items if it.pr_number == "PR2600002644"]
@@ -302,6 +351,334 @@ def test_parser_handles_continuation_items_same_wbs_qty_and_multi_wbs_allocation
     assert tes_item.wbs_allocations[0]["amount_gst"] == "50000.00"
     assert tes_item.wbs_allocations[1]["wbs"] == "R-BCAXX-R203-0004-OOE"
     assert tes_item.wbs_allocations[1]["amount_gst"] == "31000.00"
+
+
+def test_repeated_item_allocation_rows_and_percentage_splits_not_double_counted():
+    """
+    Verifies PR66 review requirements #1, #2, and #4:
+      - Repeated item rows with allocation values (PR2500002163 $77,520, PR2600001152 $176,
+        PR2600002702 $180) are grouped as portions of one source item and not counted twice.
+      - Percentage allocations (33.4%, 33.3%, 33.3% on a $180 item) compute $60.12, $59.94,
+        and $59.94, with the final portion absorbing rounding remainder.
+      - Genuine repeated non-allocation items use `base_hash::occurrence_N` identity format.
+    """
+    rows = [
+        # Case A: PR2500002163 ($77,520 item repeated across 2 same-WBS allocation rows)
+        _base_row(
+            pr="PR2500002163",
+            pr_status="Approved (Procurement)",
+            pr_sub_date="05-09-2026",
+            requestor="user.alpha",
+            purpose="High-capacity test system",
+            grand_total="77,520.00",
+            item_details="High-Capacity System Unit",
+            qty="2.000",
+            uom="EA",
+            unit_rate="38,760.00",
+            mca="Quantity",
+            allocatn="1.000",
+            wbs="A-SAME-WBS-01",
+        ),
+        _base_row(
+            item_details="High-Capacity System Unit",
+            qty="2.000",
+            uom="EA",
+            unit_rate="38,760.00",
+            mca="Quantity",
+            allocatn="1.000",
+            wbs="A-SAME-WBS-01",
+        ),
+        # Case B: PR2600002702 ($180 freight item repeated across 3 WBS rows with 33.4%, 33.3%, 33.3%)
+        _base_row(
+            pr="PR2600002702",
+            pr_status="Approved (SVP)",
+            pr_sub_date="06-09-2026",
+            requestor="user.beta",
+            purpose="Shared freight charges",
+            grand_total="180.00",
+            item_details="Freight & Handling Charge",
+            qty="1.000",
+            uom="LOT",
+            unit_rate="180.00",
+            mca="Percentage",
+            allocatn="33.4",
+            wbs="R-WBS-PCT-01",
+        ),
+        _base_row(
+            item_details="Freight & Handling Charge",
+            qty="1.000",
+            uom="LOT",
+            unit_rate="180.00",
+            mca="Percentage",
+            allocatn="33.3",
+            wbs="R-WBS-PCT-02",
+        ),
+        _base_row(
+            item_details="Freight & Handling Charge",
+            qty="1.000",
+            uom="LOT",
+            unit_rate="180.00",
+            mca="Percentage",
+            allocatn="33.3",
+            wbs="R-WBS-PCT-03",
+        ),
+        # Case C: Genuine repeated non-allocation items (no Allocatn value) preserve `::occurrence_2`
+        _base_row(
+            pr="PR2600009999",
+            pr_status="Approved (SVP)",
+            pr_sub_date="07-09-2026",
+            requestor="user.gamma",
+            purpose="Identical cables",
+            grand_total="200.00",
+            item_details="Standard Patch Cable",
+            qty="1.000",
+            uom="EA",
+            unit_rate="100.00",
+            mca="NA",
+            allocatn="",
+            wbs="A-CABLE-WBS",
+        ),
+        _base_row(
+            item_details="Standard Patch Cable",
+            qty="1.000",
+            uom="EA",
+            unit_rate="100.00",
+            mca="NA",
+            allocatn="",
+            wbs="A-CABLE-WBS",
+        ),
+    ]
+
+    df = read_upload_dataframe("test_repeated.xlsx", _xlsx_bytes(rows))
+    assert validate_dataframe(df) == []
+
+    items = parse_line_items(df)
+    assert len(items) == 4
+
+    item_2163 = next(it for it in items if it.pr_number == "PR2500002163")
+    assert item_2163.amount_gst == Decimal("77520.00")
+    assert item_2163.wbs_allocations == ()
+
+    item_2702 = next(it for it in items if it.pr_number == "PR2600002702")
+    assert item_2702.amount_gst == Decimal("180.00")
+    assert len(item_2702.wbs_allocations) == 3
+    assert [a["amount_gst"] for a in item_2702.wbs_allocations] == [
+        "60.12",
+        "59.94",
+        "59.94",
+    ]
+    assert sum(
+        Decimal(a["amount_gst"]) for a in item_2702.wbs_allocations
+    ) == Decimal("180.00")
+
+    cable_items = [it for it in items if it.pr_number == "PR2600009999"]
+    assert len(cable_items) == 2
+    expected_base = generate_line_identity_key(
+        pr_number="PR2600009999",
+        item_details="Standard Patch Cable",
+        wbs="A-CABLE-WBS",
+        requestor="user.gamma",
+        purpose="Identical cables",
+    )
+    assert cable_items[0].line_identity_key == expected_base
+    assert cable_items[1].line_identity_key == f"{expected_base}::occurrence_2"
+
+
+def test_teamlead_budget_scope_and_admin_only_cross_group_multi_wbs(
+    db, admin_user, tmp_path, multi_wbs_seed
+):
+    """
+    Verifies PR66 review requirement #3 (Team Lead Budget Scope):
+      - A multi-WBS line spanning two different Lab Groups (EQT and OOE) is hidden from
+        both Team Leads' batch lists and batch details, and returns 403 Forbidden if a
+        Team Lead tries to view or resolve it. Only Admin can review and resolve it.
+      - A multi-WBS line where ALL allocations belong to the EQT Lab Group IS visible
+        and editable by the EQT Team Lead (with Lab Group / Lab options restricted to EQT),
+        and returns 403 Forbidden if the EQT Team Lead attempts to assign any portion to OOE.
+    """
+    seed = multi_wbs_seed
+    tl_eqt = seed["teamlead_eqt"]
+    tl_ooe = seed["teamlead_ooe"]
+
+    # 1. Upload a cross-Lab-Group multi-WBS PR (EQT + OOE)
+    cross_rows = [
+        _base_row(
+            pr="PR-CROSS-GROUP",
+            pr_status="Approved (Procurement)",
+            pr_sub_date=seed["req_date_str"],
+            requestor="qiong.chen",
+            purpose="Cross-group TES system",
+            grand_total="81,000.00",
+            item_details="Cross-group TES installation",
+            qty="1.000",
+            unit_rate="81,000.00",
+            mca="Amount",
+            allocatn="50000.00",
+            wbs="R-BCAXX-R203-0004-EQT",
+            req_type="TES Equipment",
+        ),
+        _base_row(
+            allocatn="31000.00",
+            wbs="R-BCAXX-R203-0004-OOE",
+        ),
+    ]
+    service_cross = UploadService(
+        UploadRepository(tmp_path / f"cross-{uuid4().hex}.json"), db=db
+    )
+    cross_res = service_cross.process_upload(
+        filename="cross_group.xlsx",
+        content=_xlsx_bytes(cross_rows),
+        uploader_email=admin_user.email,
+        uploader_name=admin_user.full_name,
+        uploader_role="admin",
+        current_user=admin_user,
+    )
+    cross_batch_id = cross_res["persistence"]["db_batch_id"]
+    admin_detail = get_batch_detail(cross_batch_id, db=db, current_user=admin_user)
+    cross_q_id = admin_detail.prs[0].lines[0].review_queue_id
+
+    # Neither Team Lead can see the cross-group line in batch detail or open it
+    tl_eqt_detail = get_batch_detail(cross_batch_id, db=db, current_user=tl_eqt)
+    assert tl_eqt_detail.prs == []
+
+    with pytest.raises(HTTPException) as tl_view_exc:
+        get_queue_item(cross_q_id, db=db, current_user=tl_eqt)
+    assert tl_view_exc.value.status_code == 403
+
+    with pytest.raises(HTTPException) as tl_edit_exc:
+        correct_queue_item(
+            cross_q_id,
+            CorrectionRequest(
+                allocations=[
+                    AllocationCorrectionItem(
+                        wbs_code="R-BCAXX-R203-0004-EQT",
+                        amount_gst=Decimal("50000.00"),
+                        lab_group_id=seed["group_eqt"].lab_group_id,
+                        lab_id=seed["lab_eqt"].lab_id,
+                        category_id=seed["cat_equip"].category_id,
+                    ),
+                    AllocationCorrectionItem(
+                        wbs_code="R-BCAXX-R203-0004-OOE",
+                        amount_gst=Decimal("31000.00"),
+                        lab_group_id=seed["group_ooe"].lab_group_id,
+                        lab_id=seed["lab_ooe"].lab_id,
+                        category_id=seed["cat_services"].category_id,
+                    ),
+                ]
+            ),
+            db=db,
+            current_user=tl_eqt,
+        )
+    assert tl_edit_exc.value.status_code == 403
+
+    # 2. Upload an intra-Lab-Group multi-WBS PR where both WBS codes belong to EQT
+    same_group_rows = [
+        _base_row(
+            pr="PR-SAME-GROUP-EQT",
+            pr_status="Approved (SVP)",
+            pr_sub_date=seed["req_date_str"],
+            requestor="qiong.chen",
+            purpose="Intra-group EQT split",
+            grand_total="10,000.00",
+            item_details="Dual EQT sub-account purchase",
+            qty="1.000",
+            unit_rate="10,000.00",
+            mca="Amount",
+            allocatn="6000.00",
+            wbs="R-BCAXX-R203-0004-EQT-A",
+            req_type="TES Equipment",
+        ),
+        _base_row(
+            allocatn="4000.00",
+            wbs="R-BCAXX-R203-0004-EQT-B",
+        ),
+    ]
+    service_same = UploadService(
+        UploadRepository(tmp_path / f"same-{uuid4().hex}.json"), db=db
+    )
+    same_res = service_same.process_upload(
+        filename="same_group.xlsx",
+        content=_xlsx_bytes(same_group_rows),
+        uploader_email=tl_eqt.email,
+        uploader_name=tl_eqt.full_name,
+        uploader_role="teamlead",
+        current_user=tl_eqt,
+    )
+    same_batch_id = same_res["persistence"]["db_batch_id"]
+
+    # EQT Team Lead sees this batch and its queue item; OOE Team Lead does not
+    eqt_batches = list_batches(db=db, current_user=tl_eqt)
+    assert any(b.batch_id == same_batch_id for b in eqt_batches)
+    ooe_batches = list_batches(db=db, current_user=tl_ooe)
+    assert all(b.batch_id != same_batch_id for b in ooe_batches)
+
+    eqt_detail = get_batch_detail(same_batch_id, db=db, current_user=tl_eqt)
+    same_q_id = eqt_detail.prs[0].lines[0].review_queue_id
+    q_item_tl = get_queue_item(same_q_id, db=db, current_user=tl_eqt)
+
+    # Dropdown options returned to EQT Team Lead only contain EQT Lab Group and EQT Labs
+    assert [g.lab_group_id for g in q_item_tl.available_lab_groups] == [
+        seed["group_eqt"].lab_group_id
+    ]
+    assert all(
+        lab.lab_group_id == seed["group_eqt"].lab_group_id
+        for lab in q_item_tl.available_labs
+    )
+
+    # EQT Team Lead cannot save an allocation pointing to OOE Lab Group (403 Forbidden)
+    with pytest.raises(HTTPException) as cross_assign_exc:
+        correct_queue_item(
+            same_q_id,
+            CorrectionRequest(
+                allocations=[
+                    AllocationCorrectionItem(
+                        wbs_code="R-BCAXX-R203-0004-EQT-A",
+                        amount_gst=Decimal("6000.00"),
+                        lab_group_id=seed["group_eqt"].lab_group_id,
+                        lab_id=seed["lab_eqt"].lab_id,
+                        category_id=seed["cat_equip"].category_id,
+                    ),
+                    AllocationCorrectionItem(
+                        wbs_code="R-BCAXX-R203-0004-EQT-B",
+                        amount_gst=Decimal("4000.00"),
+                        lab_group_id=seed["group_ooe"].lab_group_id,
+                        lab_id=seed["lab_ooe"].lab_id,
+                        category_id=seed["cat_services"].category_id,
+                    ),
+                ]
+            ),
+            db=db,
+            current_user=tl_eqt,
+        )
+    assert cross_assign_exc.value.status_code == 403
+
+    # EQT Team Lead CAN confirm allocations across labs within their own EQT Lab Group
+    correct_res = correct_queue_item(
+        same_q_id,
+        CorrectionRequest(
+            comment="Confirmed within EQT group",
+            allocations=[
+                AllocationCorrectionItem(
+                    wbs_code="R-BCAXX-R203-0004-EQT-A",
+                    amount_gst=Decimal("6000.00"),
+                    lab_group_id=seed["group_eqt"].lab_group_id,
+                    lab_id=seed["lab_eqt"].lab_id,
+                    category_id=seed["cat_equip"].category_id,
+                ),
+                AllocationCorrectionItem(
+                    wbs_code="R-BCAXX-R203-0004-EQT-B",
+                    amount_gst=Decimal("4000.00"),
+                    lab_group_id=seed["group_eqt"].lab_group_id,
+                    lab_id=seed["lab_eqt_2"].lab_id,
+                    category_id=seed["cat_equip"].category_id,
+                ),
+            ],
+        ),
+        db=db,
+        current_user=tl_eqt,
+    )
+    assert correct_res.success is True
+    assert correct_res.new_queue_status == "resolved"
 
 
 def test_exact_multi_wbs_workflow_review_commit_reupload_and_downstream_reconciliation(
@@ -441,7 +818,6 @@ def test_exact_multi_wbs_workflow_review_commit_reupload_and_downstream_reconcil
         current_user=admin_user,
     )
 
-    # Resolve any other open review items in the batch if present
     for other_q in (
         db.query(ReviewQueueItem)
         .join(StagingPRLine)
@@ -467,7 +843,6 @@ def test_exact_multi_wbs_workflow_review_commit_reupload_and_downstream_reconcil
     )
     assert commit_res.success is True
     assert commit_res.prs_created == 1
-    # 2 portions from the $81,000 line + 2 ordinary lines ($5,000 and $2,000) = 4 committed lines
     assert commit_res.lines_created == 4
 
     pr = (
@@ -497,7 +872,7 @@ def test_exact_multi_wbs_workflow_review_commit_reupload_and_downstream_reconcil
         if cl.lab_id == seed["lab_ooe"].lab_id
     )
     assert eqt_spend == Decimal("50000.00")
-    assert ooe_spend == Decimal("38000.00")  # $31,000 + $5,000 + $2,000
+    assert ooe_spend == Decimal("38000.00")
 
     # 6. Verify Dashboard, Alerts Drilldown, PR Records, and Chatbot reconcile
     dash_summary = get_spending_summary(
@@ -638,21 +1013,26 @@ def test_exact_multi_wbs_workflow_review_commit_reupload_and_downstream_reconcil
         .filter(PurchaseRequestLine.pr_id == pr.pr_id)
         .all()
     )
-    # Still 4 lines total (updated in place, no duplicate lines added)
     assert len(updated_lines) == 4
     assert sum(Decimal(str(ul.amount_gst)) for ul in updated_lines) == Decimal(
         "88000.00"
     )
-    assert sum(
-        Decimal(str(ul.amount_gst))
-        for ul in updated_lines
-        if ul.lab_id == seed["lab_eqt"].lab_id
-    ) == Decimal("45000.00")
-    assert sum(
-        Decimal(str(ul.amount_gst))
-        for ul in updated_lines
-        if ul.lab_id == seed["lab_ooe"].lab_id
-    ) == Decimal("43000.00")
+    assert (
+        sum(
+            Decimal(str(ul.amount_gst))
+            for ul in updated_lines
+            if ul.lab_id == seed["lab_eqt"].lab_id
+        )
+        == Decimal("45000.00")
+    )
+    assert (
+        sum(
+            Decimal(str(ul.amount_gst))
+            for ul in updated_lines
+            if ul.lab_id == seed["lab_ooe"].lab_id
+        )
+        == Decimal("43000.00")
+    )
 
     versions = (
         db.query(PRVersion)
@@ -672,7 +1052,6 @@ def test_missing_allocation_amounts_and_grand_total_mismatch_guards(
     store_path = tmp_path / f"store-missing-{uuid4().hex}.json"
     service = UploadService(UploadRepository(store_path), db=db)
 
-    # 1. Missing allocation amount on continuation row + PR grand total mismatch ($95,000 vs $81,000)
     rows = [
         _base_row(
             pr="PR-MISSING-ALLOC",
@@ -709,7 +1088,6 @@ def test_missing_allocation_amounts_and_grand_total_mismatch_guards(
     assert q_line.allocations_reconciled is False
     assert "missing" in q_line.review_reason.lower()
 
-    # Trying to resolve without supplying the missing allocation amount is rejected
     with pytest.raises(HTTPException) as missing_exc:
         correct_queue_item(
             q_line.review_queue_id,
@@ -724,7 +1102,6 @@ def test_missing_allocation_amounts_and_grand_total_mismatch_guards(
     assert missing_exc.value.status_code == 400
     assert "missing allocation amounts" in missing_exc.value.detail
 
-    # Supplying valid allocation amounts ($50,000 + $31,000 = $81,000) resolves the line...
     correct_queue_item(
         q_line.review_queue_id,
         CorrectionRequest(
@@ -749,7 +1126,6 @@ def test_missing_allocation_amounts_and_grand_total_mismatch_guards(
         current_user=admin_user,
     )
 
-    # ...but commit is still blocked because PR Grand Total ($95,000) != committed lines sum ($81,000)
     with pytest.raises(HTTPException) as grand_tot_exc:
         commit_batch(batch_id, BackgroundTasks(), db=db, current_user=admin_user)
     assert grand_tot_exc.value.status_code == 409
