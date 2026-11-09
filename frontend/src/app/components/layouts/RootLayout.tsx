@@ -72,7 +72,7 @@ const navigation: NavItem[] = [
           name: "Audit Log",
           path: "/audit",
           icon: FileSearch,
-          roles: ["admin","teamlead"] as UserRole[],
+          roles: ["admin"] as UserRole[],
         },
       ]
     : []),

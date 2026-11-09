@@ -731,19 +731,19 @@ class AuthService:
         self.repository.unassign_lab_from_user(self.db, user_id, lab_id)
         return {"message": f"Lab {lab_id} unassigned from user ID {user_id}"}
 
-    # ADD to AuthService in app/services/auth_service.py.
-    # (get_users_by_role already exists in your file, so only this one is new.)
 
+    
     def get_assignment_targets(self) -> Dict[str, Any]:
         """Lab Group / Lab list for user assignment across ALL groups.
-        Deliberately contains NO budget, spend or WBS data."""
+        Deliberately contains NO budget or spend data (the WBS code is only an identifier)."""
         from app.models.config import Lab, LabGroup
 
         groups = self.db.query(LabGroup).all()
         labs = self.db.query(Lab).all()
         return {
             "lab_groups": [
-                {"id": g.lab_group_id, "name": g.lab_group_name} for g in groups
+                {"id": g.lab_group_id, "name": g.lab_group_name, "wbs_code": g.wbs_code or ""}
+                for g in groups
             ],
             "labs": [
                 {

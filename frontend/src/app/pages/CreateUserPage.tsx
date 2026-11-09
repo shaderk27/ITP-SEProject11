@@ -21,7 +21,7 @@ interface Lab {
   id: number;
   code: string;
   name: string;
-  group: string;
+  group?: string;
 }
 
 interface FieldErrors {
@@ -75,15 +75,19 @@ export function CreateUserPage() {
       .then(setRoles)
       .catch(() => setRoles(ROLES));
 
-    fetch(`${API}/config/labgroups`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setLabGroups)
-      .catch(() => setLabGroups([]));
-
-    fetch(`${API}/config/labs`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setLabs)
-      .catch(() => setLabs([]));
+    // Assignment-specific list covering ALL Lab Groups and Labs (no budget data).
+    // /config/labs and /config/labgroups are scoped to a Team Lead's own group,
+    // which would stop them assigning users to labs elsewhere.
+    fetch(`${API}/auth/assignment-targets`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { lab_groups: [], labs: [] }))
+      .then((data) => {
+        setLabGroups(data.lab_groups ?? []);
+        setLabs(data.labs ?? []);
+      })
+      .catch(() => {
+        setLabGroups([]);
+        setLabs([]);
+      });
     fetch(`${API}/auth/me`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((me) => setCurrentRole(me?.role?.toLowerCase() ?? null))
