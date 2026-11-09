@@ -321,7 +321,7 @@ class AuthService:
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
         creator_admin_id: Optional[int] = None,
-            creator_role: Optional[str] = None,
+        creator_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new user account and process lab assignments."""
         normalized_email = email.strip().lower()
@@ -732,7 +732,7 @@ class AuthService:
         return {"message": f"Lab {lab_id} unassigned from user ID {user_id}"}
 
     # ADD to AuthService in app/services/auth_service.py.
-# (get_users_by_role already exists in your file, so only this one is new.)
+    # (get_users_by_role already exists in your file, so only this one is new.)
 
     def get_assignment_targets(self) -> Dict[str, Any]:
         """Lab Group / Lab list for user assignment across ALL groups.
