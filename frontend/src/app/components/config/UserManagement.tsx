@@ -36,7 +36,6 @@ interface LabItem {
 }
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 type Role = UserData["role"];
 
@@ -104,8 +103,18 @@ export function UserManagement({
       }),
       propLabs
         ? Promise.resolve(propLabs)
-        : fetch(`${API_BASE_URL}/api/config/labs`, { credentials: "include" })
-            .then((res) => res.json())
+        : // Assignment-specific list (ids/names only, no budget data) covering ALL
+          // Lab Groups. /api/config/labs is scoped to the Team Lead's own group, so
+          // it can't resolve names for labs a user is assigned to elsewhere.
+          fetch(`${API}/auth/assignment-targets`, { credentials: "include" })
+            .then((res) => (res.ok ? res.json() : { labs: [] }))
+            .then((data) =>
+              (data.labs ?? []).map((l: any) => ({
+                id: l.id,
+                name: l.name,
+                code: l.code,
+              })),
+            )
             .catch(() => []),
     ])
       .then(([userData, labsData]) => {

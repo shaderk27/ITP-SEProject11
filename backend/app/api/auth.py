@@ -206,9 +206,20 @@ async def get_all_users(
     service: AuthService = Depends(get_auth_service),
     _admin: dict = Depends(require_admin_or_teamlead),
 ):
-    # if role:
-    #     return service.get_users_by_role(role)
+    if role:
+        return service.get_users_by_role(role.strip().lower())
     return service.get_all_users()
+
+
+@router.get("/assignment-targets")
+async def get_assignment_targets(
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin_or_teamlead),
+):
+    """Lab Groups and Labs (id/name/group only, NO budget data) that an Admin
+    or Team Lead may use when assigning users, across ALL Lab Groups.
+    Budget/config endpoints stay scoped to the Team Lead's own Lab Group."""
+    return service.get_assignment_targets()
 
 
 @router.get("/assignments")
@@ -227,6 +238,7 @@ async def assign_lab_ic(
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.assign_lab_to_user(
         user_id=user_id,
         lab_id=payload.lab_id,
@@ -256,6 +268,7 @@ async def assign_team_lead(
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.assign_labgroup_to_user(user_id, payload.lab_group_id)
     log_audit_action(
         db=service.db,
@@ -299,7 +312,7 @@ async def admin_send_reset(
     user = _ensure_can_manage(service, admin, user_id)
     if user.role.role_name == "admin":
         raise HTTPException(
-            status_code=403, detail="Admin passwords cannot be reset by another admin."
+            status_code=403, detail="Admin passwords cannot be reset by another user."
         )
     service.forgot_password(user.email)
     log_audit_action(
@@ -343,6 +356,7 @@ async def unassign_lab_from_user(
     service: AuthService = Depends(get_auth_service),
     admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.unassign_lab_from_user(user_id, lab_id)
     log_audit_action(
         db=service.db,

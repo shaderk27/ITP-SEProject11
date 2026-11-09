@@ -35,6 +35,43 @@ router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
 
 # ==============================
+# AUTHORIZATION HELPERS
+# ==============================
+def _role_of(user: User) -> str:
+    return (user.role.role_name if user.role else "").lower().strip()
+
+
+def _require_admin(user: User) -> None:
+    if _role_of(user) != "admin":
+        raise HTTPException(status_code=403, detail="Admin access is required.")
+
+
+def _require_admin_or_teamlead(user: User) -> None:
+    if _role_of(user) not in ("admin", "teamlead"):
+        raise HTTPException(
+            status_code=403, detail="Admin or team lead access is required."
+        )
+
+
+def _ensure_group_scope(user: User, lab_group_id: int | None) -> None:
+    """Admin: unrestricted. Team lead: only their own Lab Group.
+    Everyone else (incl. Lab IC): denied."""
+    role = _role_of(user)
+    if role == "admin":
+        return
+    if (
+        role == "teamlead"
+        and lab_group_id is not None
+        and user.lab_group_id == lab_group_id
+    ):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="You can only manage budget configuration for your own Lab Group.",
+    )
+
+
+# ==============================
 # AUTOMATIC FY PERIOD GENERATOR
 # ==============================
 def get_or_create_current_period(db: Session) -> int:
@@ -107,6 +144,7 @@ def create_period(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_admin(current_user)
     year = payload.year
     if year < 2000 or year > 2100:
         raise HTTPException(
@@ -157,10 +195,10 @@ def get_lab_groups(
     budget_period_filter = [] if all_periods else [Budget.period_id == pid]
 
     query = db.query(LabGroup)
-    # if role_name == "teamlead":
-    #     if not current_user.lab_group_id:
-    #         return []
-    #     query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
+    if role_name == "teamlead":
+        if not current_user.lab_group_id:
+            return []
+        query = query.filter(LabGroup.lab_group_id == current_user.lab_group_id)
     if role_name == "labic":
         user_lab_ids = [a.lab_id for a in current_user.lab_assignments]
         if not user_lab_ids:
@@ -256,6 +294,7 @@ def create_lab_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_admin(current_user)  # a new group cannot belong to a team lead's scope
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
     existing_wbs = (
@@ -403,6 +442,7 @@ def update_lab_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _ensure_group_scope(current_user, group_id)
     db_group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not db_group:
         raise HTTPException(status_code=404)
@@ -596,6 +636,7 @@ def delete_lab_group(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_admin(current_user)
     group = db.query(LabGroup).filter(LabGroup.lab_group_id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Lab Group not found")
@@ -662,6 +703,7 @@ def create_category(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_admin(current_user)
     existing_cat = (
         db.query(SpendingCategory)
         .filter(func.lower(SpendingCategory.category_name) == cat_in.name.lower())
@@ -705,6 +747,7 @@ def update_category(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_admin(current_user)
     db_cat = (
         db.query(SpendingCategory)
         .filter(SpendingCategory.category_id == cat_id)
@@ -761,6 +804,7 @@ def delete_category(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_admin(current_user)
     cat = (
         db.query(SpendingCategory)
         .filter(SpendingCategory.category_id == cat_id)
@@ -798,7 +842,11 @@ def delete_category(
 # LABS API
 # ==============================
 @router.get("/labs/orphaned")
-def get_orphaned_labs(db: Session = Depends(get_db)):
+def get_orphaned_labs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_admin_or_teamlead(current_user)
     orphaned_labs = db.query(Lab).filter(Lab.lab_group_id.is_(None)).all()
     return [
         {"lab_id": lab.lab_id, "lab_name": lab.lab_name, "lab_code": lab.lab_code or ""}
@@ -929,6 +977,7 @@ def create_lab(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _ensure_group_scope(current_user, lab_in.lab_group_id)
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
     existing_lab = (
@@ -1049,6 +1098,11 @@ def update_lab(
     db_lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not db_lab:
         raise HTTPException(status_code=404)
+    # Must own the lab's current group (an unassigned lab may be adopted) AND the
+    # destination group, so a lab can't be moved into or out of another group.
+    if db_lab.lab_group_id is not None:
+        _ensure_group_scope(current_user, db_lab.lab_group_id)
+    _ensure_group_scope(current_user, lab_in.lab_group_id)
 
     pid = period_id if period_id is not None else get_or_create_current_period(db)
 
@@ -1266,6 +1320,10 @@ def delete_lab(
     lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
     if not lab:
         raise HTTPException(status_code=404, detail="Lab not found")
+    if lab.lab_group_id is None:
+        _require_admin(current_user)
+    else:
+        _ensure_group_scope(current_user, lab.lab_group_id)
 
     old_snapshot = {
         "code": lab.lab_code,

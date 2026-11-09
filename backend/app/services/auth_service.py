@@ -321,7 +321,7 @@ class AuthService:
         lab_ids: Optional[List[int]] = None,
         primary_lab_id: Optional[int] = None,
         creator_admin_id: Optional[int] = None,
-        creator_role: Optional[str] = None,
+            creator_role: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new user account and process lab assignments."""
         normalized_email = email.strip().lower()
@@ -730,3 +730,28 @@ class AuthService:
 
         self.repository.unassign_lab_from_user(self.db, user_id, lab_id)
         return {"message": f"Lab {lab_id} unassigned from user ID {user_id}"}
+
+    # ADD to AuthService in app/services/auth_service.py.
+# (get_users_by_role already exists in your file, so only this one is new.)
+
+    def get_assignment_targets(self) -> Dict[str, Any]:
+        """Lab Group / Lab list for user assignment across ALL groups.
+        Deliberately contains NO budget, spend or WBS data."""
+        from app.models.config import Lab, LabGroup
+
+        groups = self.db.query(LabGroup).all()
+        labs = self.db.query(Lab).all()
+        return {
+            "lab_groups": [
+                {"id": g.lab_group_id, "name": g.lab_group_name} for g in groups
+            ],
+            "labs": [
+                {
+                    "id": l.lab_id,
+                    "name": l.lab_name,
+                    "code": l.lab_code or "",
+                    "group_id": l.lab_group_id,
+                }
+                for l in labs
+            ],
+        }

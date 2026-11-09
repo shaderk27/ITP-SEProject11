@@ -255,8 +255,8 @@ export function AlertsPage() {
 
     const groupsToProcess = labGroups.filter((g) => {
       if (user?.role === "admin") return true;
-      //if (user?.role === "teamlead") return g.id === user?.labGroupId;
-      if (user?.role === "teamlead") return true;
+      // Team leads see alerts for their assigned Lab Group only.
+      if (user?.role === "teamlead") return g.id === user?.labGroupId;
       if (user?.role === "labic") {
         return labs.some(
           (l) => l.group_id === g.id && user.labIds.includes(l.id)
@@ -388,7 +388,8 @@ export function AlertsPage() {
               <option value="warning">Warning (50%)</option>
             </select>
 
-            {(user?.role === "admin" ||user?.role==="teamlead")&& (
+            {/* Only admins have more than one group to choose from. */}
+            {user?.role === "admin" && (
               <select
                 className="w-full sm:w-auto px-3 py-2 border border-border rounded-md text-sm bg-white outline-none"
                 value={selectedGroup}

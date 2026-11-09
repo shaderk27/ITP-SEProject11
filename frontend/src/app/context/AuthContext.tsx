@@ -34,7 +34,10 @@ export type Permission =
   | "hierarchy:edit"
   | "category:view"
   | "category:create"
-  | "category:edit";
+  | "category:edit"
+  // Assign users to Labs / Lab Groups across ALL Lab Groups. Deliberately separate
+  // from budget/alert scope, which stays limited to a Team Lead's own Lab Group.
+  | "assignment:manage";
 
 const rolePermissions: Record<UserRole, Permission[]> = {
   admin: [
@@ -51,6 +54,11 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "budget:view",
     "budget:edit",
     "user:create",
+    "assignment:manage",
+    // Admin-only: create/delete Lab Groups, fiscal periods and spending categories.
+    "hierarchy:create",
+    "category:create",
+    "category:edit",
   ],
   teamlead: [
     "dashboard:view",
@@ -66,6 +74,7 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     "budget:view",
     "budget:edit",
     "user:create",
+    "assignment:manage",
   ],
   labic: [
     "dashboard:view",
@@ -227,7 +236,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const canAccessLabGroup = (labGroupId: number) => {
     if (!user) return false;
-    if (user.role === "admin"|| user.role === "teamlead") return true;
+    // Budget / alert scope: admins see everything; team leads only their own group.
+    if (user.role === "admin") return true;
+    if (user.role === "teamlead") return user.labGroupId === labGroupId;
     return user.labGroupId === labGroupId;
   };
 
