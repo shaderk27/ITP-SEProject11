@@ -784,6 +784,7 @@ def commit_batch(
 
         existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
         status_updates: list[dict] = []
+        amount_updates: list[dict] = []
         regressions_skipped: list[dict] = []
 
         for line in lines:
@@ -823,6 +824,25 @@ def commit_batch(
 
                 existing_line.source_staging_line_id = line.staging_line_id
                 existing_line.pr_status = _raw_line_value(line, "pr_status") or None
+                # Procurement can revise a PR after it is saved, so the latest
+                # file's money replaces the old figures. Lab and category stay
+                # as reviewed.
+                if (
+                    line.amount_gst is not None
+                    and line.amount_gst != existing_line.amount_gst
+                ):
+                    amount_updates.append(
+                        {
+                            "line_no": line.source_line_no,
+                            "old_amount": str(existing_line.amount_gst),
+                            "new_amount": str(line.amount_gst),
+                        }
+                    )
+                    existing_line.amount_gst = line.amount_gst
+                if line.qty is not None:
+                    existing_line.qty = line.qty
+                if line.unit_rate is not None:
+                    existing_line.unit_rate = line.unit_rate
                 lines_updated += 1
                 if old_status != new_status:
                     status_updates.append(
@@ -853,6 +873,15 @@ def commit_batch(
             lines_created += 1
 
         db.flush()
+        # A blocked line keeps its old amount, so the file's total no longer
+        # matches. Rebuild the PR total from the saved lines instead.
+        if regressions_skipped:
+            pr.grand_total_sgd = (
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .filter(PurchaseRequestLine.pr_id == pr.pr_id)
+                .scalar()
+            )
+            db.flush()
         final_line_count = (
             db.query(func.count(PurchaseRequestLine.pr_line_id))
             .filter(PurchaseRequestLine.pr_id == pr.pr_id)
@@ -876,6 +905,8 @@ def commit_batch(
             if old_data is None:
                 old_data = {}
             old_data["status_updates"] = [u["old_status"] for u in status_updates]
+        if amount_updates:
+            new_data["amount_updates"] = amount_updates
         if regressions_skipped:
             new_data["status_regressions_skipped"] = regressions_skipped
             status_regressions_skipped += len(regressions_skipped)
