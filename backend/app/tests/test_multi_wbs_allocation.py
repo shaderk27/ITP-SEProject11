@@ -467,9 +467,9 @@ def test_repeated_item_allocation_rows_and_percentage_splits_not_double_counted(
         "59.94",
         "59.94",
     ]
-    assert sum(
-        Decimal(a["amount_gst"]) for a in item_2702.wbs_allocations
-    ) == Decimal("180.00")
+    assert sum(Decimal(a["amount_gst"]) for a in item_2702.wbs_allocations) == Decimal(
+        "180.00"
+    )
 
     cable_items = [it for it in items if it.pr_number == "PR2600009999"]
     assert len(cable_items) == 2
@@ -1017,22 +1017,16 @@ def test_exact_multi_wbs_workflow_review_commit_reupload_and_downstream_reconcil
     assert sum(Decimal(str(ul.amount_gst)) for ul in updated_lines) == Decimal(
         "88000.00"
     )
-    assert (
-        sum(
-            Decimal(str(ul.amount_gst))
-            for ul in updated_lines
-            if ul.lab_id == seed["lab_eqt"].lab_id
-        )
-        == Decimal("45000.00")
-    )
-    assert (
-        sum(
-            Decimal(str(ul.amount_gst))
-            for ul in updated_lines
-            if ul.lab_id == seed["lab_ooe"].lab_id
-        )
-        == Decimal("43000.00")
-    )
+    assert sum(
+        Decimal(str(ul.amount_gst))
+        for ul in updated_lines
+        if ul.lab_id == seed["lab_eqt"].lab_id
+    ) == Decimal("45000.00")
+    assert sum(
+        Decimal(str(ul.amount_gst))
+        for ul in updated_lines
+        if ul.lab_id == seed["lab_ooe"].lab_id
+    ) == Decimal("43000.00")
 
     versions = (
         db.query(PRVersion)
