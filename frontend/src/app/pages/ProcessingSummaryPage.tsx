@@ -105,18 +105,14 @@ export function ProcessingSummaryPage() {
   ]);
   const reviewRows = result
     ? [...result.records.inserted, ...result.records.updated]
-        .filter((record) => {
-          const lab = record.line.lab || "";
-          const labGroup = record.line.lab_group || "";
-          return lab === "Unassigned Lab" || labGroup === "Pending Lab Group" || record.line.category === "General";
-        })
+        .filter((record) => record.line.review_issue)
         .map((record) => [
           record.line.pr_number,
           record.line.pr_status || "-",
           `Row ${record.line.row_number}`,
           record.line.item_details,
           record.line.wbs,
-          record.line.classification_reason ?? "Manual review required.",
+          record.line.review_issue ?? "",
           record.line.amount_gst,
         ])
     : sampleLines.review.map((line) => [line.pr, "-", line.line, line.item, line.wbs, line.issue, line.amount]);
@@ -146,7 +142,7 @@ export function ProcessingSummaryPage() {
         <SystemNotification
           type="success"
           title="File Processing Complete"
-          message="Uploaded rows were parsed as PR line items. Lines with unresolved Lab Group, Lab, or Category values are held for review."
+          message="Uploaded rows were parsed as PR line items. Lines that need a lab group or lab chosen, or that list more than one category, are held for review."
         />
 
         {statusRegressions > 0 && (

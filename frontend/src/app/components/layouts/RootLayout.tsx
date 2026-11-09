@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
-import type { UserRole } from "../../context/AuthContext";
+import type { User, UserRole } from "../../context/AuthContext";
 import {
   useSessionTimeout,
   WARNING_BEFORE_EXPIRY_MS,
@@ -103,13 +103,104 @@ const navigation: NavItem[] = [
   { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
 ];
 
-const getThresholdLevel = (util: number): number => {
+export const getThresholdLevel = (util: number): number => {
   if (util >= 100) return 100;
   if (util >= 95) return 95;
   if (util >= 80) return 80;
   if (util >= 50) return 50;
   return 0;
 };
+
+/**
+ * Builds stable, spend-independent alert identity keys scoped to the user's role:
+ *   - `lab:{lab_id}:threshold:{threshold_level}`
+ *   - `lab-group:{lab_group_id}:threshold:{threshold_level}`
+ */
+export function buildAlertNotificationKeys(
+  labGroups: any[],
+  labs: any[],
+  user: Pick<User, "role" | "labGroupId" | "labIds">,
+): string[] {
+  const currentKeys: string[] = [];
+
+  const groupsToProcess = labGroups.filter((g: any) => {
+    if (user.role === "admin") return true;
+    if (user.role === "teamlead") return g.id === user.labGroupId;
+    if (user.role === "labic") {
+      return labs.some(
+        (l: any) => l.group_id === g.id && user.labIds.includes(l.id),
+      );
+    }
+    return false;
+  });
+
+  groupsToProcess.forEach((group: any) => {
+    const isLabIC = user.role === "labic";
+    const groupBudget = Number(group.budget || 0);
+    const groupSpent = Number(group.spent || 0);
+    const groupUtil =
+      !isLabIC && groupBudget > 0 ? (groupSpent / groupBudget) * 100 : 0;
+    const groupThreshold = getThresholdLevel(groupUtil);
+
+    let groupLabs = labs.filter(
+      (l: any) =>
+        l.group_id === group.id &&
+        (Number(l.budget || 0) > 0 || Number(l.spent || 0) > 0),
+    );
+    if (isLabIC) {
+      groupLabs = groupLabs.filter((l: any) => user.labIds.includes(l.id));
+    }
+
+    let anyLabThresholdAdded = false;
+    groupLabs.forEach((lab: any) => {
+      const budget = Number(lab.budget || 0);
+      const spent = Number(lab.spent || 0);
+      const util =
+        budget > 0 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
+      const labThreshold = getThresholdLevel(util);
+
+      if (labThreshold > 0) {
+        anyLabThresholdAdded = true;
+        currentKeys.push(`lab:${lab.id}:threshold:${labThreshold}`);
+      }
+    });
+
+    if (!isLabIC && groupThreshold > 0 && !anyLabThresholdAdded) {
+      currentKeys.push(`lab-group:${group.id}:threshold:${groupThreshold}`);
+    }
+  });
+
+  return currentKeys;
+}
+
+/**
+ * Reconciles active alert keys against stored seen keys:
+ *  - Prunes seen keys for labs/groups that dropped below their threshold or
+ *    escalated to a different threshold so future crossings count as new.
+ *  - Returns { unreadCount, nextSeenKeys }.
+ */
+export function computeUnreadAlertState(
+  currentKeys: string[],
+  storedSeen: string[],
+  isOnAlertsPage: boolean,
+): { unreadCount: number; nextSeenKeys: string[] } {
+  if (isOnAlertsPage) {
+    return {
+      unreadCount: 0,
+      nextSeenKeys: [...currentKeys],
+    };
+  }
+
+  const activeSet = new Set(currentKeys);
+  const validSeen = storedSeen.filter((k) => activeSet.has(k));
+  const seenSet = new Set(validSeen);
+  const unreadCount = currentKeys.filter((k) => !seenSet.has(k)).length;
+
+  return {
+    unreadCount,
+    nextSeenKeys: validSeen,
+  };
+}
 
 export function RootLayout() {
   const location = useLocation();
@@ -168,60 +259,7 @@ export function RootLayout() {
           return;
         }
 
-        const currentKeys: string[] = [];
-
-        const groupsToProcess = labGroups.filter((g: any) => {
-          if (user.role === "admin") return true;
-          if (user.role === "teamlead") return g.id === user.labGroupId;
-          if (user.role === "labic") {
-            return labs.some(
-              (l: any) => l.group_id === g.id && user.labIds.includes(l.id),
-            );
-          }
-          return false;
-        });
-
-        groupsToProcess.forEach((group: any) => {
-          const isLabIC = user.role === "labic";
-          const groupBudget = Number(group.budget || 0);
-          const groupSpent = Number(group.spent || 0);
-          const groupUtil =
-            !isLabIC && groupBudget > 0 ? (groupSpent / groupBudget) * 100 : 0;
-          const groupThreshold = getThresholdLevel(groupUtil);
-
-          let groupLabs = labs.filter(
-            (l: any) =>
-              l.group_id === group.id &&
-              (Number(l.budget || 0) > 0 || Number(l.spent || 0) > 0),
-          );
-          if (isLabIC) {
-            groupLabs = groupLabs.filter((l: any) =>
-              user.labIds.includes(l.id),
-            );
-          }
-
-          let anyLabAdded = false;
-          groupLabs.forEach((lab: any) => {
-            const budget = Number(lab.budget || 0);
-            const spent = Number(lab.spent || 0);
-            const util =
-              budget > 0 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
-            const labThreshold = getThresholdLevel(util);
-
-            if (labThreshold > 0 || groupThreshold > 0) {
-              anyLabAdded = true;
-              currentKeys.push(
-                `lab:${lab.id}:t${labThreshold}:gt${groupThreshold}:s${spent.toFixed(2)}`,
-              );
-            }
-          });
-
-          if (!anyLabAdded && groupThreshold > 0) {
-            currentKeys.push(
-              `group:${group.id}:gt${groupThreshold}:s${groupSpent.toFixed(2)}`,
-            );
-          }
-        });
+        const currentKeys = buildAlertNotificationKeys(labGroups, labs, user);
 
         let storedSeen: string[] = [];
         try {
@@ -234,24 +272,16 @@ export function RootLayout() {
           storedSeen = [];
         }
 
-        if (location.pathname.startsWith("/alerts")) {
-          localStorage.setItem(seenStorageKey, JSON.stringify(currentKeys));
-          setActiveAlertKeys(currentKeys);
-          setUnreadAlertCount(0);
-          return;
-        }
+        const isOnAlertsPage = location.pathname.startsWith("/alerts");
+        const { unreadCount, nextSeenKeys } = computeUnreadAlertState(
+          currentKeys,
+          storedSeen,
+          isOnAlertsPage,
+        );
 
-        // Prune stale keys that are no longer active so future re-crossings count as new
-        const activeSet = new Set(currentKeys);
-        const validSeen = storedSeen.filter((k) => activeSet.has(k));
-        if (validSeen.length !== storedSeen.length) {
-          localStorage.setItem(seenStorageKey, JSON.stringify(validSeen));
-        }
-
-        const seenSet = new Set(validSeen);
-        const newCount = currentKeys.filter((k) => !seenSet.has(k)).length;
+        localStorage.setItem(seenStorageKey, JSON.stringify(nextSeenKeys));
         setActiveAlertKeys(currentKeys);
-        setUnreadAlertCount(newCount);
+        setUnreadAlertCount(unreadCount);
       } catch (err) {
         console.error("Failed to check alert notifications:", err);
       }

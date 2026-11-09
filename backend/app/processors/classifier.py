@@ -42,21 +42,26 @@ def classify_line_item(
 
     matched_group = _match_lab_group_by_wbs(lab_groups, wbs)
     scoped_labs = _filter_labs_by_group(labs, matched_group)
+    # A General lab is the fallback, not something a row can name. Row text can
+    # contain the word "General" from placeholder fields, so never match on it.
+    specific_labs = [
+        lab for lab in scoped_labs if not getattr(lab, "is_general", False)
+    ]
 
     lab_match = None
     lab_reason = ""
 
     if not lab_match:
         lab_match = _match_lab_by_text(
-            scoped_labs, purpose_lower
-        ) or _match_lab_by_venue_tags(scoped_labs, purpose_lower)
+            specific_labs, purpose_lower
+        ) or _match_lab_by_venue_tags(specific_labs, purpose_lower)
         if lab_match:
             lab_reason = f"Purpose field matched lab '{lab_match.lab_name}'."
 
     if not lab_match:
         lab_match = _match_lab_by_text(
-            scoped_labs, vendor_lower
-        ) or _match_lab_by_venue_tags(scoped_labs, vendor_lower)
+            specific_labs, vendor_lower
+        ) or _match_lab_by_venue_tags(specific_labs, vendor_lower)
         if lab_match:
             lab_reason = f"Vendor instructions matched lab '{lab_match.lab_name}'."
 
@@ -71,8 +76,8 @@ def classify_line_item(
 
     if not lab_match:
         lab_match = _match_lab_by_text(
-            scoped_labs, text_lower
-        ) or _match_lab_by_venue_tags(scoped_labs, text_lower)
+            specific_labs, text_lower
+        ) or _match_lab_by_venue_tags(specific_labs, text_lower)
         if lab_match:
             lab_reason = f"Row context explicitly mentioned lab '{lab_match.lab_name}'."
 
@@ -84,6 +89,7 @@ def classify_line_item(
 
     category_match = None
     cat_reason = ""
+    category_conflicts: list[str] = []
     explicit_cat = (req_type or pr_category or "").strip()
 
     if explicit_cat:
@@ -92,9 +98,10 @@ def classify_line_item(
             category_match = matched_categories[0]
             cat_reason = f"Matched category '{category_match.category_name}'."
         elif len(matched_categories) > 1:
-            cat_names = ", ".join(
-                [category.category_name for category in matched_categories]
-            )
+            category_conflicts = [
+                category.category_name for category in matched_categories
+            ]
+            cat_names = ", ".join(category_conflicts)
             cat_reason = (
                 f"Conflict detected (matched: {cat_names}). Flagged for manual review."
             )
@@ -112,6 +119,7 @@ def classify_line_item(
         "lab_id": getattr(lab_match, "lab_id", None),
         "lab_group_id": group_id,
         "category_id": getattr(category_match, "category_id", None),
+        "category_conflicts": category_conflicts,
         "reason": combined_reason,
     }
 

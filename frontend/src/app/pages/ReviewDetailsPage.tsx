@@ -95,11 +95,32 @@ export function ReviewDetailsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queueId, user?.email]);
 
+  // Restrict Lab Group and Lab selectors to Team Lead's permitted budget scope
+  const permittedLabGroups = useMemo(() => {
+    if (!item) return [];
+    if (user?.role === "teamlead" && user.labGroupId !== null) {
+      return item.available_lab_groups.filter(
+        (g) => g.lab_group_id === user.labGroupId,
+      );
+    }
+    return item.available_lab_groups;
+  }, [item, user]);
+
+  const permittedLabs = useMemo(() => {
+    if (!item) return [];
+    if (user?.role === "teamlead" && user.labGroupId !== null) {
+      return item.available_labs.filter(
+        (l) => l.lab_group_id === user.labGroupId,
+      );
+    }
+    return item.available_labs;
+  }, [item, user]);
+
   // Labs filtered by selected lab group — cascading dropdown for single-WBS mode.
   const labsForGroup = useMemo(() => {
     if (!item || labGroupId === null) return [];
-    return item.available_labs.filter((l) => l.lab_group_id === labGroupId);
-  }, [item, labGroupId]);
+    return permittedLabs.filter((l) => l.lab_group_id === labGroupId);
+  }, [item, permittedLabs, labGroupId]);
 
   // If user picks a new Lab Group whose labs don't include the current Lab, reset Lab.
   useEffect(() => {
@@ -161,7 +182,7 @@ export function ReviewDetailsPage() {
           patch.lab_group_id !== undefined &&
           patch.lab_group_id !== row.lab_group_id
         ) {
-          const groupLabs = item.available_labs.filter(
+          const groupLabs = permittedLabs.filter(
             (l) => l.lab_group_id === patch.lab_group_id,
           );
           const stillValid = groupLabs.some((l) => l.lab_id === updated.lab_id);
@@ -180,9 +201,9 @@ export function ReviewDetailsPage() {
     const defaultGroupId =
       allocRows[0]?.lab_group_id ??
       item.suggested_lab_group_id ??
-      item.available_lab_groups[0]?.lab_group_id ??
+      permittedLabGroups[0]?.lab_group_id ??
       null;
-    const groupLabs = item.available_labs.filter(
+    const groupLabs = permittedLabs.filter(
       (l) => l.lab_group_id === defaultGroupId,
     );
     const defaultLabId =
@@ -386,9 +407,7 @@ export function ReviewDetailsPage() {
                     >
                       Lab: {item.current_lab}
                     </StatusBadge>
-                    <StatusBadge
-                      status={item.is_category_general ? "general" : "info"}
-                    >
+                    <StatusBadge status="info">
                       Category: {item.current_category}
                     </StatusBadge>
                   </div>
@@ -452,7 +471,7 @@ export function ReviewDetailsPage() {
                     {allocRows.map((row, idx) => {
                       const rowLabs =
                         row.lab_group_id !== null
-                          ? item.available_labs.filter(
+                          ? permittedLabs.filter(
                               (l) => l.lab_group_id === row.lab_group_id,
                             )
                           : [];
@@ -534,7 +553,7 @@ export function ReviewDetailsPage() {
                                 <option value="" disabled>
                                   Pick a lab group
                                 </option>
-                                {item.available_lab_groups.map((g) => (
+                                {permittedLabGroups.map((g) => (
                                   <option
                                     key={g.lab_group_id}
                                     value={g.lab_group_id}
@@ -634,7 +653,7 @@ export function ReviewDetailsPage() {
                         <SelectValue placeholder="Pick a lab group" />
                       </SelectTrigger>
                       <SelectContent>
-                        {item.available_lab_groups.map((g) => (
+                        {permittedLabGroups.map((g) => (
                           <SelectItem
                             key={g.lab_group_id}
                             value={String(g.lab_group_id)}

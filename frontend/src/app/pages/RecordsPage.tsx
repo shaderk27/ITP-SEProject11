@@ -9,7 +9,7 @@ import { useAuth } from "../context/AuthContext";
 import { ExportConfirmDialog } from "../components/shared/ExportConfirmDialog";
 import { toast } from "sonner";
 import { exportCommittedPRs, listCommittedPRs } from "../services/recordsService";
-import { listPeriods, type Period } from "../services/dashboardService";
+import { findCurrentPeriod, listPeriods, type Period } from "../services/dashboardService";
 import { format } from "date-fns";
 import type { CommittedPR } from "../types/records";
 
@@ -77,12 +77,13 @@ export function RecordsPage() {
     }
   };
 
-  // Load fiscal years once; default to the newest (current FY).
+  // Load fiscal years once; default to the one containing today.
   useEffect(() => {
     listPeriods()
       .then((data) => {
         setPeriods(data);
-        if (data.length) setSelectedFYPeriodId(data[0].id);
+        const current = findCurrentPeriod(data) ?? data[0];
+        if (current) setSelectedFYPeriodId(current.id);
       })
       .catch(() => {});
   }, []);

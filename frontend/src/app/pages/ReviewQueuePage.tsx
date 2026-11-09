@@ -167,7 +167,7 @@ export function ReviewQueuePage() {
               { value: "all", label: "All Reasons" },
               { value: "lab-group", label: "Lab Group General" },
               { value: "lab", label: "Lab General" },
-              { value: "category", label: "Category General" },
+              { value: "category", label: "More than one category" },
               { value: "multi-wbs", label: "Multi-WBS Allocation" },
             ],
           },
@@ -470,9 +470,7 @@ function LineRow({ line }: { line: ReviewQueueLine }) {
             <StatusBadge status={line.is_lab_general ? "general" : "info"}>
               {line.current_lab}
             </StatusBadge>
-            <StatusBadge status={line.is_category_general ? "general" : "info"}>
-              {line.current_category}
-            </StatusBadge>
+            <StatusBadge status="info">{line.current_category}</StatusBadge>
           </div>
         </td>
         <td className="p-3 text-xs text-muted-foreground max-w-sm">
@@ -541,11 +539,7 @@ function LineRow({ line }: { line: ReviewQueueLine }) {
                         >
                           {alloc.current_lab}
                         </StatusBadge>
-                        <StatusBadge
-                          status={
-                            alloc.is_category_general ? "general" : "info"
-                          }
-                        >
+                        <StatusBadge status="info">
                           {alloc.current_category}
                         </StatusBadge>
                       </div>
