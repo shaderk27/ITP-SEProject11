@@ -749,11 +749,11 @@ class AuthService:
             ],
             "labs": [
                 {
-                    "id": l.lab_id,
-                    "name": l.lab_name,
-                    "code": l.lab_code or "",
-                    "group_id": l.lab_group_id,
+                    "id": lab.lab_id,
+                    "name": lab.lab_name,
+                    "code": lab.lab_code or "",
+                    "group_id": lab.lab_group_id,
                 }
-                for l in labs
+                for lab in labs
             ],
         }
