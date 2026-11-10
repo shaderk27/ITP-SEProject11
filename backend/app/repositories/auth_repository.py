@@ -397,8 +397,3 @@ class AuthRepository:
         if commit:
             db.commit()
             
-    def get_lab_group_by_id(self, db, lab_group_id, for_update: bool = False):
-        query = db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id)
-        if for_update:
-            query = query.with_for_update(of=LabGroup)
-        return query.first()
