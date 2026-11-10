@@ -272,14 +272,20 @@ class AuthRepository:
         return db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
 
     def get_user_by_role_and_lab_group(
-        self, db: Session, role_id: int, lab_group_id: int
+        self,
+        db: Session,
+        role_id: int,
+        lab_group_id: int,
+        exclude_user_id: Optional[int] = None,
     ) -> Optional[User]:
-        return (
+        query = (
             db.query(User)
             .filter(User.role_id == role_id, User.lab_group_id == lab_group_id)
             .filter(User.is_active.is_(True))
-            .first()
         )
+        if exclude_user_id is not None:
+            query = query.filter(User.user_id != exclude_user_id)
+        return query.first()
 
     def get_assignments(self, db: Session) -> list[dict]:
         """Return current lab group and lab IC assignments for admin UIs."""

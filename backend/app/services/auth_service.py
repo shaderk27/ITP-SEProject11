@@ -497,6 +497,14 @@ class AuthService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
 
+        # 1b. Only Team Leads can be assigned to a lab group
+        role_name = (user.role.role_name if user.role else "").lower()
+        if role_name != "teamlead":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only Team Lead users can be assigned to a lab group.",
+            )
+
         # 2. (Optional) Verify lab group exists if repository method available
         if hasattr(self.repository, "get_lab_group_by_id"):
             lab_group = self.repository.get_lab_group_by_id(self.db, lab_group_id)
@@ -505,6 +513,19 @@ class AuthService:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Lab group not found",
                 )
+
+        # 2b. A lab group can have only one active Team Lead
+        current_lead = self.repository.get_user_by_role_and_lab_group(
+            self.db, user.role_id, lab_group_id, exclude_user_id=user_id
+        )
+        if current_lead:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This lab group already has a Team Lead assigned "
+                    f"to {current_lead.full_name}."
+                ),
+            )
 
         # 3. Update lab group assignment in repository
         updated = self.repository.assign_labgroup_to_user(
