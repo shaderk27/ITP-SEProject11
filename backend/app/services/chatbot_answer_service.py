@@ -40,9 +40,9 @@ from app.schemas.chatbot_schema import (
 )
 from app.services import embedding_client, knowledge_service, llm_client
 from app.services.chatbot_service import (
-    _role_name,
     _purchase_status_prefix,
     _resolve_bounds,
+    _role_name,
     build_chatbot_context,
 )
 from app.services.embedding_client import EmbeddingUnavailableError
@@ -728,7 +728,7 @@ def _lab_group_summary(context: ChatbotContextResponse) -> list[dict]:
     }
     summary = _grouped(context.budget_context, key=lambda r: r.lab_group_name)
     for row in summary:
-        envelope = envelopes.get(row["name"], Decimal("0"))
+        envelope = envelopes.get(row["name"], Decimal(0))
         if envelope > 0:
             row["envelope_budget"] = _round(envelope)
     return summary
@@ -756,9 +756,9 @@ def _grouped(rows: list[ChatbotBudgetContext], key) -> list[dict]:
 
 
 def _totals(rows: list[ChatbotBudgetContext]) -> dict:
-    budget = sum((_money(r.budget_sgd) for r in rows), Decimal("0"))
-    spend = sum((_money(r.approved_spend_sgd) for r in rows), Decimal("0"))
-    pending = sum((_money(r.pending_spend_sgd) for r in rows), Decimal("0"))
+    budget = sum((_money(r.budget_sgd) for r in rows), Decimal(0))
+    spend = sum((_money(r.approved_spend_sgd) for r in rows), Decimal(0))
+    pending = sum((_money(r.pending_spend_sgd) for r in rows), Decimal(0))
     projected = spend + pending
     return {
         "budget": _round(budget),
@@ -1007,7 +1007,7 @@ def _money(value: str) -> Decimal:
     try:
         return Decimal(value)
     except ArithmeticError:
-        return Decimal("0")
+        return Decimal(0)
 
 
 def _round(value: Decimal) -> float:

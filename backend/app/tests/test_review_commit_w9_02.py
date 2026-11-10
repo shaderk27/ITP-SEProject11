@@ -31,7 +31,6 @@ from app.models.staging import (
 from app.models.upload import PRLineItem, UploadMetadata
 from app.repositories.persistence_repository import persist_upload_to_db
 
-
 # ─── Commit: duplicate / versioning / history ────────────────────────────
 
 
@@ -295,7 +294,7 @@ def test_upload_writes_audit_log(db, admin_user, seed_refs):
                 po_status="",
                 grand_total_sgd=Decimal("10.00"),
                 item_details="one item",
-                quantity=Decimal("1"),
+                quantity=Decimal(1),
                 unit_rate=Decimal("10.00"),
                 wbs="WBS-TEST",
                 instruction_to_vendor="",

@@ -29,11 +29,12 @@ adds no new packages.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.formatting.rule import DataBarRule

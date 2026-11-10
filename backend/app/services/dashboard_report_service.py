@@ -18,11 +18,12 @@ Uses only openpyxl, already a dependency.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
-from typing import Any, Sequence
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference

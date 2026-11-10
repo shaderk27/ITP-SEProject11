@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
-from typing import Optional, List
-from sqlalchemy import BigInteger, Boolean, String, Text, DateTime, ForeignKey
+from datetime import UTC, datetime
+from typing import Optional
+
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.models.config import Lab, LabGroup, LabIcAssignment  # noqa: F401 (registers mapper)
+from app.models.config import Lab, LabGroup, LabIcAssignment
 
 
 class Role(Base):
@@ -17,11 +18,11 @@ class Role(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationship back to users
-    users: Mapped[List["User"]] = relationship("User", back_populates="role")
+    users: Mapped[list["User"]] = relationship("User", back_populates="role")
 
     def __repr__(self) -> str:
         return f"<Role(role_name={self.role_name!r})>"
@@ -38,25 +39,25 @@ class User(Base):
     )
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    staff_id: Mapped[Optional[str]] = mapped_column(
+    staff_id: Mapped[str | None] = mapped_column(
         String(50), nullable=True, unique=True
     )
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
     )
-    lab_group_id: Mapped[Optional[int]] = mapped_column(
+    lab_group_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("lab_groups.lab_group_id"), nullable=True
     )
-    reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
+    reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         "PasswordResetToken", back_populates="user", cascade="all, delete-orphan"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -67,7 +68,7 @@ class User(Base):
     # Lab IC links live in lab_ic_assignments (many-to-many): a user can be IC of
     # several labs, and a lab can have several ICs (at most one primary).
     # Primary first, so lab_ids[0] is the IC's primary lab when they have one.
-    lab_assignments: Mapped[List["LabIcAssignment"]] = relationship(
+    lab_assignments: Mapped[list["LabIcAssignment"]] = relationship(
         "LabIcAssignment",
         back_populates="user",
         foreign_keys="LabIcAssignment.user_id",
@@ -76,7 +77,7 @@ class User(Base):
     )
 
     @property
-    def lab_ids(self) -> List[int]:
+    def lab_ids(self) -> list[int]:
         """Read-only ids of every lab this user is Lab IC of. Use for scope checks.
 
         Not usable in queries: join LabIcAssignment on user_id instead.
@@ -84,7 +85,7 @@ class User(Base):
         return [a.lab_id for a in self.lab_assignments]
 
     @property
-    def labs(self) -> List["Lab"]:
+    def labs(self) -> list["Lab"]:
         """Read-only labs this user is Lab IC of."""
         return [a.lab for a in self.lab_assignments]
 
@@ -110,7 +111,7 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
     # Relationship back to user

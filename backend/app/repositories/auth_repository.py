@@ -1,14 +1,16 @@
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Sequence
-from sqlalchemy import select, delete, update
 import json
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, joinedload
+
+from app.models.auth import PasswordResetToken, Role, User
 from app.models.config import Lab, LabGroup, LabIcAssignment
-from app.models.auth import User, Role, PasswordResetToken
 
 
 class AuthRepository:
-    def get_user_by_email(self, db: Session, email: str) -> Optional[User]:
+    def get_user_by_email(self, db: Session, email: str) -> User | None:
         return (
             db.query(User)
             .options(
@@ -20,7 +22,7 @@ class AuthRepository:
             .first()
         )
 
-    def get_user_by_id(self, db: Session, user_id: int) -> Optional[User]:
+    def get_user_by_id(self, db: Session, user_id: int) -> User | None:
         return (
             db.execute(
                 select(User)
@@ -42,11 +44,11 @@ class AuthRepository:
         full_name: str,
         email: str,
         password_hash: str,
-        staff_id: Optional[str] = None,
-        lab_group_id: Optional[int] = None,
-        lab_ids: Optional[List[int]] = None,
-        primary_lab_id: Optional[int] = None,
-        creator_admin_id: Optional[int] = None,
+        staff_id: str | None = None,
+        lab_group_id: int | None = None,
+        lab_ids: list[int] | None = None,
+        primary_lab_id: int | None = None,
+        creator_admin_id: int | None = None,
         commit: bool = True,
     ) -> User:
         """Create and persist a new user in the system with lab assignments.
@@ -93,8 +95,8 @@ class AuthRepository:
         db: Session,
         user_id: int,
         is_active: bool,
-        acting_admin_id: Optional[int] = None,
-    ) -> Optional[User]:
+        acting_admin_id: int | None = None,
+    ) -> User | None:
         """Activate or deactivate a user and log the action to audit_logs."""
         user = self.get_user_by_id(db, user_id)
         if not user or user.is_active == is_active:
@@ -133,8 +135,8 @@ class AuthRepository:
         db: Session,
         user_id: int,
         lab_id: int,
-        is_primary: Optional[bool] = None,
-        assigned_by: Optional[int] = None,
+        is_primary: bool | None = None,
+        assigned_by: int | None = None,
         commit: bool = True,
     ) -> None:
         """Assign a user to a lab via lab_ic_assignments.
@@ -195,7 +197,7 @@ class AuthRepository:
 
     def assign_labgroup_to_user(
         self, db: Session, user_id: int, lab_group_id: int, commit: bool = True
-    ) -> Optional[User]:
+    ) -> User | None:
         """Update the lab_group_id column on the User model."""
         stmt = (
             update(User)
@@ -222,7 +224,7 @@ class AuthRepository:
 
     def update_password_hash(
         self, db: Session, user_id: int, new_password_hash: str
-    ) -> Optional[User]:
+    ) -> User | None:
         user = self.get_user_by_id(db, user_id)
         if user:
             user.password_hash = new_password_hash
@@ -230,7 +232,7 @@ class AuthRepository:
             db.refresh(user)
         return user
 
-    def get_role_by_id(self, db: Session, role_id: int) -> Optional[Role]:
+    def get_role_by_id(self, db: Session, role_id: int) -> Role | None:
         return db.query(Role).filter(Role.role_id == role_id).first()
 
     def get_all_roles(self, db: Session) -> Sequence[Role]:
@@ -248,7 +250,7 @@ class AuthRepository:
             .all()
         )
 
-    def get_users_by_role(self, db: Session, role_name: str) -> List[User]:
+    def get_users_by_role(self, db: Session, role_name: str) -> list[User]:
         """Fetch all users assigned to a given role name."""
         stmt = (
             select(User)
@@ -259,7 +261,7 @@ class AuthRepository:
 
     def get_lab_by_id(
         self, db: Session, lab_id: int, for_update: bool = False
-    ) -> Optional[Lab]:
+    ) -> Lab | None:
         """Fetch a lab. With for_update=True the lab row is locked until the
         transaction ends, so concurrent primary-IC decisions for it are serialised.
         """
@@ -268,12 +270,12 @@ class AuthRepository:
             query = query.with_for_update(of=Lab)
         return query.first()
 
-    def get_lab_group_by_id(self, db: Session, lab_group_id: int) -> Optional[LabGroup]:
+    def get_lab_group_by_id(self, db: Session, lab_group_id: int) -> LabGroup | None:
         return db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
 
     def get_user_by_role_and_lab_group(
         self, db: Session, role_id: int, lab_group_id: int
-    ) -> Optional[User]:
+    ) -> User | None:
         return (
             db.query(User)
             .filter(User.role_id == role_id, User.lab_group_id == lab_group_id)
@@ -328,7 +330,7 @@ class AuthRepository:
         token = PasswordResetToken(
             user_id=user_id,
             temp_password=hashed_temp_password,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
         )
         db.add(token)
         db.commit()
@@ -354,15 +356,15 @@ class AuthRepository:
 
     def get_active_reset_token_by_user(
         self, db: Session, user_id: int
-    ) -> Optional[PasswordResetToken]:
+    ) -> PasswordResetToken | None:
         """Fetch the latest active (non-expired and non-used) reset token for a user."""
         stmt = (
             select(PasswordResetToken)
             .where(
                 PasswordResetToken.user_id == user_id,
-                ~PasswordResetToken.used,  # noqa: E712
+                ~PasswordResetToken.used,
                 # If you have an expiration column:
-                PasswordResetToken.expires_at > datetime.now(timezone.utc),
+                PasswordResetToken.expires_at > datetime.now(UTC),
             )
             .order_by(PasswordResetToken.created_at.desc())
         )
@@ -370,7 +372,7 @@ class AuthRepository:
 
     def get_last_reset_token_by_user(
         self, db: Session, user_id: int
-    ) -> Optional[PasswordResetToken]:
+    ) -> PasswordResetToken | None:
         """Fetch the most recent reset token generated for a user."""
         stmt = (
             select(PasswordResetToken)

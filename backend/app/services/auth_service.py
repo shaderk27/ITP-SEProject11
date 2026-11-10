@@ -1,16 +1,16 @@
-from datetime import datetime, timedelta, timezone
-from email.mime.text import MIMEText
-import smtplib
-from typing import List, Optional, Dict, Any
 import os
+import secrets
+import smtplib
+import string
+from datetime import UTC, datetime, timedelta
+from email.mime.text import MIMEText
+from typing import Any
 
+import bcrypt
+import jwt
 from fastapi import HTTPException, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-import jwt
-import bcrypt
-import secrets
-import string
 
 from app.config import load_environment
 from app.repositories.auth_repository import AuthRepository
@@ -60,14 +60,14 @@ class AuthService:
         domain = email.rsplit("@", 1)[-1].lower()
         return domain in ALLOWED_EMAIL_DOMAINS
 
-    def get_all_roles(self) -> List[Dict[str, Any]]:
+    def get_all_roles(self) -> list[dict[str, Any]]:
         """Retrieve all roles available in the system."""
         roles = self.repository.get_all_roles(self.db)
         return [
             {"role_id": role.role_id, "role_name": role.role_name} for role in roles
         ]
 
-    def _format_user_assignments(self, user) -> List[Dict[str, Any]]:
+    def _format_user_assignments(self, user) -> list[dict[str, Any]]:
         """Helper to safely format lab assignments array."""
         if not hasattr(user, "lab_assignments") or not user.lab_assignments:
             return []
@@ -80,7 +80,7 @@ class AuthService:
             for a in user.lab_assignments
         ]
 
-    def get_all_users(self) -> List[Dict[str, Any]]:
+    def get_all_users(self) -> list[dict[str, Any]]:
         users = self.repository.get_all_users(self.db)
         return [
             {
@@ -105,14 +105,14 @@ class AuthService:
         return self.repository.get_assignments(self.db)
 
     def _create_access_token(
-        self, data: dict, expires_delta: Optional[timedelta] = None
+        self, data: dict, expires_delta: timedelta | None = None
     ) -> str:
         """Generate a signed JWT token containing user metadata."""
         to_encode = data.copy()
         if expires_delta:
-            expire = datetime.now(timezone.utc) + expires_delta
+            expire = datetime.now(UTC) + expires_delta
         else:
-            expire = datetime.now(timezone.utc) + timedelta(
+            expire = datetime.now(UTC) + timedelta(
                 minutes=ACCESS_TOKEN_EXPIRE_MINUTES
             )
 
@@ -120,7 +120,7 @@ class AuthService:
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         return encoded_jwt
 
-    def login(self, email: str, password: str, response: Response) -> Dict[str, Any]:
+    def login(self, email: str, password: str, response: Response) -> dict[str, Any]:
         """Authenticate a user, generate a JWT, and attach it as an HTTP-only cookie."""
         user = self.repository.get_user_by_email(self.db, email)
         if user and not user.is_active:
@@ -202,7 +202,7 @@ class AuthService:
             },
         }
 
-    def get_current_user(self, token: Optional[str]) -> Dict[str, Any]:
+    def get_current_user(self, token: str | None) -> dict[str, Any]:
         """Validate an active JWT cookie token and return sanitized session user data."""
         if not token:
             raise HTTPException(
@@ -212,7 +212,7 @@ class AuthService:
 
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_id_str: Optional[str] = payload.get("sub")
+            user_id_str: str | None = payload.get("sub")
 
             if user_id_str is None:
                 raise HTTPException(
@@ -296,8 +296,8 @@ class AuthService:
     def update_user_profile(
         self,
         user_id: int,
-        full_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        full_name: str | None = None,
+    ) -> dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(
@@ -315,14 +315,14 @@ class AuthService:
         email: str,
         password: str,
         role_id: int,
-        staff_id: Optional[str] = None,
-        lab_group_id: Optional[int] = None,
-        lab_id: Optional[int] = None,
-        lab_ids: Optional[List[int]] = None,
-        primary_lab_id: Optional[int] = None,
-        creator_admin_id: Optional[int] = None,
-        creator_role: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        staff_id: str | None = None,
+        lab_group_id: int | None = None,
+        lab_id: int | None = None,
+        lab_ids: list[int] | None = None,
+        primary_lab_id: int | None = None,
+        creator_admin_id: int | None = None,
+        creator_role: str | None = None,
+    ) -> dict[str, Any]:
         """Create a new user account and process lab assignments."""
         normalized_email = email.strip().lower()
 
@@ -379,7 +379,7 @@ class AuthService:
 
         # Lab ICs: collect the labs to assign (de-duplicated, sorted so row locks
         # are always taken in the same order and cannot deadlock).
-        target_lab_ids: List[int] = []
+        target_lab_ids: list[int] = []
         if role_name == "labic":
             requested = [*(lab_ids or []), lab_id, primary_lab_id]
             target_lab_ids = sorted({lid for lid in requested if lid is not None})
@@ -454,9 +454,9 @@ class AuthService:
         self,
         user_id: int,
         lab_id: int,
-        is_primary: Optional[bool] = None,
-        assigned_by: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        is_primary: bool | None = None,
+        assigned_by: int | None = None,
+    ) -> dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -488,7 +488,7 @@ class AuthService:
 
     def assign_labgroup_to_user(
         self, user_id: int, lab_group_id: int
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Assign a user (e.g., Team Lead / Team IC) to a specific lab group."""
         # 1. Check if user exists
         user = self.repository.get_user_by_id(self.db, user_id)
@@ -544,7 +544,7 @@ class AuthService:
     #         "lab_assignments": self._format_user_assignments(user),
     #     }
 
-    def deactivate_user(self, user_id: int, current_admin_id: int) -> Dict[str, Any]:
+    def deactivate_user(self, user_id: int, current_admin_id: int) -> dict[str, Any]:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found.")
@@ -582,8 +582,8 @@ class AuthService:
         }
 
     def activate_user(
-        self, user_id: int, current_admin_id: Optional[int] = None
-    ) -> Dict[str, Any]:
+        self, user_id: int, current_admin_id: int | None = None
+    ) -> dict[str, Any]:
         """Activate a user account with optional admin audit tracking."""
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
@@ -608,7 +608,7 @@ class AuthService:
         }
 
     def reset_password(
-        self, user_id: int, current_password: Optional[str], new_password: str
+        self, user_id: int, current_password: str | None, new_password: str
     ) -> None:
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
@@ -646,7 +646,7 @@ class AuthService:
         self.repository.update_user_password(self.db, user.user_id, new_hashed)
         self.repository.delete_reset_tokens_by_user(self.db, user.user_id)
 
-    def get_current_user_allow_reset(self, token: Optional[str]) -> Dict[str, Any]:
+    def get_current_user_allow_reset(self, token: str | None) -> dict[str, Any]:
         """Like get_current_user but allows JWTs flagged with must_reset_password."""
         if not token:
             raise HTTPException(
@@ -655,7 +655,7 @@ class AuthService:
             )
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-            user_id_str: Optional[str] = payload.get("sub")
+            user_id_str: str | None = payload.get("sub")
             if user_id_str is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -680,7 +680,7 @@ class AuthService:
             "must_reset_password": bool(payload.get("must_reset_password", False)),
         }
 
-    def get_users_by_role(self, role: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_users_by_role(self, role: str | None = None) -> list[dict[str, Any]]:
         """Retrieve users, optionally filtered by role name."""
         if role:
             users = self.repository.get_users_by_role(self.db, role)
@@ -706,7 +706,7 @@ class AuthService:
             for user in users
         ]
 
-    def unassign_user_scope(self, user_id: int) -> Dict[str, str]:
+    def unassign_user_scope(self, user_id: int) -> dict[str, str]:
         """Clear all lab assignments or group scope assignments for a given user."""
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
@@ -722,7 +722,7 @@ class AuthService:
         self.db.commit()
         return {"message": f"Scope and lab assignments cleared for user ID {user_id}"}
 
-    def unassign_lab_from_user(self, user_id: int, lab_id: int) -> Dict[str, str]:
+    def unassign_lab_from_user(self, user_id: int, lab_id: int) -> dict[str, str]:
         """Remove a single lab IC assignment for a given user."""
         user = self.repository.get_user_by_id(self.db, user_id)
         if not user:
@@ -731,7 +731,7 @@ class AuthService:
         self.repository.unassign_lab_from_user(self.db, user_id, lab_id)
         return {"message": f"Lab {lab_id} unassigned from user ID {user_id}"}
 
-    def get_assignment_targets(self) -> Dict[str, Any]:
+    def get_assignment_targets(self) -> dict[str, Any]:
         """Lab Group / Lab list for user assignment across ALL groups.
         Deliberately contains NO budget or spend data (the WBS code is only an identifier)."""
         from app.models.config import Lab, LabGroup

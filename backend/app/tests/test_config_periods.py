@@ -8,11 +8,11 @@ though create_lab/update_lab call db.commit() internally.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from fastapi import HTTPException, BackgroundTasks, Request
+from fastapi import BackgroundTasks, HTTPException, Request
 
 from app.api.config import (
     PeriodCreate,
@@ -83,7 +83,7 @@ def test_update_lab_only_clears_the_selected_fiscal_year(db, admin_user):
                 period_id=fy,
                 lab_group_id=group.lab_group_id,
                 budget_amount=Decimal("100000.00"),
-                updated_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(UTC),
             )
         )
     db.flush()
@@ -142,14 +142,14 @@ def test_lab_groups_budget_scoped_to_period(db, admin_user):
     group, category = _group_and_category(db)
     fy_a = _create_period(2060, db, admin_user)["id"]
     fy_b = _create_period(2061, db, admin_user)["id"]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add_all(
         [
             Budget(
                 period_id=fy_a,
                 lab_group_id=group.lab_group_id,
                 category_id=category.category_id,
-                budget_amount=Decimal("1000"),
+                budget_amount=Decimal(1000),
                 created_at=now,
                 updated_at=now,
             ),
@@ -157,7 +157,7 @@ def test_lab_groups_budget_scoped_to_period(db, admin_user):
                 period_id=fy_b,
                 lab_group_id=group.lab_group_id,
                 category_id=category.category_id,
-                budget_amount=Decimal("5000"),
+                budget_amount=Decimal(5000),
                 created_at=now,
                 updated_at=now,
             ),
@@ -167,8 +167,8 @@ def test_lab_groups_budget_scoped_to_period(db, admin_user):
 
     groups_a = get_lab_groups(period_id=fy_a, db=db, current_user=admin_user)
     g_a = next(g for g in groups_a if g["id"] == group.lab_group_id)
-    assert Decimal(str(g_a["budget"])) == Decimal("1000")
+    assert Decimal(str(g_a["budget"])) == Decimal(1000)
 
     groups_b = get_lab_groups(period_id=fy_b, db=db, current_user=admin_user)
     g_b = next(g for g in groups_b if g["id"] == group.lab_group_id)
-    assert Decimal(str(g_b["budget"])) == Decimal("5000")
+    assert Decimal(str(g_b["budget"])) == Decimal(5000)

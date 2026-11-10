@@ -1,9 +1,11 @@
-from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+
 import pytest
-from app.main import app
+from fastapi.testclient import TestClient
+
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.main import app
 from app.models.auth import User
 
 

@@ -100,7 +100,7 @@ def _line(
         pr_id=pr.pr_id,
         line_no=1,
         item_description=description,
-        qty=Decimal("2"),
+        qty=Decimal(2),
         amount_gst=Decimal("1234.50"),
         lab_id=lab.lab_id if lab else None,
         pr_status=status,
@@ -183,7 +183,7 @@ def test_card_text_has_search_fields_and_no_requestor():
         line_no=2,
         item_description="Tektronix oscilloscope",
         qty=Decimal("1.00"),
-        amount_gst=Decimal("2400"),
+        amount_gst=Decimal(2400),
         currency_code="SGD",
         pr_status="approved",
     )

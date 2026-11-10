@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP
-from html.parser import HTMLParser
-from io import BytesIO
-from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
+from html.parser import HTMLParser
+from io import BytesIO
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 import pandas as pd
 
@@ -645,7 +645,7 @@ def _resolve_money_by_row(
                     source_currency=currency,
                     source_unit_rate=source_unit_rate,
                     source_amount=source_amount,
-                    conversion_rate=Decimal("1"),
+                    conversion_rate=Decimal(1),
                 )
             continue
 
@@ -658,19 +658,19 @@ def _resolve_money_by_row(
 
         explicit_total = sum(
             (
-                _entry_decimal(entry, "explicit_sgd") or Decimal("0")
+                _entry_decimal(entry, "explicit_sgd") or Decimal(0)
                 for entry in entries
             ),
-            Decimal("0"),
+            Decimal(0),
         )
         convertible = [
             entry for entry in entries if _entry_decimal(entry, "explicit_sgd") is None
         ]
         convertible_source_total = sum(
-            (_entry_source_amount(entry) for entry in convertible), Decimal("0")
+            (_entry_source_amount(entry) for entry in convertible), Decimal(0)
         )
         source_total = sum(
-            (_entry_source_amount(entry) for entry in entries), Decimal("0")
+            (_entry_source_amount(entry) for entry in entries), Decimal(0)
         )
         target_convertible_sgd = grand_total_sgd - explicit_total
 
@@ -700,7 +700,7 @@ def _resolve_money_by_row(
         elif source_total != 0:
             conversion_rate = grand_total_sgd / source_total
         else:
-            conversion_rate = Decimal("1")
+            conversion_rate = Decimal(1)
 
         converted_indexes: list[int] = []
         for entry in entries:
@@ -733,7 +733,7 @@ def _resolve_money_by_row(
 
         rounded_total = sum(
             (resolved[int(entry["index"])].amount_sgd for entry in entries),
-            Decimal("0"),
+            Decimal(0),
         )
         rounding_difference = grand_total_sgd - rounded_total
         if rounding_difference and converted_indexes:
@@ -761,7 +761,7 @@ def _entry_decimal(entry: dict[str, object], key: str) -> Decimal | None:
 
 def _entry_source_amount(entry: dict[str, object]) -> Decimal:
     value = _entry_decimal(entry, "source_amount")
-    return value if value is not None else Decimal("0")
+    return value if value is not None else Decimal(0)
 
 
 def _entry_base_amount(entry: dict[str, object]) -> Decimal:

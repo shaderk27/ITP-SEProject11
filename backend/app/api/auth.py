@@ -1,37 +1,36 @@
-from typing import List, Optional
 
 from fastapi import (
     APIRouter,
-    Depends,
-    Query,
-    Response,
     Cookie,
+    Depends,
     HTTPException,
-    status,
+    Query,
     Request,
+    Response,
+    status,
 )
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.auth import User
+from app.repositories.auth_repository import AuthRepository
 from app.schemas.auth_schema import (
+    AssignLabGroupSchema,
+    AssignLabSchema,
+    CreateUserRequest,
     ForgotPasswordSchema,
     LoginRequest,
-    CreateUserRequest,
     ResetPasswordSchema,
     RoleResponse,
     UpdateProfileRequest,
-    AssignLabGroupSchema,
-    AssignLabSchema,
 )
+from app.services.audit_service import log_audit_action
 from app.services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     COOKIE_NAME,
     COOKIE_SECURE,
     AuthService,
 )
-from app.repositories.auth_repository import AuthRepository
-from app.services.audit_service import log_audit_action
-from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -186,7 +185,7 @@ async def create_user(
     return res
 
 
-@router.get("/roles", response_model=List[RoleResponse])
+@router.get("/roles", response_model=list[RoleResponse])
 async def get_all_roles(service: AuthService = Depends(get_auth_service)):
     return service.get_all_roles()
 
@@ -202,7 +201,7 @@ async def forgot_password(
 
 @router.get("/users")
 async def get_all_users(
-    role: Optional[str] = Query(None),
+    role: str | None = Query(None),
     service: AuthService = Depends(get_auth_service),
     _admin: dict = Depends(require_admin_or_teamlead),
 ):

@@ -1,6 +1,7 @@
 # backend/app/repositories/config_repository.py
 from sqlalchemy.orm import Session
-from app.models.config import LabGroup, Lab, LabAlias, RequesterLabMapping
+
+from app.models.config import Lab, LabAlias, LabGroup, RequesterLabMapping
 
 
 class ConfigRepository:

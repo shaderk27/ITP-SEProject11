@@ -12,14 +12,15 @@ Everything happens in a single transaction. If any insert fails,
 SQLAlchemy rolls back the whole batch (via the session lifecycle in get_db).
 """
 
-from datetime import date, datetime
-from decimal import Decimal, ROUND_DOWN
 import re
+from datetime import date, datetime
+from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
+from app.models.auth import User
 from app.models.config import Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     AuditLog,
@@ -31,7 +32,6 @@ from app.models.staging import (
     UploadBatch,
 )
 from app.models.upload import PRLineItem, UploadMetadata
-from app.models.auth import User
 from app.services.duplicate_service import is_status_regression
 
 

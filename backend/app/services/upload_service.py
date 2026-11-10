@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from uuid import uuid4
-from sqlalchemy.orm import Session
 import dataclasses
+from uuid import uuid4
 
-from app.models.upload import UploadMetadata
+from sqlalchemy.orm import Session
+
+import app.models.config as config_models
 from app.models.auth import User
+from app.models.upload import UploadMetadata
+from app.processors.classifier import classify_line_item
 from app.processors.upload_parser import (
     parse_line_items,
     read_upload_dataframe,
     validate_dataframe,
 )
-from app.repositories.upload_repository import UploadRepository
 from app.repositories.persistence_repository import persist_upload_to_db
+from app.repositories.upload_repository import UploadRepository
 from app.services.duplicate_service import DuplicateService
-from app.processors.classifier import classify_line_item
-
-import app.models.config as config_models
 
 Lab = getattr(config_models, "Lab", None)
 LabGroup = getattr(config_models, "LabGroup", None)

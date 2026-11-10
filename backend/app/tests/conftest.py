@@ -8,8 +8,8 @@ to the budget_system database. Each test starts clean, no truncation needed.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
 from decimal import Decimal
-from typing import Callable, Generator
 
 import pytest
 from sqlalchemy import event, func
@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
 from app.models.auth import User
-from app.models.config import Lab, LabGroup, SpendingCategory, BudgetPeriod, Budget
+from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     ReviewQueueItem,
     StagingPRHeader,
@@ -167,7 +167,7 @@ def make_staging_batch(db: Session, admin_user, seed_refs) -> Callable:
                 staging_header_id=header.staging_header_id,
                 source_line_no=i,
                 item_details=desc,
-                qty=Decimal("1"),
+                qty=Decimal(1),
                 unit_rate=amount,
                 amount_gst=amount,
                 suggested_lab_group_id=seed_refs["lab_group_id"],

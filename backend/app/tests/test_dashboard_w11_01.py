@@ -16,7 +16,7 @@ SAVEPOINT, so none of these inserts persist to budget_system.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -104,7 +104,7 @@ def _make_period(db, year: int) -> int:
 
 
 def _set_budget(db, group, lab, category, amount, period_id=None) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add(
         Budget(
             period_id=period_id if period_id is not None else _a_period_id(db),
@@ -276,7 +276,7 @@ def test_zero_budget_does_not_divide_by_zero(db, admin_user):
     resp = get_breakdown(db=db, current_user=admin_user)
     grp = next(g for g in resp.lab_groups if g.lab_group_id == group.lab_group_id)
 
-    assert Decimal(grp.budget_sgd) == Decimal("0")
+    assert Decimal(grp.budget_sgd) == Decimal(0)
     assert grp.utilisation_pct == 0.0
     assert grp.projected_utilisation_pct == 0.0
     assert Decimal(grp.available_balance_sgd) == Decimal("-100.00")

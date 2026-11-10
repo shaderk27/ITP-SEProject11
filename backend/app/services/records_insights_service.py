@@ -18,10 +18,11 @@ has already role-scoped, so nothing here can widen what a user can see.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session

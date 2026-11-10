@@ -7,19 +7,14 @@ auto-classifications. Frontend's Review Queue page reads from here.
 
 from datetime import date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from app.services.threshold_service import (
-    check_and_notify_lab_thresholds,
-    check_and_notify_lab_group_thresholds,
-)
-from app.services.knowledge_service import index_pr_lines_in_background
-from app.services.duplicate_service import is_status_regression
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.models.auth import User
 from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     AuditLog,
@@ -32,7 +27,12 @@ from app.models.staging import (
     StagingPRLine,
     UploadBatch,
 )
-from app.models.auth import User
+from app.services.duplicate_service import is_status_regression
+from app.services.knowledge_service import index_pr_lines_in_background
+from app.services.threshold_service import (
+    check_and_notify_lab_group_thresholds,
+    check_and_notify_lab_thresholds,
+)
 
 router = APIRouter(prefix="/api/review", tags=["Review"])
 
