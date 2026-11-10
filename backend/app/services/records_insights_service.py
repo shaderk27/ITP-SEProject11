@@ -118,7 +118,7 @@ def build_export_insights(
 def counts_toward_budget(status: str | None) -> bool:
     """Approved + Pending lines consume budget — same rule as the dashboard."""
     s = (status or "").strip().lower()
-    return s.startswith("approved") or s.startswith("pending")
+    return s.startswith(("approved", "pending"))
 
 
 # ─── 1. Classification trail ─────────────────────────────────────────────

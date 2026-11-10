@@ -217,8 +217,8 @@ def _build_records_sheet(
         extra_rows=[
             (
                 "Records",
-                f"{pr_count} PR{'' if pr_count == 1 else 's'} · "
-                f"{len(rows)} line{'' if len(rows) == 1 else 's'}",
+                (f"{pr_count} PR{'' if pr_count == 1 else 's'} · "
+                f"{len(rows)} line{'' if len(rows) == 1 else 's'}"),
             ),
             ("Total Value", f"SGD {total_amount:,.2f}"),
         ],

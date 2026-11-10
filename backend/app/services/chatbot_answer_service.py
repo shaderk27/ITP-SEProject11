@@ -983,9 +983,9 @@ def _out_of_scope_answer(context: ChatbotContextResponse) -> str:
         )
     return "\n".join(
         [
-            "Sorry, I can only answer questions about lab budgets, spending, "
+            ("Sorry, I can only answer questions about lab budgets, spending, "
             "purchases and alerts in this system, within the data you have "
-            "access to.",
+            "access to."),
             "",
             f"{scope}. For example:",
             *(f"- {example}" for example in examples),

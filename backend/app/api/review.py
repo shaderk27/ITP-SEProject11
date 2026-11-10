@@ -376,15 +376,14 @@ def get_queue_item(
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
-    if role_name == "teamlead":
-        if (
-            current_user.lab_group_id is None
-            or line.suggested_lab_group_id != current_user.lab_group_id
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "This review item is not in your assigned lab group.",
-            )
+    if role_name == "teamlead" and (
+        current_user.lab_group_id is None
+        or line.suggested_lab_group_id != current_user.lab_group_id
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This review item is not in your assigned lab group.",
+        )
 
     lab_groups = db.query(LabGroup).order_by(LabGroup.lab_group_name).all()
     labs = db.query(Lab).order_by(Lab.lab_name).all()
@@ -485,7 +484,7 @@ def correct_queue_item(
             "Only Admin or Team Lead can resolve review items.",
         )
 
-    item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
+    item, line, _header, batch = _load_queue_item_or_404(db, review_queue_id)
 
     if batch.upload_status == "committed":
         raise HTTPException(
@@ -493,15 +492,14 @@ def correct_queue_item(
             f"Batch {batch.batch_id} has already been committed. This item can no longer be edited.",
         )
 
-    if role_name == "teamlead":
-        if (
-            current_user.lab_group_id is None
-            or line.suggested_lab_group_id != current_user.lab_group_id
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "This review item is not in your assigned lab group.",
-            )
+    if role_name == "teamlead" and (
+        current_user.lab_group_id is None
+        or line.suggested_lab_group_id != current_user.lab_group_id
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This review item is not in your assigned lab group.",
+        )
 
     lab_group = (
         db.query(LabGroup).filter(LabGroup.lab_group_id == body.lab_group_id).first()

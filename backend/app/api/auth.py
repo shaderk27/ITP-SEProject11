@@ -106,7 +106,7 @@ async def login(
                 new_value={"reason": getattr(e, "detail", "Unknown")},
                 request=request,
             )
-        raise e
+        raise
 
 
 @router.get("/me")

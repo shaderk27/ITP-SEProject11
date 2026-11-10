@@ -124,9 +124,7 @@ def _match_lab_group_by_wbs(lab_groups: list, wbs: str):
     for group in sorted(lab_groups, key=lambda g: len(g.wbs_code or ""), reverse=True):
         code = (getattr(group, "wbs_code", "") or "").lower().strip()
         if code and (
-            wbs_clean == code
-            or wbs_clean.startswith(f"{code}.")
-            or wbs_clean.startswith(f"{code}-")
+            wbs_clean == code or wbs_clean.startswith((f"{code}.", f"{code}-"))
         ):
             return group
 
