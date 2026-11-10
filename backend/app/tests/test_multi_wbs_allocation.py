@@ -20,7 +20,7 @@ and all review requirements in pr66-multi-wbs-review.md:
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from io import BytesIO
 from unittest.mock import MagicMock
@@ -77,14 +77,14 @@ def _base_row(
     pr_sub_date: str = "",
     requestor: str = "",
     purpose: str = "",
-    grand_total: str | float | int | None = "",
+    grand_total: str | float | None = "",
     item_details: str = "",
-    qty: str | float | int | None = "",
+    qty: str | float | None = "",
     uom: str = "LOT",
-    unit_rate: str | float | int | None = "",
+    unit_rate: str | float | None = "",
     delivery_date: str = "30-11-2026",
     mca: str = "",
-    allocatn: str | float | int | None = "",
+    allocatn: str | float | None = "",
     wbs: str = "",
     req_type: str = "",
     instruction: str = "",
@@ -176,7 +176,7 @@ def multi_wbs_seed(db):
     db.add_all([cat_equip, cat_services])
     db.flush()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add_all(
         [
             Budget(

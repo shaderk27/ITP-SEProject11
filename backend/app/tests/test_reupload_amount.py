@@ -122,8 +122,8 @@ def test_amount_change_is_recorded_in_pr_history(db, save) -> None:
     pr = _pr(db)
     updates = _latest_version(db, pr).new_data["amount_updates"]
     assert len(updates) == 1
-    assert Decimal(updates[0]["old_amount"]) == Decimal("100")
-    assert Decimal(updates[0]["new_amount"]) == Decimal("150")
+    assert Decimal(updates[0]["old_amount"]) == Decimal(100)
+    assert Decimal(updates[0]["new_amount"]) == Decimal(150)
 
 
 def test_status_only_change_records_no_amount_update(db, save) -> None:

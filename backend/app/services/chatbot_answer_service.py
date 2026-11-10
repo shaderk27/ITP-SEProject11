@@ -743,7 +743,7 @@ def _lab_group_summary(context: ChatbotContextResponse) -> list[dict]:
     )
     for row in summary:
         row["allocated_to_labs"] = row["budget"]
-        envelope = envelopes.get(row["name"], Decimal("0"))
+        envelope = envelopes.get(row["name"], Decimal(0))
         if envelope > 0:
             _set_budget(row, envelope)
             row["unallocated"] = _round(unallocated[row["name"]])
@@ -752,14 +752,14 @@ def _lab_group_summary(context: ChatbotContextResponse) -> list[dict]:
 
 def _use_lab_group_budgets(overall: dict, lab_groups: list[dict]) -> None:
     """Make the overall budget the sum of the lab group budgets."""
-    budget = sum((Decimal(str(g["budget"])) for g in lab_groups), Decimal("0"))
+    budget = sum((Decimal(str(g["budget"])) for g in lab_groups), Decimal(0))
     if budget != Decimal(str(overall["budget"])):
         overall["allocated_to_labs"] = overall["budget"]
         _set_budget(overall, budget)
         overall["unallocated"] = _round(
             sum(
                 (Decimal(str(g.get("unallocated", 0))) for g in lab_groups),
-                Decimal("0"),
+                Decimal(0),
             )
         )
 

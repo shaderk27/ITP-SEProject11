@@ -12,10 +12,11 @@ Everything happens in a single transaction. If any insert fails,
 SQLAlchemy rolls back the whole batch (via the session lifecycle in get_db).
 """
 
-from decimal import Decimal, ROUND_DOWN
 import re
-from typing import Any
 from datetime import date, datetime
+from decimal import ROUND_DOWN, Decimal
+from typing import Any
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 

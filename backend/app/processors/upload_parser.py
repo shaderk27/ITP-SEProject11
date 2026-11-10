@@ -7,10 +7,8 @@ from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from html.parser import HTMLParser
 from io import BytesIO
-from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
-import hashlib
-import re
 from typing import Any
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 import pandas as pd
 
@@ -643,9 +641,9 @@ def _is_percentage_mca(
         return False
     parsed_vals = [_parse_alloc_decimal(t) for t in raw_alloc_texts]
     if parsed_vals and all(v is not None and v > 0 for v in parsed_vals):
-        raw_sum = sum((v for v in parsed_vals if v is not None), Decimal("0"))
-        if abs(raw_sum - Decimal("100")) <= Decimal("0.1"):
-            if line_amount is None or abs(line_amount - Decimal("100")) > Decimal(
+        raw_sum = sum((v for v in parsed_vals if v is not None), Decimal(0))
+        if abs(raw_sum - Decimal(100)) <= Decimal("0.1"):
+            if line_amount is None or abs(line_amount - Decimal(100)) > Decimal(
                 "0.01"
             ):
                 return True
@@ -680,7 +678,7 @@ def _finalize_wbs_allocations(
     parent_rate = parent_entry["unit_rate"]
     line_amount: Decimal | None = parent_entry["amount_gst"]
     line_qty: Decimal | None = parent_entry.get("quantity")
-    conversion_rate: Decimal = parent_entry.get("conversion_rate") or Decimal("1")
+    conversion_rate: Decimal = parent_entry.get("conversion_rate") or Decimal(1)
 
     if not continuations:
         inline_codes = _split_inline_wbs_codes(parent_wbs)
@@ -734,11 +732,11 @@ def _finalize_wbs_allocations(
             v is not None and v > 0 for v in pct_vals
         )
         pct_sum = (
-            sum((v for v in pct_vals if v is not None), Decimal("0"))
+            sum((v for v in pct_vals if v is not None), Decimal(0))
             if all_present
-            else Decimal("0")
+            else Decimal(0)
         )
-        absorb_remainder = all_present and abs(pct_sum - Decimal("100")) <= Decimal(
+        absorb_remainder = all_present and abs(pct_sum - Decimal(100)) <= Decimal(
             "0.1"
         )
         running_amt = Decimal("0.00")
@@ -761,7 +759,7 @@ def _finalize_wbs_allocations(
             if absorb_remainder and idx == len(raw_rows) - 1:
                 amt = (line_amount.quantize(_CENT) - running_amt).quantize(_CENT)
             else:
-                amt = ((line_amount * pct_val) / Decimal("100")).quantize(
+                amt = ((line_amount * pct_val) / Decimal(100)).quantize(
                     _CENT, rounding=ROUND_HALF_UP
                 )
                 running_amt += amt
@@ -785,9 +783,9 @@ def _finalize_wbs_allocations(
             and all(v is not None and v > 0 for v in qty_vals)
         )
         qty_sum = (
-            sum((v for v in qty_vals if v is not None), Decimal("0"))
+            sum((v for v in qty_vals if v is not None), Decimal(0))
             if all_present
-            else Decimal("0")
+            else Decimal(0)
         )
         absorb_remainder = (
             all_present
@@ -841,14 +839,14 @@ def _finalize_wbs_allocations(
         ]
         all_present = all(v is not None and v > 0 for v in raw_amts)
         raw_sum = (
-            sum((v for v in raw_amts if v is not None), Decimal("0"))
+            sum((v for v in raw_amts if v is not None), Decimal(0))
             if all_present
-            else Decimal("0")
+            else Decimal(0)
         )
         source_amt: Decimal | None = parent_entry.get("source_amount")
         needs_fx = (
             all_present
-            and conversion_rate != Decimal("1")
+            and conversion_rate != Decimal(1)
             and source_amt is not None
             and line_amount is not None
             and abs(raw_sum - source_amt) <= Decimal("0.05")
