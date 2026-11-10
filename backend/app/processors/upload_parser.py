@@ -643,9 +643,7 @@ def _is_percentage_mca(
     if parsed_vals and all(v is not None and v > 0 for v in parsed_vals):
         raw_sum = sum((v for v in parsed_vals if v is not None), Decimal(0))
         if abs(raw_sum - Decimal(100)) <= Decimal("0.1"):
-            if line_amount is None or abs(line_amount - Decimal(100)) > Decimal(
-                "0.01"
-            ):
+            if line_amount is None or abs(line_amount - Decimal(100)) > Decimal("0.01"):
                 return True
     return False
 
@@ -736,9 +734,7 @@ def _finalize_wbs_allocations(
             if all_present
             else Decimal(0)
         )
-        absorb_remainder = all_present and abs(pct_sum - Decimal(100)) <= Decimal(
-            "0.1"
-        )
+        absorb_remainder = all_present and abs(pct_sum - Decimal(100)) <= Decimal("0.1")
         running_amt = Decimal("0.00")
 
         for idx, (r, pct_val) in enumerate(zip(raw_rows, pct_vals)):
