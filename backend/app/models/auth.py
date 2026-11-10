@@ -39,9 +39,7 @@ class User(Base):
     )
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
     email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    staff_id: Mapped[str | None] = mapped_column(
-        String(50), nullable=True, unique=True
-    )
+    staff_id: Mapped[str | None] = mapped_column(String(50), nullable=True, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

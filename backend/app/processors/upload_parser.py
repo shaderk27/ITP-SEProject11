@@ -657,10 +657,7 @@ def _resolve_money_by_row(
             continue
 
         explicit_total = sum(
-            (
-                _entry_decimal(entry, "explicit_sgd") or Decimal(0)
-                for entry in entries
-            ),
+            (_entry_decimal(entry, "explicit_sgd") or Decimal(0) for entry in entries),
             Decimal(0),
         )
         convertible = [

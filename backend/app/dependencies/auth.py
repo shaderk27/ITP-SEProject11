@@ -9,7 +9,6 @@ Returns the User model so endpoints can keep using
 `current_user.role.role_name`, `current_user.lab_group_id`, etc.
 """
 
-
 import jwt
 from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session

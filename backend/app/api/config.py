@@ -1211,9 +1211,7 @@ def update_lab(
         old_cat_budget = float(old_budgets_map.get(cat_id_str, 0.0))
         new_cat_budget = float(lab_in.budgets.get(cat_id_str, 0.0))
         # If category was not in overrun, floor is cat_spent; if already in overrun, floor is old_cat_budget
-        min_required_cat_budget = (
-            min(cat_spent, old_cat_budget)
-        )
+        min_required_cat_budget = min(cat_spent, old_cat_budget)
         if new_cat_budget + 1e-6 < min_required_cat_budget:
             cat_name = category_names.get(cat_id_str, f"Category {cat_id_str}")
             raise HTTPException(
@@ -1225,9 +1223,7 @@ def update_lab(
             )
 
     old_total_lab_budget = sum(old_budgets_map.values())
-    min_required_lab_budget = (
-        min(total_spent, old_total_lab_budget)
-    )
+    min_required_lab_budget = min(total_spent, old_total_lab_budget)
     if requested_total + 1e-6 < min_required_lab_budget:
         raise HTTPException(
             status_code=400,
