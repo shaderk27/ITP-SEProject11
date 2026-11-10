@@ -2,12 +2,12 @@ import hashlib
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Header,
     HTTPException,
     UploadFile,
-    BackgroundTasks,
 )
 from sqlalchemy.orm import Session
 
@@ -15,9 +15,8 @@ from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
 from app.repositories.upload_repository import UploadRepository
-from app.services.upload_service import UploadService
-
 from app.services.scheduler_service import check_and_email_pending_reviews
+from app.services.upload_service import UploadService
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 

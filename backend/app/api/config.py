@@ -1,35 +1,34 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, and_
-from typing import List
 from datetime import date
-from sqlalchemy.exc import IntegrityError
 
-from app.models.config import (
-    LabGroup,
-    Lab,
-    SpendingCategory,
-    Budget,
-    BudgetPeriod,
-    LabGroupOut,
-    LabOut,
-    CategoryOut,
-    LabGroupCreate,
-    LabCreate,
-    CategoryCreate,
-    LabIcAssignment,
-)
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from pydantic import BaseModel
+from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.auth import User
-from app.services.audit_service import log_audit_action
-
-from app.services.threshold_service import (
-    check_and_notify_lab_thresholds,
-    check_and_notify_lab_group_thresholds,
+from app.models.config import (
+    Budget,
+    BudgetPeriod,
+    CategoryCreate,
+    CategoryOut,
+    Lab,
+    LabCreate,
+    LabGroup,
+    LabGroupCreate,
+    LabGroupOut,
+    LabIcAssignment,
+    LabOut,
+    SpendingCategory,
 )
-from app.models.staging import PurchaseRequestLine, PurchaseRequest
+from app.models.staging import PurchaseRequest, PurchaseRequestLine
+from app.services.audit_service import log_audit_action
+from app.services.threshold_service import (
+    check_and_notify_lab_group_thresholds,
+    check_and_notify_lab_thresholds,
+)
 
 router = APIRouter(prefix="/api/config", tags=["Configuration"])
 
@@ -180,7 +179,7 @@ def create_period(
 # ==============================
 # LAB GROUPS API
 # ==============================
-@router.get("/labgroups", response_model=List[LabGroupOut])
+@router.get("/labgroups", response_model=list[LabGroupOut])
 def get_lab_groups(
     period_id: int | None = None,
     db: Session = Depends(get_db),
@@ -683,7 +682,7 @@ def delete_lab_group(
 # ==============================
 # CATEGORIES API
 # ==============================
-@router.get("/categories", response_model=List[CategoryOut])
+@router.get("/categories", response_model=list[CategoryOut])
 def get_categories(db: Session = Depends(get_db)):
     cats = db.query(SpendingCategory).all()
     return [
@@ -854,7 +853,7 @@ def get_orphaned_labs(
     ]
 
 
-@router.get("/labs", response_model=List[LabOut])
+@router.get("/labs", response_model=list[LabOut])
 def get_labs(
     period_id: int | None = None,
     db: Session = Depends(get_db),
@@ -1212,9 +1211,7 @@ def update_lab(
         old_cat_budget = float(old_budgets_map.get(cat_id_str, 0.0))
         new_cat_budget = float(lab_in.budgets.get(cat_id_str, 0.0))
         # If category was not in overrun, floor is cat_spent; if already in overrun, floor is old_cat_budget
-        min_required_cat_budget = (
-            cat_spent if old_cat_budget >= cat_spent else old_cat_budget
-        )
+        min_required_cat_budget = min(cat_spent, old_cat_budget)
         if new_cat_budget + 1e-6 < min_required_cat_budget:
             cat_name = category_names.get(cat_id_str, f"Category {cat_id_str}")
             raise HTTPException(
@@ -1226,9 +1223,7 @@ def update_lab(
             )
 
     old_total_lab_budget = sum(old_budgets_map.values())
-    min_required_lab_budget = (
-        total_spent if old_total_lab_budget >= total_spent else old_total_lab_budget
-    )
+    min_required_lab_budget = min(total_spent, old_total_lab_budget)
     if requested_total + 1e-6 < min_required_lab_budget:
         raise HTTPException(
             status_code=400,

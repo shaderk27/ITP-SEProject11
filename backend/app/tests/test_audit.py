@@ -1,12 +1,13 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from app.main import app
 from app.api.config import create_category, delete_category, update_category
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.main import app
 from app.models.auth import User
 from app.models.config import CategoryCreate
 from app.models.staging import AuditLog
@@ -36,7 +37,7 @@ def test_get_audit_logs_as_admin_succeeds():
     mock_log.old_value = None
     mock_log.new_value = {"code": "L1"}
     mock_log.ip_address = "127.0.0.1"
-    mock_log.created_at = datetime.now(timezone.utc)
+    mock_log.created_at = datetime.now(UTC)
 
     mock_db.query.return_value.outerjoin.return_value.order_by.return_value.limit.return_value.all.return_value = [
         (mock_log, "Admin User", "admin@test.com")

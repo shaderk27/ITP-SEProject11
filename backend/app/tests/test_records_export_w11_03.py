@@ -332,7 +332,7 @@ def test_export_scoping_matches_list_scoping(db, admin_user) -> None:
     The export must not widen access: for the same filters it returns exactly
     the PR set that /prs returns for that user.
     """
-    from app.api.records import _scoped_committed_prs, _role_name
+    from app.api.records import _role_name, _scoped_committed_prs
 
     role = _role_name(admin_user)
     listed = _scoped_committed_prs(db, admin_user, role, "all", None, None)
@@ -370,7 +370,7 @@ def test_labic_without_lab_exports_nothing(db) -> None:
 
 def test_date_bounds_are_applied(db, admin_user) -> None:
     """A window in the far past must exclude everything current."""
-    from app.api.records import _scoped_committed_prs, _role_name
+    from app.api.records import _role_name, _scoped_committed_prs
 
     role = _role_name(admin_user)
     result = _scoped_committed_prs(

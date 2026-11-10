@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
 from app.models.auth import User
+from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
 from app.processors.classifier import classify_line_item
 
 
@@ -206,3 +206,39 @@ def test_unknown_row_is_left_for_review() -> None:
     assert result["category_id"] is None
     assert "Insufficient lab context clues" in result["reason"]
     assert "Could not auto-determine category" in result["reason"]
+
+
+def test_general_lab_is_not_matched_from_row_text() -> None:
+    db = FakeDb()
+    db.labs.append(
+        SimpleNamespace(
+            lab_id=11,
+            lab_group_id=1,
+            lab_code="GEN-CHEM",
+            lab_name="General",
+            venue="",
+            is_general=True,
+        )
+    )
+
+    result = classify_line_item(
+        db,
+        row_text="stationery general gen-chem",
+        requestor_name="Unknown",
+        wbs="WBS-100",
+        purpose="General purchase",
+    )
+
+    assert result["lab_group_id"] == 1
+    assert result["lab_id"] is None
+
+
+def test_category_conflict_returns_the_names() -> None:
+    result = classify_line_item(
+        FakeDb(),
+        row_text="random item",
+        requestor_name="Unknown",
+        req_type="IT-Hardware (computers, accessories, maintenance)",
+    )
+
+    assert len(result["category_conflicts"]) > 1

@@ -1,21 +1,20 @@
+import tempfile
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-import tempfile
 from zipfile import ZIP_DEFLATED, ZipFile
-from decimal import Decimal
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from app.repositories.upload_repository import UploadRepository
-from app.repositories.persistence_repository import _resolve_line_amount
 from app.processors.upload_parser import (
     generate_content_hash,
     parse_line_items,
     read_upload_dataframe,
     validate_dataframe,
 )
+from app.repositories.persistence_repository import _resolve_line_amount
+from app.repositories.upload_repository import UploadRepository
 from app.services.upload_service import UploadService
-
 
 STRICT_NAMESPACES = {
     b"http://schemas.openxmlformats.org/spreadsheetml/2006/main": (
@@ -341,7 +340,7 @@ def test_formula_like_item_text_is_recovered_from_xlsx() -> None:
         ]
     )
     buffer = BytesIO()
-    dataframe.to_excel(buffer, index=False)
+    dataframe.to_excel(buffer, index=False, engine="openpyxl")
 
     prepared = read_upload_dataframe("formula-text.xlsx", buffer.getvalue())
 
@@ -595,6 +594,77 @@ def test_repeated_allocated_item_is_counted_once() -> None:
     assert lines[0].amount_gst == Decimal("180.00")
 
 
+def test_percentage_allocated_repeated_item_splits_and_absorbs_remainder() -> None:
+    dataframe = pd.DataFrame(
+        [
+            {
+                "PR": "PR2600002702",
+                "PR Status": "Approved",
+                "PR Sub Date": "2026-05-01",
+                "Requestor": "alice",
+                "Purpose": "Split freight",
+                "Grand Total in SGD": "180",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.4",
+                "WBS": "WBS-1",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.3",
+                "WBS": "WBS-2",
+            },
+            {
+                "PR": "",
+                "PR Status": "",
+                "PR Sub Date": "",
+                "Requestor": "",
+                "Purpose": "",
+                "Grand Total in SGD": "",
+                "Item Details": "Freight",
+                "Qty": "1",
+                "UOM": "EA",
+                "Unit Rate": "180",
+                "Delivery Date": "2026-05-10",
+                "Allocatn": "33.3",
+                "WBS": "WBS-3",
+            },
+        ]
+    )
+    buffer = BytesIO()
+    dataframe.to_excel(buffer, index=False)
+
+    prepared = read_upload_dataframe("split-pct.xlsx", buffer.getvalue())
+    lines = parse_line_items(prepared)
+
+    assert len(prepared) == 1
+    assert len(lines) == 1
+    assert lines[0].amount_gst == Decimal("180.00")
+    assert [a["wbs"] for a in lines[0].wbs_allocations] == [
+        "WBS-1",
+        "WBS-2",
+        "WBS-3",
+    ]
+    assert [a["amount_gst"] for a in lines[0].wbs_allocations] == [
+        "60.12",
+        "59.94",
+        "59.94",
+    ]
+
+
 def test_repeat_is_kept_when_both_rows_are_not_allocated() -> None:
     dataframe = pd.DataFrame(
         [
@@ -722,9 +792,9 @@ def test_foreign_currency_lines_reconcile_to_sgd_total() -> None:
     lines = parse_line_items(prepared)
 
     assert [line.source_currency for line in lines] == ["USD", "USD"]
-    assert [line.source_amount for line in lines] == [Decimal("10"), Decimal("20")]
+    assert [line.source_amount for line in lines] == [Decimal(10), Decimal(20)]
     assert [line.amount_gst for line in lines] == [Decimal("13.50"), Decimal("27.00")]
-    assert sum((line.amount_gst for line in lines), Decimal("0")) == Decimal("40.50")
+    assert sum((line.amount_gst for line in lines), Decimal(0)) == Decimal("40.50")
 
 
 def test_zero_value_line_does_not_fall_back_to_pr_total() -> None:

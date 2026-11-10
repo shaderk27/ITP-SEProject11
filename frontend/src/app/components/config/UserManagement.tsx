@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus, Trash2, Unlink, KeyRound, UserCheck } from "lucide-react";
+import { Plus, Ban, Unlink, KeyRound, UserCheck } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { StatusBadge } from "../shared/StatusBadge";
@@ -489,7 +489,7 @@ export function UserManagement({
                         }
                         onClick={() => handleDeactivateUser(user)}
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Ban className="h-3 w-3" />
                       </Button>
                     ) : (
                       <Button

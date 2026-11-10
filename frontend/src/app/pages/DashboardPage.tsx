@@ -51,6 +51,7 @@ import {
   getSpendingSummary,
   listLabGroups,
   listPeriods,
+  findCurrentPeriod,
   type MonthlyPoint,
   type Period,
 } from "../services/dashboardService";
@@ -598,16 +599,19 @@ export function DashboardPage() {
     }
   }
 
-  // Load fiscal years once; default to the newest (current FY).
+  // Load fiscal years once; default to the one containing today.
   useEffect(() => {
     let cancelled = false;
     listPeriods()
       .then((data) => {
         if (!cancelled) {
           setPeriods(data);
-          if (data.length) setSelectedFYPeriodId(data[0].id);
-          // Default the YoY comparison to the two most recent fiscal years.
-          setYoyYearIds(new Set(data.slice(0, 2).map((p) => p.id)));
+          const current = findCurrentPeriod(data) ?? data[0];
+          if (current) setSelectedFYPeriodId(current.id);
+          // Default the YoY comparison to the current fiscal year and the one
+          // before it (periods arrive newest first).
+          const start = current ? data.indexOf(current) : 0;
+          setYoyYearIds(new Set(data.slice(start, start + 2).map((p) => p.id)));
         }
       })
       .catch(() => {});

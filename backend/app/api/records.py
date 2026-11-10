@@ -17,9 +17,9 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.models.auth import User
 from app.models.config import BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import PurchaseRequest, PurchaseRequestLine
-from app.models.auth import User
 from app.services.records_insights_service import build_export_insights
 from app.services.report_service import ReportMeta, build_pr_records_workbook
 from app.utils.date_range import date_range_bounds
@@ -346,7 +346,7 @@ def _pr_grand_total(pr, visible_lines, role_name: str) -> str:
     matches what the Lab IC can actually see.
     """
     if role_name == "labic":
-        total = sum((line.amount_gst or Decimal("0")) for line in visible_lines)
+        total = sum((line.amount_gst or Decimal(0)) for line in visible_lines)
         return str(total)
     return str(pr.grand_total_sgd) if pr.grand_total_sgd is not None else "0"
 

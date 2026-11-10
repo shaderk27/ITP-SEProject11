@@ -199,7 +199,7 @@ def _aggregate_by_status(
     query = _apply_role_scope(query, current_user)
 
     by_group: dict[str, str] = {}
-    total = Decimal("0")
+    total = Decimal(0)
     for lab_group_id, amount in query.all():
         # lab_group_id will never be NULL here (INNER joins ensure it),
         # but stringify defensively.
@@ -427,25 +427,25 @@ def get_breakdown(
     result_groups: list[BreakdownLabGroup] = []
     for lg_id in sorted(by_group.keys()):
         labs_list: list[BreakdownLab] = []
-        lg_budget = Decimal("0")
-        lg_approved = Decimal("0")
-        lg_pending = Decimal("0")
+        lg_budget = Decimal(0)
+        lg_approved = Decimal(0)
+        lg_pending = Decimal(0)
 
         for lab_id in sorted(by_group[lg_id].keys()):
             cats_list: list[BreakdownCategory] = []
-            lab_budget = Decimal("0")
-            lab_approved = Decimal("0")
-            lab_pending = Decimal("0")
+            lab_budget = Decimal(0)
+            lab_approved = Decimal(0)
+            lab_pending = Decimal(0)
 
             # Sort with NULL category last; mixing int and None raises TypeError
             # under Python 3's sorted(), so key it explicitly.
             for cat_id in sorted(
                 by_group[lg_id][lab_id], key=lambda c: (c is None, c or 0)
             ):
-                cat_budget = budget_by_lab_cat.get((lab_id, cat_id), Decimal("0"))
+                cat_budget = budget_by_lab_cat.get((lab_id, cat_id), Decimal(0))
                 spending = spending_by_lab_cat.get((lab_id, cat_id), {})
-                cat_approved = spending.get("approved", Decimal("0"))
-                cat_pending = spending.get("pending", Decimal("0"))
+                cat_approved = spending.get("approved", Decimal(0))
+                cat_pending = spending.get("pending", Decimal(0))
                 cat_available = cat_budget - cat_approved - cat_pending
 
                 cats_list.append(
@@ -713,15 +713,15 @@ def _dashboard_kpis(
         lab = next(
             (lab for g in groups for lab in g.labs if lab.lab_id == lab_id), None
         )
-        budget = _to_decimal(lab.budget_sgd) if lab else Decimal("0")
-        actual = _to_decimal(lab.actual_spend_sgd) if lab else Decimal("0")
-        pending = _to_decimal(lab.pending_sgd) if lab else Decimal("0")
+        budget = _to_decimal(lab.budget_sgd) if lab else Decimal(0)
+        actual = _to_decimal(lab.actual_spend_sgd) if lab else Decimal(0)
+        pending = _to_decimal(lab.pending_sgd) if lab else Decimal(0)
     else:
         # get_lab_groups() hands back plain dicts (FastAPI only coerces them
         # to LabGroupOut at the response boundary), so index them as dicts —
         # a defaulted getattr here silently reads every budget as zero.
         if lab_group_id is None:
-            budget = sum((_to_decimal(g["budget"]) for g in lab_groups), Decimal("0"))
+            budget = sum((_to_decimal(g["budget"]) for g in lab_groups), Decimal(0))
             actual = _to_decimal(spending.total_actual_spend_sgd)
             pending = _to_decimal(spending.total_pending_sgd)
         else:
@@ -729,14 +729,14 @@ def _dashboard_kpis(
                 (g for g in lab_groups if g["id"] == lab_group_id),
                 None,
             )
-            budget = _to_decimal(match["budget"]) if match else Decimal("0")
+            budget = _to_decimal(match["budget"]) if match else Decimal(0)
             key = str(lab_group_id)
             actual = _to_decimal(spending.by_lab_group.get(key, "0"))
             pending = _to_decimal(spending.pending_by_lab_group.get(key, "0"))
         if lab_ic:
             budget = sum(
                 (_to_decimal(lab.budget_sgd) for g in groups for lab in g.labs),
-                Decimal("0"),
+                Decimal(0),
             )
 
     available = budget - actual - pending

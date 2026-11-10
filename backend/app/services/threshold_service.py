@@ -1,10 +1,12 @@
 import logging
 from datetime import date
-from sqlalchemy import func, or_, and_
+
+from sqlalchemy import and_, func, or_
+
 from app.database import SessionLocal
-from app.models.config import LabGroup, Lab, LabIcAssignment, Budget, BudgetPeriod
-from app.models.staging import PurchaseRequestLine, PurchaseRequest
 from app.models.auth import User
+from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, LabIcAssignment
+from app.models.staging import PurchaseRequest, PurchaseRequestLine
 from app.services.email_service import send_threshold_alert
 
 logger = logging.getLogger(__name__)

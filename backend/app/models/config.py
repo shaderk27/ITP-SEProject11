@@ -1,22 +1,23 @@
+from pydantic import BaseModel
 from sqlalchemy import (
-    Column,
     BigInteger,
-    Integer,
-    String,
-    Text,
     Boolean,
-    Numeric,
+    Column,
+    Date,
     DateTime,
     ForeignKey,
-    Date,
-    UniqueConstraint,
     Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+
 from app.database import Base
-from pydantic import BaseModel
 
 # --- SQLALCHEMY DATABASE MODELS ---
 

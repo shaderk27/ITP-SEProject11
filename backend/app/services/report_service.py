@@ -29,11 +29,12 @@ adds no new packages.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.formatting.rule import DataBarRule
@@ -216,8 +217,10 @@ def _build_records_sheet(
         extra_rows=[
             (
                 "Records",
-                f"{pr_count} PR{'' if pr_count == 1 else 's'} · "
-                f"{len(rows)} line{'' if len(rows) == 1 else 's'}",
+                (
+                    f"{pr_count} PR{'' if pr_count == 1 else 's'} · "
+                    f"{len(rows)} line{'' if len(rows) == 1 else 's'}"
+                ),
             ),
             ("Total Value", f"SGD {total_amount:,.2f}"),
         ],

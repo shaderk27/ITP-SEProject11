@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 # ==========================================
@@ -40,7 +40,7 @@ class UserBaseResponse(BaseModel):
     id: int = Field(..., serialization_alias="id")
     full_name: str
     email: EmailStr
-    role: Optional[str] = Field(
+    role: str | None = Field(
         None, description="Assigned role name (e.g., admin, teamlead, labic)"
     )
     is_active: bool = True
@@ -58,13 +58,13 @@ class LoginResponse(BaseModel):
 class CurrentUserResponse(UserBaseResponse):
     """Detailed response structure returned by the /me endpoint."""
 
-    staff_id: Optional[str] = Field(
+    staff_id: str | None = Field(
         None, description="Unique institutional employee identifier"
     )
-    lab_group_id: Optional[int] = Field(
+    lab_group_id: int | None = Field(
         None, description="Associated primary lab group cluster identifier, if scoped"
     )
-    lab_ids: List[int] = Field(
+    lab_ids: list[int] = Field(
         default_factory=list, description="IDs of labs where user is assigned as IC"
     )
 
@@ -76,12 +76,12 @@ class CreateUserRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     role_id: int
-    staff_id: Optional[str] = None
-    lab_group_id: Optional[int] = None
-    lab_ids: Optional[List[int]] = Field(
+    staff_id: str | None = None
+    lab_group_id: int | None = None
+    lab_ids: list[int] | None = Field(
         default=None, description="List of lab IDs to assign this user to"
     )
-    primary_lab_id: Optional[int] = Field(
+    primary_lab_id: int | None = Field(
         default=None, description="Lab ID to mark as primary for this user"
     )
 
@@ -89,18 +89,18 @@ class CreateUserRequest(BaseModel):
 class RoleResponse(BaseModel):
     role_id: int
     role_name: str
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class UpdateProfileRequest(BaseModel):
-    full_name: Optional[str] = None
+    full_name: str | None = None
 
 
 class ForgotPasswordSchema(BaseModel):
     email: str
-    new_password: Optional[str] = Field(
+    new_password: str | None = Field(
         None, min_length=8, description="Must be at least 8 characters"
     )
 
@@ -109,7 +109,7 @@ class LabICOut(BaseModel):
     user_id: int
     full_name: str
     email: str
-    lab_ids: List[int] = []
+    lab_ids: list[int] = []
     is_primary: bool = False
 
     model_config = ConfigDict(from_attributes=True)
@@ -117,7 +117,7 @@ class LabICOut(BaseModel):
 
 class AssignLabSchema(BaseModel):
     lab_id: int
-    is_primary: Optional[bool] = None
+    is_primary: bool | None = None
 
 
 class AssignLabGroupSchema(BaseModel):
@@ -125,7 +125,7 @@ class AssignLabGroupSchema(BaseModel):
 
 
 class ResetPasswordSchema(BaseModel):
-    current_password: Optional[str] = None
+    current_password: str | None = None
     new_password: str
 
     @field_validator("new_password")

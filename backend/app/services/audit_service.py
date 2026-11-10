@@ -1,14 +1,16 @@
 import ipaddress
 import logging
-from typing import Any, Optional
+from typing import Any
+
 from fastapi import Request
 from sqlalchemy.orm import Session
+
 from app.models.staging import AuditLog
 
 logger = logging.getLogger(__name__)
 
 
-def _extract_valid_ip(request: Optional[Request]) -> Optional[str]:
+def _extract_valid_ip(request: Request | None) -> str | None:
     if not request:
         return None
     forwarded = request.headers.get("X-Forwarded-For")
@@ -32,9 +34,9 @@ def log_audit_action(
     action_type: str,
     entity_name: str,
     record_id: str,
-    old_value: Optional[dict[str, Any]] = None,
-    new_value: Optional[dict[str, Any]] = None,
-    request: Optional[Request] = None,
+    old_value: dict[str, Any] | None = None,
+    new_value: dict[str, Any] | None = None,
+    request: Request | None = None,
 ) -> None:
     try:
         log_entry = AuditLog(

@@ -9,8 +9,6 @@ Returns the User model so endpoints can keep using
 `current_user.role.role_name`, `current_user.lab_group_id`, etc.
 """
 
-from typing import Optional
-
 import jwt
 from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -21,7 +19,7 @@ from app.services.auth_service import ALGORITHM, COOKIE_NAME, SECRET_KEY
 
 
 def get_current_user(
-    access_token: Optional[str] = Cookie(default=None, alias=COOKIE_NAME),
+    access_token: str | None = Cookie(default=None, alias=COOKIE_NAME),
     db: Session = Depends(get_db),
 ) -> User:
     """

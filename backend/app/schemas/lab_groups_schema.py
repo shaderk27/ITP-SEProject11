@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-from typing import Optional
 
 
 class LabGroupRead(BaseModel):
@@ -16,9 +15,9 @@ class UserResponse(BaseModel):
     full_name: str
     email: str
     role: str
-    lab_group_id: Optional[int] = None
+    lab_group_id: int | None = None
     # This must be present for FastAPI to emit the data
-    lab_group: Optional[LabGroupRead] = None
+    lab_group: LabGroupRead | None = None
 
     class Config:
         from_attributes = True
