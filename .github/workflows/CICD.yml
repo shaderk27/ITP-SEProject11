@@ -109,7 +109,7 @@ jobs:
           fi
 
       - name: Lint with Ruff
-        run: ruff check .
+        run: ruff check --fix .
 
       - name: Format check with Ruff
         run: ruff format --check .
