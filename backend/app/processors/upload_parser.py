@@ -8,6 +8,7 @@ from io import BytesIO
 from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 import hashlib
 import re
+from typing import Any
 
 import pandas as pd
 
@@ -36,6 +37,14 @@ CRITICAL_COLUMNS = [
     "Item Details",
 ]
 
+PR_HEADER_CRITICAL_COLUMNS = [
+    "PR",
+    "PR Status",
+    "PR Sub Date",
+    "Requestor",
+    "Purpose",
+]
+
 PR_LEVEL_COLUMNS = [
     "PR",
     "PO",
@@ -49,6 +58,13 @@ PR_LEVEL_COLUMNS = [
     "Req Type",
     "PR Category",
 ]
+
+ALLOCATION_COLUMN_ALIASES = (
+    "Allocatn",
+    "Allocation",
+    "Allocated Amount",
+    "WBS Allocation",
+)
 
 _STRICT_OPEN_XML_NAMESPACES = {
     b"http://purl.oclc.org/ooxml/spreadsheetml/main": (
@@ -107,9 +123,9 @@ def read_upload_dataframe(filename: str, content: bytes) -> pd.DataFrame:
         dataframe = _read_csv(content)
     elif extension == "xls":
         dataframe = _read_legacy_xls(content)
-    if extension == "xlsx":
+    elif extension == "xlsx":
         dataframe = _read_xlsx(content)
-    elif extension not in {"csv", "xls"}:
+    else:
         raise ValueError("Invalid file format. Upload a .csv, .xls, or .xlsx file.")
 
     return _prepare_source_rows(dataframe)
@@ -204,7 +220,15 @@ def _normalise_strict_xlsx(content: bytes) -> BytesIO:
 
 
 def _prepare_source_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Remove export formatting rows and expand merged PR headers over line items."""
+    """
+    Remove export formatting rows, expand merged PR headers over line items,
+    and group WBS/allocation continuation rows (both blank-item continuation rows
+    and repeated-item allocation rows) onto their parent purchase item row.
+    """
+    if dataframe.attrs.get("_prepared_source_rows"):
+        return dataframe
+
+    dataframe = dataframe.copy()
     normalised_columns = {
         normalize_text(column): column for column in dataframe.columns
     }
@@ -212,10 +236,23 @@ def _prepare_source_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
     quantity_column = normalised_columns.get("Qty")
     rate_column = normalised_columns.get("Unit Rate")
     amount_column = normalised_columns.get("Amount + GST")
+    wbs_column = normalised_columns.get("WBS")
+    alloc_columns = [
+        normalised_columns[alias]
+        for alias in ALLOCATION_COLUMN_ALIASES
+        if alias in normalised_columns
+    ]
 
     line_columns = [
         column
-        for column in (item_column, quantity_column, rate_column, amount_column)
+        for column in (
+            item_column,
+            quantity_column,
+            rate_column,
+            amount_column,
+            wbs_column,
+            *alloc_columns,
+        )
         if column is not None
     ]
     if line_columns:
@@ -226,34 +263,48 @@ def _prepare_source_rows(dataframe: pd.DataFrame) -> pd.DataFrame:
         )
         dataframe = dataframe.loc[meaningful_line].copy()
 
+    header_check_cols = [
+        normalised_columns[column]
+        for column in PR_HEADER_CRITICAL_COLUMNS
+        if column in normalised_columns
+    ]
     columns_to_fill = [
         normalised_columns[column]
         for column in PR_LEVEL_COLUMNS
         if column in normalised_columns
     ]
-    if columns_to_fill:
-        blank = dataframe[columns_to_fill].apply(
+    if header_check_cols and columns_to_fill and not dataframe.empty:
+        header_blank = dataframe[header_check_cols].apply(
             lambda column: column.map(lambda value: not normalize_text(value))
         )
-        is_continuation = blank.all(axis=1)
+        is_continuation = header_blank.all(axis=1)
         parent = dataframe.index.to_series().where(~is_continuation).ffill()
         has_parent = is_continuation & parent.notna()
         for column in columns_to_fill:
             dataframe[column] = dataframe[column].astype(object)
-            dataframe.loc[has_parent, column] = dataframe.loc[
-                parent[has_parent].astype(int), column
-            ].to_numpy()
+            cell_blank = dataframe[column].map(lambda value: not normalize_text(value))
+            fill_mask = has_parent & cell_blank
+            if fill_mask.any():
+                dataframe.loc[fill_mask, column] = dataframe.loc[
+                    parent[fill_mask].astype(int), column
+                ].to_numpy()
 
-    return _drop_repeated_allocation_copies(dataframe, normalised_columns)
+    return _group_allocation_continuation_rows(dataframe, normalised_columns)
 
 
-def _drop_repeated_allocation_copies(
+def _group_allocation_continuation_rows(
     dataframe: pd.DataFrame,
     column_map: dict[str, str],
 ) -> pd.DataFrame:
-    """Count an allocation-split item once until exact WBS allocation is supported."""
-    allocation_column = column_map.get("Allocatn")
-    if allocation_column is None or "PR" not in column_map:
+    """
+    Groups both:
+      1. Blank-Item-Details WBS/allocation continuation rows (e.g. .xls Row 10 of PR2600002644), and
+      2. Repeated-Item-Details allocation rows (e.g. .xlsx PR2500002163, PR2600001152, PR2600002702)
+    into `dataframe.attrs["continuation_rows_by_index"][parent_idx]` and drops the
+    continuation rows from `dataframe` so each genuine purchase item is counted once.
+    """
+    if "PR" not in column_map or "Item Details" not in column_map:
+        dataframe.attrs["_prepared_source_rows"] = True
         return dataframe
 
     comparison_columns = [
@@ -268,24 +319,72 @@ def _drop_repeated_allocation_copies(
         )
         if column in column_map
     ]
-    seen_allocated_items: set[tuple[str, ...]] = set()
+    amt_col = column_map.get("Amount + GST")
+
+    continuation_rows_by_index: dict[int, list[dict[str, Any]]] = {}
+    seen_allocated_items: dict[tuple[str, ...], int] = {}
+    last_item_index_by_pr: dict[str, int] = {}
     keep_rows: list[bool] = []
 
-    for _, row in dataframe.iterrows():
-        allocation = normalize_text(row[allocation_column])
-        if not allocation:
+    for index, row in dataframe.iterrows():
+        idx_int = int(index)
+        row_number = idx_int + 2
+        pr_number = _identifier_text(row[column_map["PR"]])
+        item_details = normalize_text(row[column_map["Item Details"]])
+        allocation = _optional_allocation_text(row, column_map)
+        wbs = _optional_text(row, column_map, "WBS")
+        mca = _optional_text(row, column_map, "MCA")
+        row_amt_gst = parse_decimal(row[amt_col]) if amt_col is not None else None
+
+        # Pattern 1: Blank Item Details continuation row with WBS/allocation
+        if not item_details:
+            parent_idx = last_item_index_by_pr.get(pr_number) if pr_number else None
+            if parent_idx is not None and bool(
+                wbs or allocation or row_amt_gst is not None
+            ):
+                continuation_rows_by_index.setdefault(parent_idx, []).append(
+                    {
+                        "row_number": row_number,
+                        "wbs": wbs,
+                        "mca": mca,
+                        "allocatn_raw": allocation,
+                        "row_amount_gst": row_amt_gst,
+                    }
+                )
+                keep_rows.append(False)
+                continue
             keep_rows.append(True)
             continue
 
-        item_key = (
-            _identifier_text(row[column_map["PR"]]),
-            *(normalize_key_part(row[column]) for column in comparison_columns),
-        )
-        is_repeated_allocation = item_key in seen_allocated_items
-        keep_rows.append(not is_repeated_allocation)
-        seen_allocated_items.add(item_key)
+        # Pattern 2: Repeated Item Details row representing an allocation portion
+        if allocation:
+            item_key = (
+                pr_number,
+                *(normalize_key_part(row[column]) for column in comparison_columns),
+            )
+            if item_key in seen_allocated_items:
+                parent_idx = seen_allocated_items[item_key]
+                continuation_rows_by_index.setdefault(parent_idx, []).append(
+                    {
+                        "row_number": row_number,
+                        "wbs": wbs,
+                        "mca": mca,
+                        "allocatn_raw": allocation,
+                        "row_amount_gst": row_amt_gst,
+                    }
+                )
+                keep_rows.append(False)
+                continue
+            seen_allocated_items[item_key] = idx_int
 
-    return dataframe.loc[keep_rows].copy()
+        if pr_number:
+            last_item_index_by_pr[pr_number] = idx_int
+        keep_rows.append(True)
+
+    result = dataframe.loc[keep_rows].copy()
+    result.attrs["continuation_rows_by_index"] = continuation_rows_by_index
+    result.attrs["_prepared_source_rows"] = True
+    return result
 
 
 def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
@@ -307,7 +406,12 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
     if missing_columns:
         return errors
 
-    for index, row in df.iterrows():
+    prepared_df = _prepare_source_rows(df)
+    normalised_columns = {
+        normalize_text(column): column for column in prepared_df.columns
+    }
+
+    for index, row in prepared_df.iterrows():
         row_number = int(index) + 2
         for column in CRITICAL_COLUMNS:
             if not normalize_text(row[normalised_columns[column]]):
@@ -340,7 +444,7 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
             )
 
     try:
-        _resolve_money_by_row(df, normalised_columns)
+        _resolve_money_by_row(prepared_df, normalised_columns)
     except ValueError as error:
         errors.append(
             {
@@ -354,13 +458,18 @@ def validate_dataframe(df: pd.DataFrame) -> list[dict[str, str]]:
 
 
 def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
-    column_map = {normalize_text(column): column for column in df.columns}
+    prepared_df = _prepare_source_rows(df)
+    column_map = {normalize_text(column): column for column in prepared_df.columns}
+    continuation_rows_by_index: dict[int, list[dict[str, Any]]] = (
+        prepared_df.attrs.get("continuation_rows_by_index") or {}
+    )
     items: list[PRLineItem] = []
-    money_by_row = _resolve_money_by_row(df, column_map)
+    money_by_row = _resolve_money_by_row(prepared_df, column_map)
     identity_occurrences: dict[str, int] = {}
 
-    for index, row in df.iterrows():
-        row_number = int(index) + 2
+    for index, row in prepared_df.iterrows():
+        idx_int = int(index)
+        row_number = idx_int + 2
         pr_number = _identifier_text(row[column_map["PR"]])
         pr_status = normalize_text(row[column_map["PR Status"]])
         po_number = _optional_identifier_text(row, column_map, "PO")
@@ -372,18 +481,32 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
         instruction = _optional_text(row, column_map, "Instruction to Vendor")
 
         req_type = _optional_text(row, column_map, "Req Type")
-        pr_category = _optional_text(row, column_map, "PR Category")  # RESTORED
+        pr_category = _optional_text(row, column_map, "PR Category")
 
         lab = _optional_text(row, column_map, "Lab")
         pr_sub_date = _format_date(row[column_map["PR Sub Date"]])
         grand_total = parse_decimal(row[column_map["Grand Total in SGD"]])
         quantity = parse_decimal(row[column_map["Qty"]])
-        money = money_by_row.get(int(index))
+        money = money_by_row.get(idx_int)
 
         if money is None:
             continue
         unit_rate = money.unit_rate_sgd
         amount_gst = money.amount_sgd
+
+        parent_entry = {
+            "row_number": row_number,
+            "wbs": wbs,
+            "mca": _optional_text(row, column_map, "MCA"),
+            "allocatn_raw": _optional_allocation_text(row, column_map),
+            "quantity": quantity,
+            "unit_rate": unit_rate,
+            "amount_gst": amount_gst,
+            "source_amount": money.source_amount,
+            "conversion_rate": money.conversion_rate,
+            "continuation_rows": continuation_rows_by_index.get(idx_int, []),
+        }
+        wbs_allocations = _finalize_wbs_allocations(parent_entry)
 
         base_identity_key = generate_line_identity_key(
             pr_number=pr_number,
@@ -399,7 +522,8 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
             if occurrence == 1
             else f"{base_identity_key}::occurrence_{occurrence}"
         )
-        hash_fields = {
+
+        hash_fields: dict[str, str] = {
             "pr_number": pr_number,
             "pr_status": pr_status,
             "po_number": po_number,
@@ -414,7 +538,7 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
             "wbs": wbs,
             "instruction_to_vendor": instruction,
             "req_type": req_type,
-            "pr_category": pr_category,  # RESTORED
+            "pr_category": pr_category,
             "lab": lab,
             "amount_gst": _decimal_to_text(
                 _resolve_amount(row, column_map)
@@ -429,6 +553,10 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                     "source_unit_rate": _decimal_to_text(money.source_unit_rate),
                     "source_amount": _decimal_to_text(money.source_amount),
                 }
+            )
+        if wbs_allocations:
+            hash_fields["wbs_allocations"] = "|".join(
+                f"{a.get('wbs', '')}={a.get('amount_gst', '')}" for a in wbs_allocations
             )
         content_hash = generate_content_hash(hash_fields)
 
@@ -449,7 +577,7 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                 wbs=wbs,
                 instruction_to_vendor=instruction,
                 req_type=req_type,
-                pr_category=pr_category,  # RESTORED
+                pr_category=pr_category,
                 lab=lab,
                 amount_gst=amount_gst,
                 line_identity_key=identity_key,
@@ -458,6 +586,7 @@ def parse_line_items(df: pd.DataFrame) -> list[PRLineItem]:
                 source_unit_rate=money.source_unit_rate,
                 source_amount=money.source_amount,
                 conversion_rate=money.conversion_rate,
+                wbs_allocations=wbs_allocations,
             )
         )
 
@@ -489,6 +618,303 @@ def generate_content_hash(fields: dict[str, str]) -> str:
         f"{key}={normalize_key_part(value)}" for key, value in sorted(fields.items())
     )
     return hashlib.sha256(raw_content.encode("utf-8")).hexdigest()
+
+
+def _parse_alloc_decimal(value: object) -> Decimal | None:
+    text = normalize_text(value)
+    if text.endswith("%"):
+        text = text[:-1].strip()
+    return parse_decimal(text)
+
+
+def _is_percentage_mca(
+    mca_mode: str,
+    raw_alloc_texts: list[str],
+    line_amount: Decimal | None,
+) -> bool:
+    mca_clean = (mca_mode or "").strip().lower()
+    if mca_clean in {"percentage", "percent", "pct", "%"}:
+        return True
+    if any(str(t or "").strip().endswith("%") for t in raw_alloc_texts):
+        return True
+    if mca_clean == "quantity":
+        return False
+    parsed_vals = [_parse_alloc_decimal(t) for t in raw_alloc_texts]
+    if parsed_vals and all(v is not None and v > 0 for v in parsed_vals):
+        raw_sum = sum((v for v in parsed_vals if v is not None), Decimal("0"))
+        if abs(raw_sum - Decimal("100")) <= Decimal("0.1"):
+            if line_amount is None or abs(line_amount - Decimal("100")) > Decimal(
+                "0.01"
+            ):
+                return True
+    return False
+
+
+def _split_inline_wbs_codes(wbs_text: str) -> list[str]:
+    if not wbs_text or not wbs_text.strip():
+        return []
+    parts = [tok.strip() for tok in re.split(r"[,;/&]+", wbs_text) if tok.strip()]
+    seen: list[str] = []
+    for part in parts:
+        if part.upper() not in {s.upper() for s in seen}:
+            seen.append(part)
+    return seen
+
+
+def _finalize_wbs_allocations(
+    parent_entry: dict[str, Any],
+) -> tuple[dict[str, Any], ...]:
+    """
+    Evaluates the parent item and any attached WBS/allocation continuation rows:
+      - Supports Quantity, Amount, and Percentage allocations (with final-portion
+        cent rounding remainder absorption when percentages sum to ~100% or
+        quantities sum to the line quantity).
+      - Collapses same-WBS continuation rows when they reconcile with the line total.
+      - Preserves multi-WBS allocations (or missing/mismatched allocations) for Review Queue.
+    """
+    continuations: list[dict[str, Any]] = parent_entry["continuation_rows"]
+    parent_wbs = parent_entry["wbs"]
+    parent_mca = parent_entry["mca"]
+    parent_rate = parent_entry["unit_rate"]
+    line_amount: Decimal | None = parent_entry["amount_gst"]
+    line_qty: Decimal | None = parent_entry.get("quantity")
+    conversion_rate: Decimal = parent_entry.get("conversion_rate") or Decimal("1")
+
+    if not continuations:
+        inline_codes = _split_inline_wbs_codes(parent_wbs)
+        if len(inline_codes) > 1:
+            return tuple(
+                {
+                    "row_number": parent_entry["row_number"],
+                    "wbs": code,
+                    "mca": parent_mca or "Amount",
+                    "raw_allocation": None,
+                    "quantity": None,
+                    "amount_gst": None,
+                    "amount_missing": True,
+                }
+                for code in inline_codes
+            )
+        return ()
+
+    raw_rows: list[dict[str, Any]] = [
+        {
+            "row_number": parent_entry["row_number"],
+            "wbs": parent_wbs,
+            "mca": parent_mca,
+            "allocatn_raw": parent_entry["allocatn_raw"],
+            "row_amount_gst": None,
+        },
+        *[
+            {
+                "row_number": cont["row_number"],
+                "wbs": cont["wbs"] or parent_wbs,
+                "mca": cont["mca"] or parent_mca,
+                "allocatn_raw": cont["allocatn_raw"],
+                "row_amount_gst": cont["row_amount_gst"],
+            }
+            for cont in continuations
+        ],
+    ]
+
+    effective_mca = (
+        next((r["mca"] for r in raw_rows if normalize_text(r["mca"])), "") or "Amount"
+    )
+    raw_alloc_texts = [str(r["allocatn_raw"] or "") for r in raw_rows]
+    is_pct = _is_percentage_mca(effective_mca, raw_alloc_texts, line_amount)
+    is_qty = not is_pct and effective_mca.strip().lower() == "quantity"
+
+    alloc_entries: list[dict[str, Any]] = []
+
+    if is_pct:
+        pct_vals = [_parse_alloc_decimal(r["allocatn_raw"]) for r in raw_rows]
+        all_present = line_amount is not None and all(
+            v is not None and v > 0 for v in pct_vals
+        )
+        pct_sum = (
+            sum((v for v in pct_vals if v is not None), Decimal("0"))
+            if all_present
+            else Decimal("0")
+        )
+        absorb_remainder = all_present and abs(pct_sum - Decimal("100")) <= Decimal(
+            "0.1"
+        )
+        running_amt = Decimal("0.00")
+
+        for idx, (r, pct_val) in enumerate(zip(raw_rows, pct_vals)):
+            if pct_val is None or pct_val <= 0 or line_amount is None:
+                alloc_entries.append(
+                    {
+                        "row_number": r["row_number"],
+                        "wbs": r["wbs"],
+                        "mca": "Percentage",
+                        "raw_allocation": r["allocatn_raw"] or None,
+                        "quantity": None,
+                        "amount_gst": None,
+                        "amount_missing": True,
+                    }
+                )
+                continue
+
+            if absorb_remainder and idx == len(raw_rows) - 1:
+                amt = (line_amount.quantize(_CENT) - running_amt).quantize(_CENT)
+            else:
+                amt = ((line_amount * pct_val) / Decimal("100")).quantize(
+                    _CENT, rounding=ROUND_HALF_UP
+                )
+                running_amt += amt
+
+            alloc_entries.append(
+                {
+                    "row_number": r["row_number"],
+                    "wbs": r["wbs"],
+                    "mca": "Percentage",
+                    "raw_allocation": r["allocatn_raw"] or None,
+                    "quantity": None,
+                    "amount_gst": str(amt),
+                    "amount_missing": False,
+                }
+            )
+    elif is_qty:
+        qty_vals = [_parse_alloc_decimal(r["allocatn_raw"]) for r in raw_rows]
+        all_present = (
+            parent_rate is not None
+            and line_amount is not None
+            and all(v is not None and v > 0 for v in qty_vals)
+        )
+        qty_sum = (
+            sum((v for v in qty_vals if v is not None), Decimal("0"))
+            if all_present
+            else Decimal("0")
+        )
+        absorb_remainder = (
+            all_present
+            and line_qty is not None
+            and abs(qty_sum - line_qty) <= Decimal("0.001")
+        )
+        running_amt = Decimal("0.00")
+
+        for idx, (r, q_val) in enumerate(zip(raw_rows, qty_vals)):
+            if q_val is None or q_val <= 0 or parent_rate is None:
+                alloc_entries.append(
+                    {
+                        "row_number": r["row_number"],
+                        "wbs": r["wbs"],
+                        "mca": "Quantity",
+                        "raw_allocation": r["allocatn_raw"] or None,
+                        "quantity": str(q_val) if q_val is not None else None,
+                        "amount_gst": None,
+                        "amount_missing": True,
+                    }
+                )
+                continue
+
+            if (
+                absorb_remainder
+                and idx == len(raw_rows) - 1
+                and line_amount is not None
+            ):
+                amt = (line_amount.quantize(_CENT) - running_amt).quantize(_CENT)
+            else:
+                amt = (q_val * parent_rate).quantize(_CENT, rounding=ROUND_HALF_UP)
+                running_amt += amt
+
+            alloc_entries.append(
+                {
+                    "row_number": r["row_number"],
+                    "wbs": r["wbs"],
+                    "mca": "Quantity",
+                    "raw_allocation": r["allocatn_raw"] or None,
+                    "quantity": str(q_val),
+                    "amount_gst": str(amt),
+                    "amount_missing": False,
+                }
+            )
+    else:
+        raw_amts = [
+            _parse_alloc_decimal(r["allocatn_raw"])
+            if _parse_alloc_decimal(r["allocatn_raw"]) is not None
+            else r["row_amount_gst"]
+            for r in raw_rows
+        ]
+        all_present = all(v is not None and v > 0 for v in raw_amts)
+        raw_sum = (
+            sum((v for v in raw_amts if v is not None), Decimal("0"))
+            if all_present
+            else Decimal("0")
+        )
+        source_amt: Decimal | None = parent_entry.get("source_amount")
+        needs_fx = (
+            all_present
+            and conversion_rate != Decimal("1")
+            and source_amt is not None
+            and line_amount is not None
+            and abs(raw_sum - source_amt) <= Decimal("0.05")
+        )
+        running_amt = Decimal("0.00")
+
+        for idx, (r, a_val) in enumerate(zip(raw_rows, raw_amts)):
+            if a_val is None or a_val <= 0:
+                alloc_entries.append(
+                    {
+                        "row_number": r["row_number"],
+                        "wbs": r["wbs"],
+                        "mca": effective_mca,
+                        "raw_allocation": r["allocatn_raw"] or None,
+                        "quantity": None,
+                        "amount_gst": None,
+                        "amount_missing": True,
+                    }
+                )
+                continue
+
+            if needs_fx and line_amount is not None:
+                if idx == len(raw_rows) - 1:
+                    amt = (line_amount.quantize(_CENT) - running_amt).quantize(_CENT)
+                else:
+                    amt = (a_val * conversion_rate).quantize(
+                        _CENT, rounding=ROUND_HALF_UP
+                    )
+                    running_amt += amt
+            else:
+                amt = a_val.quantize(_CENT, rounding=ROUND_HALF_UP)
+
+            alloc_entries.append(
+                {
+                    "row_number": r["row_number"],
+                    "wbs": r["wbs"],
+                    "mca": effective_mca,
+                    "raw_allocation": r["allocatn_raw"] or None,
+                    "quantity": None,
+                    "amount_gst": str(amt),
+                    "amount_missing": False,
+                }
+            )
+
+    distinct_wbs = {
+        (entry["wbs"] or "").strip().upper()
+        for entry in alloc_entries
+        if (entry["wbs"] or "").strip()
+    }
+    any_missing = any(entry["amount_missing"] for entry in alloc_entries)
+    total_allocated = sum(
+        (
+            Decimal(entry["amount_gst"])
+            for entry in alloc_entries
+            if entry["amount_gst"] is not None
+        ),
+        Decimal("0.00"),
+    )
+    reconciles = (
+        not any_missing
+        and line_amount is not None
+        and abs(total_allocated - line_amount.quantize(_CENT)) <= _CENT
+    )
+
+    if len(distinct_wbs) <= 1 and reconciles:
+        return ()
+
+    return tuple(alloc_entries)
 
 
 def _format_date(value: object) -> str:
@@ -540,6 +966,17 @@ def _optional_text(
     if source_column is None:
         return ""
     return normalize_text(row[source_column])
+
+
+def _optional_allocation_text(
+    row: pd.Series,
+    column_map: dict[str, str],
+) -> str:
+    for alias in ALLOCATION_COLUMN_ALIASES:
+        val = _optional_text(row, column_map, alias)
+        if val:
+            return val
+    return ""
 
 
 def _optional_identifier_text(

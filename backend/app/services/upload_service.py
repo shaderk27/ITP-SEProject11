@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import uuid4
 from sqlalchemy.orm import Session
 import dataclasses
@@ -84,9 +85,9 @@ class UploadService:
         needs_review_count = 0
 
         # Lookups for classification mapping
-        lab_cache = {}
-        group_cache = {}
-        category_cache = {}
+        lab_cache: dict[int, dict[str, str]] = {}
+        group_cache: dict[int, str] = {}
+        category_cache: dict[int, str] = {}
 
         if self.db:
             try:
@@ -131,12 +132,16 @@ class UploadService:
             assigned_category = "General"
             classification_reason = "Manual review required."
 
-            classification: dict = {
+            classification: dict[str, Any] = {
                 "lab_id": None,
                 "lab_group_id": None,
                 "category_id": None,
                 "reason": classification_reason,
+                "wbs_allocations": [],
             }
+
+            raw_allocations = list(getattr(item, "wbs_allocations", ()) or ())
+            enriched_allocations: list[dict[str, Any]] = []
 
             if self.db:
                 try:
@@ -146,7 +151,11 @@ class UploadService:
                         else getattr(item, "__dict__", {})
                     )
                     row_text = " ".join(
-                        [str(v) for v in item_dict.values() if v is not None]
+                        [
+                            str(v)
+                            for k, v in item_dict.items()
+                            if v is not None and k != "wbs_allocations"
+                        ]
                     ).lower()
 
                     classification = classify_line_item(
@@ -178,10 +187,77 @@ class UploadService:
                     if cat_id and cat_id in category_cache:
                         assigned_category = category_cache[cat_id]
 
+                    # Classify each WBS allocation portion individually when multi-WBS is present
+                    for alloc in raw_allocations:
+                        alloc_wbs = str(alloc.get("wbs") or item_dict.get("wbs") or "")
+                        alloc_cls = classify_line_item(
+                            self.db,
+                            f"{row_text} {alloc_wbs.lower()}",
+                            item_dict.get("requestor", ""),
+                            wbs=alloc_wbs,
+                            purpose=item_dict.get("purpose", ""),
+                            instruction_to_vendor=item_dict.get(
+                                "instruction_to_vendor", ""
+                            ),
+                            req_type=item_dict.get("req_type", ""),
+                            pr_category=item_dict.get("pr_category", ""),
+                        )
+                        a_lab_id = alloc_cls.get("lab_id")
+                        a_group_id = alloc_cls.get("lab_group_id")
+                        a_cat_id = alloc_cls.get("category_id")
+                        a_lab_name = (
+                            lab_cache[a_lab_id]["lab_name"]
+                            if a_lab_id and a_lab_id in lab_cache
+                            else "General"
+                        )
+                        a_group_name = (
+                            lab_cache[a_lab_id]["lab_group_name"]
+                            if a_lab_id and a_lab_id in lab_cache
+                            else (
+                                group_cache.get(a_group_id, "General")
+                                if a_group_id
+                                else "General"
+                            )
+                        )
+                        a_cat_name = (
+                            category_cache.get(a_cat_id, "General")
+                            if a_cat_id
+                            else "General"
+                        )
+                        enriched_allocations.append(
+                            {
+                                **alloc,
+                                "suggested_lab_group_id": a_group_id,
+                                "suggested_lab_group_name": a_group_name,
+                                "suggested_lab_id": a_lab_id,
+                                "suggested_lab_name": a_lab_name,
+                                "suggested_category_id": a_cat_id,
+                                "suggested_category_name": a_cat_name,
+                                "reason": alloc_cls.get("reason", ""),
+                            }
+                        )
+
                 except Exception:
                     classification_reason = (
                         "Classification unavailable. Manual review required."
                     )
+
+            if not enriched_allocations and raw_allocations:
+                enriched_allocations = [
+                    {
+                        **alloc,
+                        "suggested_lab_group_id": classification.get("lab_group_id"),
+                        "suggested_lab_group_name": assigned_group,
+                        "suggested_lab_id": classification.get("lab_id"),
+                        "suggested_lab_name": assigned_lab,
+                        "suggested_category_id": classification.get("category_id"),
+                        "suggested_category_name": assigned_category,
+                        "reason": classification_reason,
+                    }
+                    for alloc in raw_allocations
+                ]
+
+            classification["wbs_allocations"] = enriched_allocations
 
             if dataclasses.is_dataclass(item):
                 item = dataclasses.replace(
@@ -189,6 +265,7 @@ class UploadService:
                     lab=assigned_lab,
                     lab_group=assigned_group,
                     category=assigned_category,
+                    wbs_allocations=tuple(enriched_allocations),
                 )
             else:
                 item.lab = assigned_lab
@@ -199,7 +276,12 @@ class UploadService:
             decision = self.duplicate_service.decide(item, existing)
 
             if decision.status != "duplicate":
-                if assigned_lab in ("Unassigned Lab", "General") or not assigned_lab:
+                if (
+                    assigned_lab in ("Unassigned Lab", "General")
+                    or not assigned_lab
+                    or assigned_category == "General"
+                    or len(enriched_allocations) > 1
+                ):
                     needs_review_count += 1
                 classified_items.append(
                     {

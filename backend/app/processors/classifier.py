@@ -130,13 +130,15 @@ def _match_lab_group_by_wbs(lab_groups: list, wbs: str):
         return None
 
     for group in sorted(lab_groups, key=lambda g: len(g.wbs_code or ""), reverse=True):
-        code = (getattr(group, "wbs_code", "") or "").lower().strip()
-        if code and (
-            wbs_clean == code
-            or wbs_clean.startswith(f"{code}.")
-            or wbs_clean.startswith(f"{code}-")
-        ):
-            return group
+        raw_codes = getattr(group, "wbs_code", "") or ""
+        for code_part in raw_codes.split(","):
+            code = code_part.lower().strip()
+            if code and (
+                wbs_clean == code
+                or wbs_clean.startswith(f"{code}.")
+                or wbs_clean.startswith(f"{code}-")
+            ):
+                return group
 
     return None
 
@@ -196,8 +198,6 @@ def _match_lab_by_requestor(db: Session, labs: list, requestor_name: str):
                 or ic_name_clean in requestor_name
                 or requestor_name in ic_name_clean
             ):
-                # A Lab IC can run several labs: take the first one inside the
-                # PR's lab group, primary lab first.
                 for assignment in sorted(
                     ic.lab_assignments, key=lambda a: not a.is_primary
                 ):

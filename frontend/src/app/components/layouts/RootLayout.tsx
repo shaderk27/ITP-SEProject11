@@ -16,18 +16,35 @@ import {
   User as UserIcon,
   Lock,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "../ui/utils";
 import { useAuth } from "../../context/AuthContext";
-import type { UserRole } from "../../context/AuthContext";
-import { useSessionTimeout, WARNING_BEFORE_EXPIRY_MS } from "../../services/useSessionTimeout";
+import type { User, UserRole } from "../../context/AuthContext";
+import {
+  useSessionTimeout,
+  WARNING_BEFORE_EXPIRY_MS,
+} from "../../services/useSessionTimeout";
 import { FEATURES } from "../../config/features";
 import { AskAiWidget } from "../shared/AskAiWidget";
 
 interface NavItem {
   name: string;
   path: string;
-  icon: any;
+  icon: LucideIcon;
   roles: UserRole[];
+}
+
+interface AlertLabGroupSummary {
+  id: number;
+  budget?: number;
+  spent?: number;
+}
+
+interface AlertLabSummary {
+  id: number;
+  group_id?: number;
+  budget?: number;
+  spent?: number;
 }
 
 const navigation: NavItem[] = [
@@ -65,7 +82,12 @@ const navigation: NavItem[] = [
         },
       ]
     : []),
-  { name: "Alerts", path: "/alerts", icon: Bell, roles: ["admin", "teamlead", "labic"] },
+  {
+    name: "Alerts",
+    path: "/alerts",
+    icon: Bell,
+    roles: ["admin", "teamlead", "labic"],
+  },
   ...(FEATURES.auditLog
     ? [
         {
@@ -95,10 +117,113 @@ const navigation: NavItem[] = [
   { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
 ];
 
+const getThresholdLevel = (util: number): number => {
+  if (util >= 100) return 100;
+  if (util >= 95) return 95;
+  if (util >= 80) return 80;
+  if (util >= 50) return 50;
+  return 0;
+};
+
+/**
+ * Builds stable, spend-independent alert identity keys scoped to the user's role:
+ *   - `lab:{lab_id}:threshold:{threshold_level}`
+ *   - `lab-group:{lab_group_id}:threshold:{threshold_level}`
+ */
+function buildAlertNotificationKeys(
+  labGroups: AlertLabGroupSummary[],
+  labs: AlertLabSummary[],
+  user: Pick<User, "role" | "labGroupId" | "labIds">,
+): string[] {
+  const currentKeys: string[] = [];
+
+  const groupsToProcess = labGroups.filter((g) => {
+    if (user.role === "admin") return true;
+    if (user.role === "teamlead") return g.id === user.labGroupId;
+    if (user.role === "labic") {
+      return labs.some(
+        (lab) => lab.group_id === g.id && user.labIds.includes(lab.id),
+      );
+    }
+    return false;
+  });
+
+  groupsToProcess.forEach((group) => {
+    const isLabIC = user.role === "labic";
+    const groupBudget = Number(group.budget || 0);
+    const groupSpent = Number(group.spent || 0);
+    const groupUtil =
+      !isLabIC && groupBudget > 0 ? (groupSpent / groupBudget) * 100 : 0;
+    const groupThreshold = getThresholdLevel(groupUtil);
+
+    let groupLabs = labs.filter(
+      (lab) =>
+        lab.group_id === group.id &&
+        (Number(lab.budget || 0) > 0 || Number(lab.spent || 0) > 0),
+    );
+    if (isLabIC) {
+      groupLabs = groupLabs.filter((lab) => user.labIds.includes(lab.id));
+    }
+
+    let anyLabThresholdAdded = false;
+    groupLabs.forEach((lab) => {
+      const budget = Number(lab.budget || 0);
+      const spent = Number(lab.spent || 0);
+      const util =
+        budget > 0 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
+      const labThreshold = getThresholdLevel(util);
+
+      if (labThreshold > 0) {
+        anyLabThresholdAdded = true;
+        currentKeys.push(`lab:${lab.id}:threshold:${labThreshold}`);
+      }
+    });
+
+    if (!isLabIC && groupThreshold > 0 && !anyLabThresholdAdded) {
+      currentKeys.push(`lab-group:${group.id}:threshold:${groupThreshold}`);
+    }
+  });
+
+  return currentKeys;
+}
+
+/**
+ * Reconciles active alert keys against stored seen keys:
+ *  - Prunes seen keys for labs/groups that dropped below their threshold or
+ *    escalated to a different threshold so future crossings count as new.
+ *  - Returns { unreadCount, nextSeenKeys }.
+ */
+function computeUnreadAlertState(
+  currentKeys: string[],
+  storedSeen: string[],
+  isOnAlertsPage: boolean,
+): { unreadCount: number; nextSeenKeys: string[] } {
+  if (isOnAlertsPage) {
+    return {
+      unreadCount: 0,
+      nextSeenKeys: [...currentKeys],
+    };
+  }
+
+  const activeSet = new Set(currentKeys);
+  const validSeen = storedSeen.filter((k) => activeSet.has(k));
+  const seenSet = new Set(validSeen);
+  const unreadCount = currentKeys.filter((k) => !seenSet.has(k)).length;
+
+  return {
+    unreadCount,
+    nextSeenKeys: validSeen,
+  };
+}
+
 export function RootLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, updateUser } = useAuth();
+
+  // --- Unread Alerts Notification Badge State ---
+  const [unreadAlertCount, setUnreadAlertCount] = useState<number>(0);
+  const [activeAlertKeys, setActiveAlertKeys] = useState<string[]>([]);
 
   // --- Profile Modal States ---
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -115,12 +240,93 @@ export function RootLayout() {
   const { showWarning, secondsRemaining, extendSession, handleExpire } =
     useSessionTimeout();
   const API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
+  const CONFIG_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
   useEffect(() => {
     if (!user) {
       navigate("/login");
     }
   }, [user, navigate]);
+
+  const seenStorageKey = user ? `seen_alerts_user_${user.id}` : "";
+
+  useEffect(() => {
+    if (!user || user.mustResetPassword || !seenStorageKey) return;
+
+    let isCancelled = false;
+
+    const pollAlertNotifications = async () => {
+      try {
+        const [groupsRes, labsRes] = await Promise.all([
+          fetch(`${CONFIG_API_BASE}/api/config/labgroups`, {
+            credentials: "include",
+          }),
+          fetch(`${CONFIG_API_BASE}/api/config/labs`, {
+            credentials: "include",
+          }),
+        ]);
+        if (!groupsRes.ok || !labsRes.ok || isCancelled) return;
+
+        const labGroups: unknown = await groupsRes.json();
+        const labs: unknown = await labsRes.json();
+        if (!Array.isArray(labGroups) || !Array.isArray(labs) || isCancelled) {
+          return;
+        }
+
+        const currentKeys = buildAlertNotificationKeys(
+          labGroups as AlertLabGroupSummary[],
+          labs as AlertLabSummary[],
+          user,
+        );
+
+        let storedSeen: string[] = [];
+        try {
+          const raw = localStorage.getItem(seenStorageKey);
+          if (raw) {
+            const parsed: unknown = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              storedSeen = parsed.filter(
+                (item): item is string => typeof item === "string",
+              );
+            }
+          }
+        } catch {
+          storedSeen = [];
+        }
+
+        const isOnAlertsPage = location.pathname.startsWith("/alerts");
+        const { unreadCount, nextSeenKeys } = computeUnreadAlertState(
+          currentKeys,
+          storedSeen,
+          isOnAlertsPage,
+        );
+
+        localStorage.setItem(seenStorageKey, JSON.stringify(nextSeenKeys));
+        setActiveAlertKeys(currentKeys);
+        setUnreadAlertCount(unreadCount);
+      } catch (err) {
+        console.error("Failed to check alert notifications:", err);
+      }
+    };
+
+    void pollAlertNotifications();
+    const intervalId = window.setInterval(() => {
+      void pollAlertNotifications();
+    }, 15000);
+
+    return () => {
+      isCancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [user, seenStorageKey, location.pathname, CONFIG_API_BASE]);
+
+  // Clear badge immediately when navigating to /alerts
+  const handleNavClick = (path: string) => {
+    if (path === "/alerts" && seenStorageKey) {
+      localStorage.setItem(seenStorageKey, JSON.stringify(activeAlertKeys));
+      setUnreadAlertCount(0);
+    }
+  };
 
   if (!user) {
     return null;
@@ -247,6 +453,7 @@ export function RootLayout() {
                   <li key={item.path}>
                     <Link
                       to={item.path}
+                      onClick={() => handleNavClick(item.path)}
                       className={cn(
                         "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors",
                         isActive
@@ -254,8 +461,22 @@ export function RootLayout() {
                           : "text-[#475569] hover:bg-[#f1f5f9]",
                       )}
                     >
-                      <Icon className="h-5 w-5" />
-                      <span className="text-sm font-medium">{item.name}</span>
+                      <Icon className="h-5 w-5 shrink-0" />
+                      <span className="text-sm font-medium flex-1">
+                        {item.name}
+                      </span>
+                      {item.path === "/alerts" && unreadAlertCount > 0 && (
+                        <span
+                          className={cn(
+                            "ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-[11px] font-bold leading-none rounded-full shadow-xs",
+                            isActive
+                              ? "bg-white text-[#dc2626]"
+                              : "bg-[#dc2626] text-white",
+                          )}
+                        >
+                          {unreadAlertCount}
+                        </span>
+                      )}
                     </Link>
                   </li>
                 );
