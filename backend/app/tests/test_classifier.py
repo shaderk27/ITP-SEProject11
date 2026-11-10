@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
 from app.models.auth import User
+from app.models.config import Lab, LabGroup, RequesterLabMapping, SpendingCategory
 from app.processors.classifier import classify_line_item
 
 

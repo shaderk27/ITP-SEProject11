@@ -1,37 +1,35 @@
-from typing import List, Optional
-
 from fastapi import (
     APIRouter,
-    Depends,
-    Query,
-    Response,
     Cookie,
+    Depends,
     HTTPException,
-    status,
+    Query,
     Request,
+    Response,
+    status,
 )
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.auth import User
+from app.repositories.auth_repository import AuthRepository
 from app.schemas.auth_schema import (
+    AssignLabGroupSchema,
+    AssignLabSchema,
+    CreateUserRequest,
     ForgotPasswordSchema,
     LoginRequest,
-    CreateUserRequest,
     ResetPasswordSchema,
     RoleResponse,
     UpdateProfileRequest,
-    AssignLabGroupSchema,
-    AssignLabSchema,
 )
+from app.services.audit_service import log_audit_action
 from app.services.auth_service import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
     COOKIE_NAME,
     COOKIE_SECURE,
     AuthService,
 )
-from app.repositories.auth_repository import AuthRepository
-from app.services.audit_service import log_audit_action
-from app.models.auth import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -40,15 +38,15 @@ def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     return AuthService(repository=AuthRepository(), db=db)
 
 
-def require_admin(
+def require_admin_or_teamlead(  # allow manager too
     access_token: str | None = Cookie(None),
     service: AuthService = Depends(get_auth_service),
 ) -> dict:
     current_user = service.get_current_user(access_token)
-    if current_user.get("role") != "admin":
+    if current_user.get("role") not in ("admin", "teamlead"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access is required.",
+            detail="Admin or team lead access is required.",
         )
     return current_user
 
@@ -58,6 +56,21 @@ def get_current_user_allow_reset(
     service: AuthService = Depends(get_auth_service),
 ) -> dict:
     return service.get_current_user_allow_reset(access_token)
+
+
+def _ensure_can_manage(service: AuthService, actor: dict, user_id: int):
+    """Admins can manage anyone. Team leads can manage team leads and
+    lab ICs, but never admins. Returns the target user."""
+    target = service.repository.get_user_by_id(service.db, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    if target.role.role_name == "admin" and actor.get("role") != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Team leads cannot manage admin accounts.",
+        )
+    return target
 
 
 @router.post("/login")
@@ -92,7 +105,7 @@ async def login(
                 new_value={"reason": getattr(e, "detail", "Unknown")},
                 request=request,
             )
-        raise e
+        raise
 
 
 @router.get("/me")
@@ -141,7 +154,7 @@ async def create_user(
     payload: CreateUserRequest,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
     res = service.create_user(
         full_name=payload.full_name,
@@ -153,6 +166,7 @@ async def create_user(
         lab_ids=payload.lab_ids,
         primary_lab_id=payload.primary_lab_id,
         creator_admin_id=admin.get("id"),
+        creator_role=admin.get("role"),
     )
     log_audit_action(
         db=service.db,
@@ -170,7 +184,7 @@ async def create_user(
     return res
 
 
-@router.get("/roles", response_model=List[RoleResponse])
+@router.get("/roles", response_model=list[RoleResponse])
 async def get_all_roles(service: AuthService = Depends(get_auth_service)):
     return service.get_all_roles()
 
@@ -186,19 +200,30 @@ async def forgot_password(
 
 @router.get("/users")
 async def get_all_users(
-    role: Optional[str] = Query(None),
+    role: str | None = Query(None),
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_admin_or_teamlead),
 ):
     if role:
-        return service.get_users_by_role(role)
+        return service.get_users_by_role(role.strip().lower())
     return service.get_all_users()
+
+
+@router.get("/assignment-targets")
+async def get_assignment_targets(
+    service: AuthService = Depends(get_auth_service),
+    _admin: dict = Depends(require_admin_or_teamlead),
+):
+    """Lab Groups and Labs (id/name/group only, NO budget data) that an Admin
+    or Team Lead may use when assigning users, across ALL Lab Groups.
+    Budget/config endpoints stay scoped to the Team Lead's own Lab Group."""
+    return service.get_assignment_targets()
 
 
 @router.get("/assignments")
 async def get_assignments(
     service: AuthService = Depends(get_auth_service),
-    _admin: dict = Depends(require_admin),
+    _admin: dict = Depends(require_admin_or_teamlead),
 ):
     return service.get_assignments()
 
@@ -209,8 +234,9 @@ async def assign_lab_ic(
     payload: AssignLabSchema,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.assign_lab_to_user(
         user_id=user_id,
         lab_id=payload.lab_id,
@@ -238,8 +264,9 @@ async def assign_team_lead(
     payload: AssignLabGroupSchema,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.assign_labgroup_to_user(user_id, payload.lab_group_id)
     log_audit_action(
         db=service.db,
@@ -253,13 +280,59 @@ async def assign_team_lead(
     return res
 
 
+@router.put("/users/{user_id}/deactivate")
+async def deactivate_user(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    admin: dict = Depends(require_admin_or_teamlead),
+):
+    _ensure_can_manage(service, admin, user_id)
+    return service.deactivate_user(user_id, current_admin_id=admin["id"])
+
+
+@router.put("/users/{user_id}/activate")
+async def activate_user(
+    user_id: int,
+    service: AuthService = Depends(get_auth_service),
+    admin: dict = Depends(require_admin_or_teamlead),
+):
+    _ensure_can_manage(service, admin, user_id)
+    return service.activate_user(user_id, current_admin_id=admin.get("id"))
+
+
+@router.post("/users/{user_id}/send-reset")
+async def admin_send_reset(
+    user_id: int,
+    request: Request,
+    service: AuthService = Depends(get_auth_service),
+    admin: dict = Depends(require_admin_or_teamlead),
+):
+    user = _ensure_can_manage(service, admin, user_id)
+    if user.role.role_name == "admin":
+        raise HTTPException(
+            status_code=403, detail="Admin passwords cannot be reset by another user."
+        )
+    service.forgot_password(user.email)
+    log_audit_action(
+        db=service.db,
+        user_id=admin["id"],
+        action_type="UPDATE",
+        entity_name="UserPassword",
+        record_id=str(user_id),
+        new_value={"action": "admin_triggered_reset"},
+        request=request,
+    )
+    return {"message": f"Temporary password sent to {user.email}."}
+
+
 @router.put("/users/{user_id}/unassign-scope")
 async def unassign_user_scope(
     user_id: int,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.unassign_user_scope(user_id)
     log_audit_action(
         db=service.db,
@@ -279,8 +352,9 @@ async def unassign_lab_from_user(
     lab_id: int,
     request: Request,
     service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin_or_teamlead),
 ):
+    _ensure_can_manage(service, admin, user_id)
     res = service.unassign_lab_from_user(user_id, lab_id)
     log_audit_action(
         db=service.db,
@@ -295,26 +369,6 @@ async def unassign_lab_from_user(
     return res
 
 
-@router.put("/users/{user_id}/deactivate")
-async def deactivate_user(
-    user_id: int,
-    service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
-):
-    # Canonical audit log is written inside auth_repository.set_user_activation_status
-    return service.deactivate_user(user_id, current_admin_id=admin["id"])
-
-
-@router.put("/users/{user_id}/activate")
-async def activate_user(
-    user_id: int,
-    service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
-):
-    # Canonical audit log is written inside auth_repository.set_user_activation_status
-    return service.activate_user(user_id, current_admin_id=admin.get("id"))
-
-
 @router.post("/reset-password")
 async def reset_password(
     payload: ResetPasswordSchema,
@@ -327,33 +381,6 @@ async def reset_password(
         payload.new_password,
     )
     return {"message": "Password reset successfully."}
-
-
-@router.post("/users/{user_id}/send-reset")
-async def admin_send_reset(
-    user_id: int,
-    request: Request,
-    service: AuthService = Depends(get_auth_service),
-    admin: dict = Depends(require_admin),
-):
-    user = service.repository.get_user_by_id(service.db, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-    if user.role.role_name == "admin":
-        raise HTTPException(
-            status_code=403, detail="Admin passwords cannot be reset by another admin."
-        )
-    service.forgot_password(user.email)
-    log_audit_action(
-        db=service.db,
-        user_id=admin["id"],
-        action_type="UPDATE",
-        entity_name="UserPassword",
-        record_id=str(user_id),
-        new_value={"action": "admin_triggered_reset"},
-        request=request,
-    )
-    return {"message": f"Temporary password sent to {user.email}."}
 
 
 @router.post("/refresh")

@@ -1,10 +1,11 @@
 """RAG knowledge store (W13-03A). Tables come from migrations/add_rag_knowledge.sql."""
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
+    CHAR,
     BigInteger,
     Boolean,
-    CHAR,
     Column,
     DateTime,
     ForeignKey,
@@ -13,7 +14,6 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.sql import func
-from pgvector.sqlalchemy import Vector
 
 from app.database import Base
 

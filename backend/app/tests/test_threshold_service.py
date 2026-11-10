@@ -1,14 +1,26 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
 from sqlalchemy import func
 
-from app.main import app
+from app.api.alerts import _find_threshold_crossing
 from app.database import get_db
 from app.dependencies.auth import get_current_user
-from app.api.alerts import _find_threshold_crossing
+from app.main import app
+from app.models.auth import Role, User
+from app.models.config import (
+    Budget,
+    BudgetPeriod,
+    Lab,
+    LabGroup,
+    LabIcAssignment,
+    SpendingCategory,
+)
+from app.models.staging import PurchaseRequest, PurchaseRequestLine, UploadBatch
+from app.models.upload import PRLineItem
 from app.repositories.persistence_repository import (
     _build_lab_matcher_patterns,
     _detect_labs_in_line,
@@ -16,20 +28,9 @@ from app.repositories.persistence_repository import (
     _split_amount_equally,
 )
 from app.services.threshold_service import (
-    check_and_notify_lab_thresholds,
     check_and_notify_lab_group_thresholds,
+    check_and_notify_lab_thresholds,
 )
-from app.models.config import (
-    Lab,
-    LabGroup,
-    LabIcAssignment,
-    Budget,
-    BudgetPeriod,
-    SpendingCategory,
-)
-from app.models.staging import PurchaseRequest, PurchaseRequestLine, UploadBatch
-from app.models.upload import PRLineItem
-from app.models.auth import User, Role
 
 client = TestClient(app)
 
@@ -48,7 +49,7 @@ def _make_pr_line_item(**overrides: Any) -> PRLineItem:
         "purpose": "E2-02-02",
         "grand_total_sgd": Decimal("5000.00"),
         "item_details": "Price Schedule G Desktop Workstation",
-        "quantity": Decimal("1"),
+        "quantity": Decimal(1),
         "unit_rate": Decimal("5000.00"),
         "amount_gst": Decimal("5000.00"),
         "wbs": "D-MOEXX-FCBX-E014-OOE",
@@ -262,19 +263,19 @@ def test_check_and_notify_lab_group_thresholds_95_percent(
 def test_find_threshold_crossing_uses_upload_batch_chronology_and_exact_line():
     batch_early = UploadBatch(
         batch_id=10,
-        uploaded_at=datetime(2026, 5, 1, 9, 0, tzinfo=timezone.utc),
-        processed_at=datetime(2026, 5, 1, 9, 5, tzinfo=timezone.utc),
+        uploaded_at=datetime(2026, 5, 1, 9, 0, tzinfo=UTC),
+        processed_at=datetime(2026, 5, 1, 9, 5, tzinfo=UTC),
     )
     batch_trigger = UploadBatch(
         batch_id=20,
-        uploaded_at=datetime(2026, 5, 2, 9, 0, tzinfo=timezone.utc),
-        processed_at=datetime(2026, 5, 2, 9, 5, tzinfo=timezone.utc),
+        uploaded_at=datetime(2026, 5, 2, 9, 0, tzinfo=UTC),
+        processed_at=datetime(2026, 5, 2, 9, 5, tzinfo=UTC),
     )
     # Uploaded last, even though its PR has an older historical request_date
     batch_late_with_old_pr_date = UploadBatch(
         batch_id=30,
-        uploaded_at=datetime(2026, 5, 3, 9, 0, tzinfo=timezone.utc),
-        processed_at=datetime(2026, 5, 3, 9, 5, tzinfo=timezone.utc),
+        uploaded_at=datetime(2026, 5, 3, 9, 0, tzinfo=UTC),
+        processed_at=datetime(2026, 5, 3, 9, 5, tzinfo=UTC),
     )
 
     pr1 = PurchaseRequest(pr_id=1, latest_batch_id=10, request_date=date(2026, 5, 1))
@@ -420,21 +421,21 @@ def test_alert_drilldown_reconciles_calculations_and_flags_triggering_lines(db):
         filename="batch1.xlsx",
         file_type="xlsx",
         upload_status="committed",
-        processed_at=datetime(2099, 5, 1, 10, 0, tzinfo=timezone.utc),
+        processed_at=datetime(2099, 5, 1, 10, 0, tzinfo=UTC),
     )
     batch2 = UploadBatch(
         uploaded_by=uploader.user_id,
         filename="batch2.xlsx",
         file_type="xlsx",
         upload_status="committed",
-        processed_at=datetime(2099, 6, 1, 10, 0, tzinfo=timezone.utc),
+        processed_at=datetime(2099, 6, 1, 10, 0, tzinfo=UTC),
     )
     batch3 = UploadBatch(
         uploaded_by=uploader.user_id,
         filename="batch3.xlsx",
         file_type="xlsx",
         upload_status="committed",
-        processed_at=datetime(2099, 7, 1, 10, 0, tzinfo=timezone.utc),
+        processed_at=datetime(2099, 7, 1, 10, 0, tzinfo=UTC),
     )
     db.add_all([batch1, batch2, batch3])
     db.flush()
@@ -588,7 +589,7 @@ def test_multi_lab_detection_and_equal_spending_distribution():
         purpose="E2-02-02",
         item_details="Price Schedule G Desktop Workstation (High End) Latest Gen Intel Core i9 processor",
         amount_gst=Decimal("5000.00"),
-        quantity=Decimal("1"),
+        quantity=Decimal(1),
         unit_rate=Decimal("5000.00"),
     )
     single_detected = _detect_labs_in_line(single_item, patterns)
@@ -603,7 +604,7 @@ def test_multi_lab_detection_and_equal_spending_distribution():
         item_details="Collective purchase of glass flasks for E2-02-01, Robotics Lab, and Cyber Security",
         grand_total_sgd=Decimal("300.00"),
         amount_gst=Decimal("300.00"),
-        quantity=Decimal("30"),
+        quantity=Decimal(30),
         unit_rate=Decimal("10.00"),
         pr_category="Consumables",
         line_identity_key="PR-MULTI-001::1",

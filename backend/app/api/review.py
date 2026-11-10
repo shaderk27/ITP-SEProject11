@@ -9,19 +9,14 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from app.services.threshold_service import (
-    check_and_notify_lab_thresholds,
-    check_and_notify_lab_group_thresholds,
-)
-from app.services.knowledge_service import index_pr_lines_in_background
-from app.services.duplicate_service import is_status_regression
 from app.database import get_db
 from app.dependencies.auth import get_current_user
+from app.models.auth import User
 from app.models.config import Budget, BudgetPeriod, Lab, LabGroup, SpendingCategory
 from app.models.staging import (
     AuditLog,
@@ -34,7 +29,12 @@ from app.models.staging import (
     StagingPRLine,
     UploadBatch,
 )
-from app.models.auth import User
+from app.services.duplicate_service import is_status_regression
+from app.services.knowledge_service import index_pr_lines_in_background
+from app.services.threshold_service import (
+    check_and_notify_lab_group_thresholds,
+    check_and_notify_lab_thresholds,
+)
 
 router = APIRouter(prefix="/api/review", tags=["Review"])
 
@@ -430,14 +430,14 @@ def get_queue_item(
 
     item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
 
-    if role_name == "teamlead":
-        if current_user.lab_group_id is None or not _line_in_teamlead_scope(
-            line, current_user.lab_group_id
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "This review item is not in your assigned lab group.",
-            )
+    if role_name == "teamlead" and (
+        current_user.lab_group_id is None
+        or line.suggested_lab_group_id != current_user.lab_group_id
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This review item is not in your assigned lab group.",
+        )
 
     lab_groups = db.query(LabGroup).order_by(LabGroup.lab_group_name).all()
     labs = db.query(Lab).order_by(Lab.lab_name).all()
@@ -562,7 +562,7 @@ def correct_queue_item(
             "Only Admin or Team Lead can resolve review items.",
         )
 
-    item, line, header, batch = _load_queue_item_or_404(db, review_queue_id)
+    item, line, _header, batch = _load_queue_item_or_404(db, review_queue_id)
 
     if batch.upload_status == "committed":
         raise HTTPException(
@@ -570,14 +570,14 @@ def correct_queue_item(
             f"Batch {batch.batch_id} has already been committed. This item can no longer be edited.",
         )
 
-    if role_name == "teamlead":
-        if current_user.lab_group_id is None or not _line_in_teamlead_scope(
-            line, current_user.lab_group_id
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "This review item is not in your assigned lab group.",
-            )
+    if role_name == "teamlead" and (
+        current_user.lab_group_id is None
+        or line.suggested_lab_group_id != current_user.lab_group_id
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This review item is not in your assigned lab group.",
+        )
 
     raw_json = dict(line.raw_line_json) if isinstance(line.raw_line_json, dict) else {}
     existing_allocs = list(raw_json.get("wbs_allocations") or [])
@@ -598,7 +598,7 @@ def correct_queue_item(
         alloc_sum = Decimal("0.00")
         parent_identity_key = str(
             raw_json.get("line_identity_key")
-            or f"{header.source_pr_number}::{line.source_line_no}"
+            or f"{_header.source_pr_number}::{line.source_line_no}"
         )
 
         for idx, alloc_in in enumerate(body.allocations, start=1):

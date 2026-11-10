@@ -8,6 +8,7 @@ import {
 } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
 import { UserManagement } from "../components/config/UserManagement";
+import { useAuth } from "../context/AuthContext";
 import { findCurrentPeriod } from "../services/dashboardService";
 import {
   Plus,
@@ -79,6 +80,10 @@ const generateVenueTags = (
 };
 
 export function SystemConfigPage() {
+  const { hasPermission } = useAuth();
+  // Creating/deleting Lab Groups, fiscal years and categories is Admin-only
+  // (enforced by the API; hidden here so Team Leads aren't offered 403 actions).
+  const isAdmin = hasPermission("hierarchy:create");
   const [labGroups, setLabGroups] = useState<any[]>([]);
   const [labs, setLabs] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
@@ -668,7 +673,7 @@ export function SystemConfigPage() {
                   {p.name}
                 </option>
               ))}
-              <option value="__add__">+ Add Fiscal Year</option>
+              {isAdmin && <option value="__add__">+ Add Fiscal Year</option>}
             </select>
           </div>
         </div>
@@ -707,15 +712,17 @@ export function SystemConfigPage() {
                     allocate funds to specific labs.
                   </p>
                 </div>
-                <Button
-                  onClick={() => {
-                    resetGroupModal();
-                    setIsGroupModalOpen(true);
-                  }}
-                  className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
-                >
-                  <Plus className="h-4 w-4 mr-2" /> Add Lab Group
-                </Button>
+                {isAdmin && (
+                  <Button
+                    onClick={() => {
+                      resetGroupModal();
+                      setIsGroupModalOpen(true);
+                    }}
+                    className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Add Lab Group
+                  </Button>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -828,19 +835,21 @@ export function SystemConfigPage() {
                                 >
                                   <Edit className="h-3 w-3" />
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() =>
-                                    handleDelete(
-                                      `/api/config/labgroups/${group.id}`,
-                                      group.name,
-                                    )
-                                  }
-                                  className="text-[#dc2626]"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
+                                {isAdmin && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      handleDelete(
+                                        `/api/config/labgroups/${group.id}`,
+                                        group.name,
+                                      )
+                                    }
+                                    className="text-[#dc2626]"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1127,15 +1136,17 @@ export function SystemConfigPage() {
                 <h3 className="text-lg font-semibold text-foreground">
                   Spending Categories
                 </h3>
-                <Button
-                  onClick={() => {
-                    resetCategoryModal();
-                    setIsCategoryModalOpen(true);
-                  }}
-                  className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
-                >
-                  <Plus className="h-4 w-4 mr-2" /> Add Category
-                </Button>
+                {isAdmin && (
+                  <Button
+                    onClick={() => {
+                      resetCategoryModal();
+                      setIsCategoryModalOpen(true);
+                    }}
+                    className="bg-[#1e3a8a] hover:bg-[#1e40af] text-white"
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Add Category
+                  </Button>
+                )}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -1159,28 +1170,30 @@ export function SystemConfigPage() {
                           {cat.description}
                         </td>
                         <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => openEditCategory(cat)}
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                handleDelete(
-                                  `/api/config/categories/${cat.id}`,
-                                  cat.name,
-                                )
-                              }
-                              className="text-[#dc2626]"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
+                          {isAdmin && (
+                            <div className="flex items-center justify-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openEditCategory(cat)}
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  handleDelete(
+                                    `/api/config/categories/${cat.id}`,
+                                    cat.name,
+                                  )
+                                }
+                                className="text-[#dc2626]"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}

@@ -102,7 +102,7 @@ const navigation: NavItem[] = [
     name: "Create User",
     path: "/users/create",
     icon: UserPlus,
-    roles: ["admin"],
+    roles: ["admin","teamlead"],
   },
   ...(FEATURES.chatbot
     ? [
@@ -114,7 +114,7 @@ const navigation: NavItem[] = [
         },
       ]
     : []),
-  { name: "System Config", path: "/config", icon: Settings, roles: ["admin"] },
+  { name: "System Config", path: "/config", icon: Settings, roles: ["admin","teamlead"] },
 ];
 
 const getThresholdLevel = (util: number): number => {

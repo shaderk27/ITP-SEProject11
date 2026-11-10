@@ -1,17 +1,18 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api.chatbot import router as chatbot_router
+
 from app.api import config
+from app.api.alerts import router as alerts_router
+from app.api.audit import router as audit_router
+from app.api.auth import router as auth_router
+from app.api.chatbot import router as chatbot_router
 from app.api.dashboard import router as dashboard_router
 from app.api.records import router as records_router
 from app.api.review import router as review_router
 from app.api.upload import router as upload_router
-from app.api.auth import router as auth_router
-from app.api.audit import router as audit_router
-from app.api.alerts import router as alerts_router
-
-from app.services.scheduler_service import start_scheduler, shutdown_scheduler
+from app.services.scheduler_service import shutdown_scheduler, start_scheduler
 
 
 @asynccontextmanager

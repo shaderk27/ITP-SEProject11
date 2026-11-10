@@ -36,19 +36,61 @@ interface LabItem {
 }
 
 const API = import.meta.env.VITE_API_URL ?? "/api";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+type Role = UserData["role"];
 
 interface UserManagementProps {
   onUsersChanged?: () => void;
   labs?: LabItem[];
+  /**
+   * Optional. Role of the logged-in user. If omitted, the component tries to
+   * look it up itself via GET /auth/me. If the role can't be determined, the
+   * UI doesn't restrict by role (the backend still enforces permissions).
+   */
+  currentUserRole?: Role;
 }
 
-export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagementProps) {
+/**
+ * Admins can manage anyone. Team leads can manage other team leads and
+ * lab ICs, but never admins. Lab ICs can't manage anyone.
+ * Unknown actor role: don't restrict in the UI; the backend decides.
+ */
+const canManageUser = (
+  actorRole: Role | null | undefined,
+  targetRole: Role,
+): boolean => {
+  if (!actorRole) return true;
+  if (actorRole === "admin") return true;
+  if (actorRole === "teamlead") return targetRole !== "admin";
+  return false;
+};
+
+export function UserManagement({
+  onUsersChanged,
+  labs: propLabs,
+  currentUserRole: roleProp,
+}: UserManagementProps) {
   const navigate = useNavigate();
   const [users, setUsers] = useState<UserData[]>([]);
   const [fetchedLabs, setFetchedLabs] = useState<LabItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [fetchedRole, setFetchedRole] = useState<Role | null>(null);
+  const currentUserRole: Role | null = roleProp ?? fetchedRole;
+
+  useEffect(() => {
+    if (roleProp) return;
+    fetch(`${API}/auth/me`, { credentials: "include" }) // verify path
+      .then((res) => (res.ok ? res.json() : null))
+      .then((me) => {
+        const r = me?.role;
+        if (r === "admin" || r === "teamlead" || r === "labic") {
+          setFetchedRole(r);
+        }
+      })
+      .catch(() => {});
+  }, [roleProp]);
 
   // Use props if provided, otherwise fallback to fetched labs
   const activeLabs = propLabs ?? fetchedLabs;
@@ -61,8 +103,18 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
       }),
       propLabs
         ? Promise.resolve(propLabs)
-        : fetch(`${API_BASE_URL}/api/config/labs`, { credentials: "include" })
-            .then((res) => res.json())
+        : // Assignment-specific list (ids/names only, no budget data) covering ALL
+          // Lab Groups. /api/config/labs is scoped to the Team Lead's own group, so
+          // it can't resolve names for labs a user is assigned to elsewhere.
+          fetch(`${API}/auth/assignment-targets`, { credentials: "include" })
+            .then((res) => (res.ok ? res.json() : { labs: [] }))
+            .then((data) =>
+              (data.labs ?? []).map((l: any) => ({
+                id: l.id,
+                name: l.name,
+                code: l.code,
+              })),
+            )
             .catch(() => []),
     ])
       .then(([userData, labsData]) => {
@@ -173,6 +225,7 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
   };
 
   const handleUnassignScope = async (user: UserData) => {
+    if (!canManageUser(currentUserRole, user.role)) return;
     if (!hasScope(user)) return;
     const confirmed = window.confirm(
       `Clear all assignments for ${user.full_name}?`,
@@ -196,6 +249,7 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
   };
 
   const handleDeactivateUser = async (user: UserData) => {
+    if (!canManageUser(currentUserRole, user.role)) return;
     if (!user.is_active) return;
     if (hasScope(user)) {
       alert(
@@ -224,6 +278,7 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
   };
 
   const handleActivateUser = async (user: UserData) => {
+    if (!canManageUser(currentUserRole, user.role)) return;
     if (user.is_active) return;
 
     const confirmed = window.confirm(`Reactivate ${user.full_name}?`);
@@ -252,6 +307,7 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
 
   const handleAdminResetPassword = async () => {
     if (!resetTargetUser) return;
+    if (!canManageUser(currentUserRole, resetTargetUser.role)) return;
     setIsResetting(true);
     setResetSuccess(null);
     setResetError(null);
@@ -339,7 +395,9 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
+            {users.map((user) => {
+              const canManage = canManageUser(currentUserRole, user.role);
+              return (
               <tr
                 key={user.id}
                 className="border-b border-border last:border-0 hover:bg-[#f8f9fa]"
@@ -379,11 +437,17 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!user.is_active || user.role === "admin"}
+                      disabled={
+                        !user.is_active || user.role === "admin" || !canManage
+                      }
                       title={
                         user.role === "admin"
-                          ? "Admin passwords cannot be reset by another admin"
-                          : user.is_active
+                          ? currentUserRole === "admin"
+                            ? "Admin passwords cannot be reset by another admin"
+                            : "Team leads cannot reset admin passwords"
+                          : !canManage
+                            ? "You do not have permission to manage this user"
+                            : user.is_active
                             ? "Send password reset email"
                             : "User is inactive"
                       }
@@ -398,11 +462,13 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
                     <Button
                       size="sm"
                       variant="outline"
-                      disabled={!user.is_active || !hasScope(user)}
+                      disabled={!canManage || !user.is_active || !hasScope(user)}
                       title={
-                        user.is_active && hasScope(user)
-                          ? "Clear lab or lab group assignment"
-                          : "No assignment to clear"
+                        !canManage
+                          ? "You do not have permission to manage this user"
+                          : user.is_active && hasScope(user)
+                            ? "Clear lab or lab group assignment"
+                            : "No assignment to clear"
                       }
                       onClick={() => handleUnassignScope(user)}
                     >
@@ -413,10 +479,13 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
                         size="sm"
                         variant="outline"
                         className="text-[#dc2626] hover:text-[#dc2626]"
+                        disabled={!canManage}
                         title={
-                          hasScope(user)
-                            ? "Unassign user before deactivation"
-                            : "Deactivate user"
+                          !canManage
+                            ? "You do not have permission to deactivate this user"
+                            : hasScope(user)
+                              ? "Unassign user before deactivation"
+                              : "Deactivate user"
                         }
                         onClick={() => handleDeactivateUser(user)}
                       >
@@ -427,7 +496,12 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
                         size="sm"
                         variant="outline"
                         className="text-[#16a34a] hover:text-[#16a34a]"
-                        title="Activate user"
+                        disabled={!canManage}
+                        title={
+                          canManage
+                            ? "Activate user"
+                            : "You do not have permission to activate this user"
+                        }
                         onClick={() => handleActivateUser(user)}
                       >
                         <UserCheck className="h-3 w-3" />
@@ -436,7 +510,8 @@ export function UserManagement({ onUsersChanged, labs: propLabs }: UserManagemen
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
             {users.length === 0 && !error && (
               <tr>
                 <td

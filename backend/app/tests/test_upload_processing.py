@@ -1,21 +1,20 @@
+import tempfile
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
-import tempfile
 from zipfile import ZIP_DEFLATED, ZipFile
-from decimal import Decimal
 
 import pandas as pd  # type: ignore[import-untyped]
 
-from app.repositories.upload_repository import UploadRepository
-from app.repositories.persistence_repository import _resolve_line_amount
 from app.processors.upload_parser import (
     generate_content_hash,
     parse_line_items,
     read_upload_dataframe,
     validate_dataframe,
 )
+from app.repositories.persistence_repository import _resolve_line_amount
+from app.repositories.upload_repository import UploadRepository
 from app.services.upload_service import UploadService
-
 
 STRICT_NAMESPACES = {
     b"http://schemas.openxmlformats.org/spreadsheetml/2006/main": (
@@ -793,9 +792,9 @@ def test_foreign_currency_lines_reconcile_to_sgd_total() -> None:
     lines = parse_line_items(prepared)
 
     assert [line.source_currency for line in lines] == ["USD", "USD"]
-    assert [line.source_amount for line in lines] == [Decimal("10"), Decimal("20")]
+    assert [line.source_amount for line in lines] == [Decimal(10), Decimal(20)]
     assert [line.amount_gst for line in lines] == [Decimal("13.50"), Decimal("27.00")]
-    assert sum((line.amount_gst for line in lines), Decimal("0")) == Decimal("40.50")
+    assert sum((line.amount_gst for line in lines), Decimal(0)) == Decimal("40.50")
 
 
 def test_zero_value_line_does_not_fall_back_to_pr_total() -> None:

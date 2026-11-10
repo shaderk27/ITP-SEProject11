@@ -253,10 +253,10 @@ def _lab_group_budget_context(
 
     rows: list[ChatbotLabGroupBudgetContext] = []
     for group_id in sorted(set(envelopes) | set(allocations) | set(spends)):
-        envelope = envelopes.get(group_id, Decimal("0"))
-        allocated = allocations.get(group_id, Decimal("0"))
-        spend = spends.get(group_id, Decimal("0"))
-        pending = pending_spends.get(group_id, Decimal("0"))
+        envelope = envelopes.get(group_id, Decimal(0))
+        allocated = allocations.get(group_id, Decimal(0))
+        spend = spends.get(group_id, Decimal(0))
+        pending = pending_spends.get(group_id, Decimal(0))
         projected = spend + pending
         rows.append(
             ChatbotLabGroupBudgetContext(
@@ -391,9 +391,9 @@ def _budget_context(
     for group_id, lab_id, category_id in sorted(
         set(budgets) | set(spends) | set(pending_spends)
     ):
-        budget = budgets.get((group_id, lab_id, category_id), Decimal("0"))
-        spend = spends.get((group_id, lab_id, category_id), Decimal("0"))
-        pending = pending_spends.get((group_id, lab_id, category_id), Decimal("0"))
+        budget = budgets.get((group_id, lab_id, category_id), Decimal(0))
+        spend = spends.get((group_id, lab_id, category_id), Decimal(0))
+        pending = pending_spends.get((group_id, lab_id, category_id), Decimal(0))
         projected = spend + pending
         remaining = budget - spend
         rows.append(
@@ -460,7 +460,7 @@ def _purchase_line_context(
                 purpose=pr.purpose or "",
                 wbs_code=pr.wbs_code or "",
                 item_description=line.item_description or "",
-                amount_gst=str(line.amount_gst or Decimal("0")),
+                amount_gst=str(line.amount_gst or Decimal(0)),
                 currency_code=line.currency_code or "SGD",
                 lab_group_name=group.lab_group_name,
                 lab_name=lab.lab_name,

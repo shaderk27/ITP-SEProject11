@@ -179,7 +179,7 @@ def _find_threshold_crossing(
         return None, None
 
     sorted_items = sorted(items, key=_chronological_sort_key)
-    running_spend = Decimal("0")
+    running_spend = Decimal(0)
     for item in sorted_items:
         pr_line = item[0]
         pr_header = item[1]
@@ -421,10 +421,10 @@ def get_alert_drilldown(
             tuple[PurchaseRequestLine, PurchaseRequest, UploadBatch | None]
         ] = []
 
-        lg_allocated_budget = Decimal("0")
-        lg_actual = Decimal("0")
-        lg_pending = Decimal("0")
-        lg_committed = Decimal("0")
+        lg_allocated_budget = Decimal(0)
+        lg_actual = Decimal(0)
+        lg_pending = Decimal(0)
+        lg_committed = Decimal(0)
 
         for lab in group_labs:
             lid = lab.lab_id
@@ -436,16 +436,16 @@ def get_alert_drilldown(
                 if k_lid == lid
             }
 
-            lab_budget = Decimal("0")
-            lab_actual = Decimal("0")
-            lab_pending = Decimal("0")
-            lab_committed = Decimal("0")
+            lab_budget = Decimal(0)
+            lab_actual = Decimal(0)
+            lab_pending = Decimal(0)
+            lab_committed = Decimal(0)
             lab_all_lines: list[
                 tuple[PurchaseRequestLine, PurchaseRequest, UploadBatch | None]
             ] = []
 
             for cid in cat_keys:
-                lab_budget += budget_by_lab_cat.get((lid, cid), Decimal("0"))
+                lab_budget += budget_by_lab_cat.get((lid, cid), Decimal(0))
                 cat_items = lines_by_lab_cat.get((lid, cid), [])
                 lab_all_lines.extend(cat_items)
                 group_all_lines.extend(cat_items)
@@ -466,10 +466,10 @@ def get_alert_drilldown(
 
             out_cats: list[DrilldownCategory] = []
             for cid in sorted(cat_keys, key=lambda c: (c is None, c or 0)):
-                cat_budget = budget_by_lab_cat.get((lid, cid), Decimal("0"))
-                cat_actual = Decimal("0")
-                cat_pending = Decimal("0")
-                cat_committed = Decimal("0")
+                cat_budget = budget_by_lab_cat.get((lid, cid), Decimal(0))
+                cat_actual = Decimal(0)
+                cat_pending = Decimal(0)
+                cat_committed = Decimal(0)
                 out_lines: list[DrilldownPRLine] = []
 
                 for pr_line, pr_header, batch in lines_by_lab_cat.get((lid, cid), []):

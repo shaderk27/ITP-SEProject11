@@ -40,9 +40,9 @@ from app.schemas.chatbot_schema import (
 )
 from app.services import embedding_client, knowledge_service, llm_client
 from app.services.chatbot_service import (
-    _role_name,
     _purchase_status_prefix,
     _resolve_bounds,
+    _role_name,
     build_chatbot_context,
 )
 from app.services.embedding_client import EmbeddingUnavailableError
@@ -743,7 +743,7 @@ def _lab_group_summary(context: ChatbotContextResponse) -> list[dict]:
     )
     for row in summary:
         row["allocated_to_labs"] = row["budget"]
-        envelope = envelopes.get(row["name"], Decimal("0"))
+        envelope = envelopes.get(row["name"], Decimal(0))
         if envelope > 0:
             _set_budget(row, envelope)
             row["unallocated"] = _round(unallocated[row["name"]])
@@ -752,14 +752,14 @@ def _lab_group_summary(context: ChatbotContextResponse) -> list[dict]:
 
 def _use_lab_group_budgets(overall: dict, lab_groups: list[dict]) -> None:
     """Make the overall budget the sum of the lab group budgets."""
-    budget = sum((Decimal(str(g["budget"])) for g in lab_groups), Decimal("0"))
+    budget = sum((Decimal(str(g["budget"])) for g in lab_groups), Decimal(0))
     if budget != Decimal(str(overall["budget"])):
         overall["allocated_to_labs"] = overall["budget"]
         _set_budget(overall, budget)
         overall["unallocated"] = _round(
             sum(
                 (Decimal(str(g.get("unallocated", 0))) for g in lab_groups),
-                Decimal("0"),
+                Decimal(0),
             )
         )
 
@@ -797,9 +797,9 @@ def _grouped(rows: list[ChatbotBudgetContext], key) -> list[dict]:
 
 
 def _totals(rows: list[ChatbotBudgetContext]) -> dict:
-    budget = sum((_money(r.budget_sgd) for r in rows), Decimal("0"))
-    spend = sum((_money(r.approved_spend_sgd) for r in rows), Decimal("0"))
-    pending = sum((_money(r.pending_spend_sgd) for r in rows), Decimal("0"))
+    budget = sum((_money(r.budget_sgd) for r in rows), Decimal(0))
+    spend = sum((_money(r.approved_spend_sgd) for r in rows), Decimal(0))
+    pending = sum((_money(r.pending_spend_sgd) for r in rows), Decimal(0))
     projected = spend + pending
     return {
         "budget": _round(budget),
@@ -1028,9 +1028,11 @@ def _out_of_scope_answer(context: ChatbotContextResponse) -> str:
         )
     return "\n".join(
         [
-            "Sorry, I can only answer questions about lab budgets, spending, "
-            "purchases and alerts in this system, within the data you have "
-            "access to.",
+            (
+                "Sorry, I can only answer questions about lab budgets, spending, "
+                "purchases and alerts in this system, within the data you have "
+                "access to."
+            ),
             "",
             f"{scope}. For example:",
             *(f"- {example}" for example in examples),
@@ -1052,7 +1054,7 @@ def _money(value: str) -> Decimal:
     try:
         return Decimal(value)
     except ArithmeticError:
-        return Decimal("0")
+        return Decimal(0)
 
 
 def _round(value: Decimal) -> float:

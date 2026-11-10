@@ -1,11 +1,11 @@
-from app.models.auth import User, Role
+from app.models.auth import Role, User
+from app.models.config import LabGroup
 from app.models.staging import (
-    UploadBatch,
+    ReviewQueueItem,
     StagingPRHeader,
     StagingPRLine,
-    ReviewQueueItem,
+    UploadBatch,
 )
-from app.models.config import LabGroup
 from app.services.scheduler_service import check_and_email_pending_reviews
 
 
@@ -136,7 +136,7 @@ def test_scheduler_groups_and_emails_correct_team_lead(db, admin_user, mocker):
     mock_reminder.assert_called_once()
     mock_new_alert.assert_not_called()
 
-    args, kwargs = mock_reminder.call_args
+    args, _kwargs = mock_reminder.call_args
     assert args[0] == "physics.lead@sit.edu.sg"
     assert args[2] == 2
 
@@ -189,6 +189,6 @@ def test_scheduler_triggers_new_upload_alert_if_flagged(db, admin_user, mocker):
     mock_new_alert.assert_called_once()
     mock_reminder.assert_not_called()
 
-    args, kwargs = mock_new_alert.call_args
+    args, _kwargs = mock_new_alert.call_args
     assert args[0] == "chem.lead@sit.edu.sg"
     assert args[2] == 1

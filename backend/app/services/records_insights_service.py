@@ -18,10 +18,11 @@ has already role-scoped, so nothing here can widen what a user can see.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Sequence
+from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -117,7 +118,7 @@ def build_export_insights(
 def counts_toward_budget(status: str | None) -> bool:
     """Approved + Pending lines consume budget — same rule as the dashboard."""
     s = (status or "").strip().lower()
-    return s.startswith("approved") or s.startswith("pending")
+    return s.startswith(("approved", "pending"))
 
 
 # ─── 1. Classification trail ─────────────────────────────────────────────

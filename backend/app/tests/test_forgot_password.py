@@ -1,11 +1,13 @@
 # tests/test_forgot_password.py
-import pytest
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timedelta, timezone
+
+import pytest
 from fastapi import HTTPException
-from app.services.auth_service import AuthService
-from app.models.auth import User, PasswordResetToken
+
+from app.models.auth import PasswordResetToken, User
 from app.repositories.auth_repository import AuthRepository
+from app.services.auth_service import AuthService
 
 
 def make_service():
@@ -36,7 +38,7 @@ def make_user(is_active=True, password_hash="$2b$12$hashedpassword"):
 def make_token(used=False, expires_at=None):
     token = MagicMock(spec=PasswordResetToken)
     token.used = used
-    token.expires_at = expires_at or (datetime.now(timezone.utc) + timedelta(hours=1))
+    token.expires_at = expires_at or (datetime.now(UTC) + timedelta(hours=1))
     token.temp_password = "$2b$12$hashedtemppassword"
     return token
 
@@ -109,7 +111,7 @@ def test_login_rejects_expired_temp_password():
 
     expired_token = make_token(
         used=False,
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=1),  # already expired
+        expires_at=datetime.now(UTC) - timedelta(hours=1),  # already expired
     )
     expired_token.temp_password = hashed
     service.repository.get_active_reset_token_by_user.return_value = (
@@ -158,7 +160,7 @@ def test_reset_password_rejects_wrong_current_password():
 
     service = make_service()
 
-    hashed = bcrypt.hashpw("CorrectPass1".encode(), bcrypt.gensalt()).decode()
+    hashed = bcrypt.hashpw(b"CorrectPass1", bcrypt.gensalt()).decode()
     user = make_user(password_hash=hashed)
     service.repository.get_user_by_id.return_value = user
     service.repository.get_last_reset_token_by_user.return_value = None
@@ -333,7 +335,7 @@ def test_get_current_user_rejects_inactive_user():
 
     # Build a valid token pointing to user_id=1
     token = pyjwt.encode(
-        {"sub": "1", "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
+        {"sub": "1", "exp": datetime.now(UTC) + timedelta(hours=1)},
         "a" * 64,
         algorithm="HS256",
     )
@@ -355,7 +357,7 @@ def test_get_current_user_rejects_expired_token():
     service = make_service()
 
     token = pyjwt.encode(
-        {"sub": "1", "exp": datetime.now(timezone.utc) - timedelta(hours=1)},
+        {"sub": "1", "exp": datetime.now(UTC) - timedelta(hours=1)},
         "a" * 64,
         algorithm="HS256",
     )

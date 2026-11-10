@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -82,7 +82,7 @@ def _set_budget(
     amount: str,
     period_id: int,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add(
         Budget(
             period_id=period_id,
@@ -103,7 +103,7 @@ def _set_group_envelope(
     amount: str,
     period_id: int,
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     db.add(
         Budget(
             period_id=period_id,
