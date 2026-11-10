@@ -396,4 +396,3 @@ class AuthRepository:
         db.execute(stmt)
         if commit:
             db.commit()
-            
