@@ -12,11 +12,10 @@ Everything happens in a single transaction. If any insert fails,
 SQLAlchemy rolls back the whole batch (via the session lifecycle in get_db).
 """
 
+from decimal import Decimal, ROUND_DOWN
 import re
-from datetime import date, datetime
-from decimal import ROUND_DOWN, Decimal
 from typing import Any
-
+from datetime import date, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
@@ -32,6 +31,7 @@ from app.models.staging import (
     UploadBatch,
 )
 from app.models.upload import PRLineItem, UploadMetadata
+from app.processors.classifier import classify_line_item
 from app.services.duplicate_service import is_status_regression
 
 
@@ -63,6 +63,10 @@ def persist_upload_to_db(
     general_labs_by_group: dict[int, int] = {
         lab.lab_group_id: lab.lab_id
         for lab in db.query(Lab).filter(Lab.is_general.is_(True)).all()
+    }
+    general_lab_ids = set(general_labs_by_group.values())
+    lab_group_names: dict[int, str] = {
+        group.lab_group_id: group.lab_group_name for group in db.query(LabGroup).all()
     }
 
     categories_by_name: dict[str, int] = {
@@ -103,10 +107,19 @@ def persist_upload_to_db(
     queue_items_inserted = 0
     # Source row -> accepted final status for rows that commit will skip.
     status_regression_rows: dict[int, str] = {}
+    # Source row -> what the reviewer needs to fix, for the upload summary.
+    review_issues: dict[int, str] = {}
 
     # ─── 3. For each unique PR: write header + its lines ──────────────────
     for pr_number, pr_items in items_by_pr.items():
         first_item: PRLineItem = pr_items[0]["item"]
+
+        header_raw_json = dict(first_item.to_dict())
+        if any(
+            len(getattr(entry["item"], "wbs_allocations", ()) or ()) > 1
+            for entry in pr_items
+        ):
+            header_raw_json["has_multi_wbs_allocations"] = True
 
         header = StagingPRHeader(
             batch_id=batch.batch_id,
@@ -118,13 +131,13 @@ def persist_upload_to_db(
             grand_total_sgd=first_item.grand_total_sgd,
             wbs_code=first_item.wbs or None,
             instruction_to_vendor=first_item.instruction_to_vendor or None,
-            raw_header_json=first_item.to_dict(),
+            raw_header_json=header_raw_json,
         )
         db.add(header)
         db.flush()
         headers_inserted += 1
 
-        # ─── 4. Per line: detect single vs. multi-lab distribution ────────
+        # ─── 4. Per line: Multi-WBS vs. Multi-Lab vs. Single-Lab ──────────
         for ci in pr_items:
             item: PRLineItem = ci["item"]
             classification: dict[str, Any] = ci["classification"]
@@ -141,8 +154,241 @@ def persist_upload_to_db(
                 categories_by_name=categories_by_name,
                 general_cat_id=general_category.category_id,
             )
+            category_issue = _category_issue(
+                _find_named_categories(
+                    item.pr_category,
+                    item.req_type,
+                    categories_by_name,
+                    general_category.category_id,
+                )[0],
+                classification.get("category_conflicts") or [],
+            )
 
-            # ─── 4A. Automated Multi-Lab Spending Distribution ────────────
+            raw_wbs_allocations = list(
+                classification.get("wbs_allocations")
+                or getattr(item, "wbs_allocations", ())
+                or ()
+            )
+
+            # ─── 4A. Exact Multi-WBS Transaction Allocation ───────────────
+            if len(raw_wbs_allocations) > 1:
+                resolved_allocations: list[dict[str, Any]] = []
+                any_missing_amount = False
+                allocated_sum = Decimal("0.00")
+                regressed_status: str | None = None
+
+                for idx, alloc in enumerate(raw_wbs_allocations, start=1):
+                    alloc_wbs = str(alloc.get("wbs") or item.wbs or "").strip()
+                    portion_identity_key = (
+                        f"{item.line_identity_key}::alloc_{idx}"
+                        if item.line_identity_key
+                        else f"{pr_number}::{item.row_number}::alloc_{idx}"
+                    )
+
+                    # Classify this WBS portion if not already classified
+                    a_group_id = alloc.get("suggested_lab_group_id")
+                    a_lab_id = alloc.get("suggested_lab_id")
+                    a_cat_id = alloc.get("suggested_category_id")
+
+                    if a_group_id is None and a_lab_id is None:
+                        alloc_cls = classify_line_item(
+                            db,
+                            f"{item.item_details or ''} {alloc_wbs}".lower(),
+                            item.requestor or "",
+                            wbs=alloc_wbs,
+                            purpose=item.purpose or "",
+                            instruction_to_vendor=item.instruction_to_vendor or "",
+                            req_type=item.req_type or "",
+                            pr_category=item.pr_category or "",
+                        )
+                        a_group_id = alloc_cls.get("lab_group_id")
+                        a_lab_id = alloc_cls.get("lab_id")
+                        if a_cat_id is None:
+                            a_cat_id = alloc_cls.get("category_id")
+
+                    if a_lab_id is None and len(detected_labs) == 1:
+                        if (
+                            a_group_id is None
+                            or detected_labs[0].lab_group_id == a_group_id
+                        ):
+                            a_lab_id = detected_labs[0].lab_id
+                            if a_group_id is None:
+                                a_group_id = detected_labs[0].lab_group_id
+
+                    final_alloc_group_id = a_group_id or general_group.lab_group_id
+                    final_alloc_lab_id = a_lab_id or general_labs_by_group.get(
+                        final_alloc_group_id
+                    )
+                    final_alloc_cat_id = (
+                        classifier_category_id
+                        or a_cat_id
+                        or general_category.category_id
+                    )
+
+                    existing_portion = _find_existing_final_line(
+                        db, pr_number, portion_identity_key
+                    )
+                    if existing_portion is not None:
+                        final_alloc_lab_id = existing_portion.lab_id
+                        existing_lab = _get_lab_by_id(db, final_alloc_lab_id)
+                        if existing_lab is not None and existing_lab.lab_group_id:
+                            final_alloc_group_id = existing_lab.lab_group_id
+                        if existing_portion.category_id is not None:
+                            final_alloc_cat_id = existing_portion.category_id
+                        if is_status_regression(
+                            existing_portion.pr_status, item.pr_status
+                        ):
+                            regressed_status = existing_portion.pr_status
+
+                    raw_amt = alloc.get("amount_gst")
+                    amt_missing = bool(alloc.get("amount_missing")) or raw_amt is None
+                    portion_amt_str: str | None = None
+                    if not amt_missing:
+                        try:
+                            portion_dec = Decimal(str(raw_amt)).quantize(
+                                Decimal("0.01")
+                            )
+                            if portion_dec < 0 or (
+                                portion_dec == 0 and line_total_amount > 0
+                            ):
+                                amt_missing = True
+                            else:
+                                allocated_sum += portion_dec
+                                portion_amt_str = str(portion_dec)
+                        except Exception:
+                            amt_missing = True
+
+                    if amt_missing:
+                        any_missing_amount = True
+
+                    resolved_allocations.append(
+                        {
+                            "allocation_index": idx,
+                            "row_number": alloc.get("row_number", item.row_number),
+                            "wbs": alloc_wbs,
+                            "mca": alloc.get("mca") or "Amount",
+                            "raw_allocation": alloc.get("raw_allocation"),
+                            "quantity": alloc.get("quantity"),
+                            "amount_gst": portion_amt_str,
+                            "amount_missing": amt_missing,
+                            "suggested_lab_group_id": final_alloc_group_id,
+                            "suggested_lab_id": final_alloc_lab_id,
+                            "suggested_category_id": final_alloc_cat_id,
+                            "line_identity_key": portion_identity_key,
+                            "confirmed": False,
+                        }
+                    )
+
+                # Also check parent identity key for status regression if previously committed as 1 line
+                if regressed_status is None:
+                    existing_parent = _find_existing_final_line(
+                        db, pr_number, item.line_identity_key
+                    )
+                    if existing_parent and is_status_regression(
+                        existing_parent.pr_status, item.pr_status
+                    ):
+                        regressed_status = existing_parent.pr_status
+
+                duplicate_status = "unchecked"
+                if regressed_status is not None:
+                    duplicate_status = "status_regression"
+                    status_regression_rows[item.row_number] = regressed_status
+
+                reconciles_with_line = not any_missing_amount and abs(
+                    allocated_sum - line_total_amount
+                ) <= Decimal("0.01")
+
+                wbs_summary = ", ".join(
+                    f"{a['wbs'] or 'Unspecified WBS'} "
+                    f"({'$' + a['amount_gst'] if a['amount_gst'] else 'missing amount'})"
+                    for a in resolved_allocations
+                )
+                if any_missing_amount:
+                    multi_wbs_reason = (
+                        f"Multi-WBS allocation detected ({wbs_summary}), but one or more "
+                        f"allocation amounts are missing. Enter exact allocation amounts "
+                        f"summing to ${line_total_amount:,.2f} in Review Queue."
+                    )
+                elif not reconciles_with_line:
+                    multi_wbs_reason = (
+                        f"Multi-WBS allocation mismatch ({wbs_summary}): portions sum to "
+                        f"${allocated_sum:,.2f}, which does not reconcile with purchase line "
+                        f"amount ${line_total_amount:,.2f}. Adjust allocation amounts in Review Queue."
+                    )
+                else:
+                    multi_wbs_reason = (
+                        f"Multi-WBS transaction allocation across {len(resolved_allocations)} "
+                        f"WBS codes ({wbs_summary}; line total ${line_total_amount:,.2f}). "
+                        f"Confirm WBS mapping and allocation amounts before commit."
+                    )
+
+                if category_issue:
+                    multi_wbs_reason = f"{multi_wbs_reason} {category_issue}"
+                elif classification_reason and "Conflicting categories" in (
+                    classification_reason or ""
+                ):
+                    multi_wbs_reason = f"{multi_wbs_reason} {classification_reason}"
+
+                # Choose primary staging line Lab Group / Lab / Category from first non-General portion
+                primary_alloc = next(
+                    (
+                        a
+                        for a in resolved_allocations
+                        if a["suggested_lab_group_id"] != general_group.lab_group_id
+                    ),
+                    resolved_allocations[0],
+                )
+                primary_group_id = primary_alloc["suggested_lab_group_id"]
+                primary_lab_id = primary_alloc["suggested_lab_id"]
+                primary_cat_id = primary_alloc["suggested_category_id"]
+
+                raw_json = dict(item.to_dict())
+                raw_json["wbs_allocations"] = resolved_allocations
+                raw_json["allocations_reconciled"] = reconciles_with_line
+                raw_json["allocated_total_gst"] = str(allocated_sum)
+
+                all_wbs_codes = ", ".join(
+                    dict.fromkeys(
+                        a["wbs"] for a in resolved_allocations if a.get("wbs")
+                    )
+                )
+                if all_wbs_codes:
+                    header.wbs_code = all_wbs_codes[:100]
+
+                line = StagingPRLine(
+                    staging_header_id=header.staging_header_id,
+                    source_line_no=item.row_number,
+                    item_details=item.item_details or None,
+                    qty=item.quantity,
+                    unit_rate=item.unit_rate,
+                    raw_pr_category=item.pr_category or item.req_type or None,
+                    raw_lab_text=item.lab or item.purpose or None,
+                    amount_gst=line_total_amount,
+                    suggested_lab_group_id=primary_group_id,
+                    suggested_lab_id=primary_lab_id,
+                    suggested_category_id=primary_cat_id,
+                    classification_status="unclear",
+                    duplicate_status=duplicate_status,
+                    review_status="pending_review",
+                    match_reason=multi_wbs_reason,
+                    raw_line_json=raw_json,
+                )
+                db.add(line)
+                db.flush()
+                lines_inserted += 1
+
+                queue_item = ReviewQueueItem(
+                    staging_line_id=line.staging_line_id,
+                    queue_status="open",
+                    priority="normal",
+                    review_reason=multi_wbs_reason,
+                )
+                db.add(queue_item)
+                queue_items_inserted += 1
+                review_issues[item.row_number] = multi_wbs_reason
+                continue
+
+            # ─── 4B. Automated Multi-Lab Spending Distribution ────────────
             if len(detected_labs) > 1:
                 num_labs = len(detected_labs)
                 amount_shares = _split_amount_equally(line_total_amount, num_labs)
@@ -176,11 +422,7 @@ def persist_upload_to_db(
                     )
 
                     used_fallback_group = final_group_id == general_group.lab_group_id
-                    used_fallback_lab = False
-                    used_fallback_category = (
-                        classifier_category_id is None
-                        or final_category_id == general_category.category_id
-                    )
+                    used_fallback_category = category_issue is not None
 
                     split_reason = (
                         f"Automated multi-lab spending distribution ({idx + 1}/{num_labs} "
@@ -202,11 +444,11 @@ def persist_upload_to_db(
                             or general_category.category_id
                         )
                         used_fallback_group = False
-                        used_fallback_lab = False
                         used_fallback_category = False
                         split_reason = (
                             "Existing committed split line found. Preserving reviewed "
-                            "lab/category; only source status may update on commit."
+                            "lab/category; only source status and amounts may "
+                            "update on commit."
                         )
 
                     duplicate_status = "unchecked"
@@ -218,11 +460,7 @@ def persist_upload_to_db(
                             existing_final_line.pr_status
                         )
 
-                    any_fallback = (
-                        used_fallback_group
-                        or used_fallback_lab
-                        or used_fallback_category
-                    )
+                    any_fallback = used_fallback_group or used_fallback_category
                     classification_status = "unclear" if any_fallback else "confident"
                     review_status = "pending_review" if any_fallback else "not_required"
 
@@ -267,25 +505,45 @@ def persist_upload_to_db(
                     lines_inserted += 1
 
                     if review_status == "pending_review":
+                        issues = []
+                        if used_fallback_group:
+                            issues.append(
+                                _lab_issue(
+                                    item.wbs,
+                                    None,
+                                    wbs_matched=classification.get("lab_group_id")
+                                    is not None,
+                                )
+                            )
+                        if used_fallback_category:
+                            issues.append(category_issue)
                         queue_item = ReviewQueueItem(
                             staging_line_id=line.staging_line_id,
                             queue_status="open",
                             priority="normal",
-                            review_reason=split_reason,
+                            review_reason=(
+                                f"{' '.join(issues)} This line is split equally "
+                                f"across {detected_labels}."
+                            ),
                         )
                         db.add(queue_item)
                         queue_items_inserted += 1
+                        review_issues[item.row_number] = queue_item.review_reason
 
                 continue
 
-            # ─── 4B. Standard Single-Lab Line Processing ──────────────────
+            # ─── 4C. Standard Single-Lab Line Processing ──────────────────
             classifier_group_id = classification.get("lab_group_id")
             classifier_lab_id = classification.get("lab_id")
 
             if classifier_lab_id is None and len(detected_labs) == 1:
-                classifier_lab_id = detected_labs[0].lab_id
-                if classifier_group_id is None:
-                    classifier_group_id = detected_labs[0].lab_group_id
+                if (
+                    classifier_group_id is None
+                    or detected_labs[0].lab_group_id == classifier_group_id
+                ):
+                    classifier_lab_id = detected_labs[0].lab_id
+                    if classifier_group_id is None:
+                        classifier_group_id = detected_labs[0].lab_group_id
 
             existing_final_line = _find_existing_final_line(
                 db, pr_number, item.line_identity_key
@@ -298,15 +556,14 @@ def persist_upload_to_db(
             )
             final_category_id = classifier_category_id or general_category.category_id
 
+            # Category General on its own is a valid result, so only a clash
+            # between categories sends a line to review.
             used_fallback_group = (
                 classifier_group_id is None
                 or final_group_id == general_group.lab_group_id
             )
-            used_fallback_lab = classifier_lab_id is None
-            used_fallback_category = (
-                classifier_category_id is None
-                or final_category_id == general_category.category_id
-            )
+            used_fallback_lab = final_lab_id is None or final_lab_id in general_lab_ids
+            used_fallback_category = category_issue is not None
 
             if existing_final_line:
                 final_lab_id = existing_final_line.lab_id
@@ -325,7 +582,8 @@ def persist_upload_to_db(
                 used_fallback_category = False
                 classification_reason = (
                     "Existing committed line found. Preserving reviewed "
-                    "lab/category; only source status may update on commit."
+                    "lab/category; only source status and amounts may update on "
+                    "commit."
                 )
 
             any_fallback = (
@@ -366,15 +624,29 @@ def persist_upload_to_db(
 
             # ─── 5. Queue for review if needed ────────────────────────────
             if review_status == "pending_review":
+                issues = []
+                if used_fallback_group or used_fallback_lab:
+                    issues.append(
+                        _lab_issue(
+                            item.wbs,
+                            None
+                            if final_group_id == general_group.lab_group_id
+                            else lab_group_names.get(final_group_id),
+                            wbs_matched=classifier_group_id is not None,
+                        )
+                    )
+                if used_fallback_category:
+                    issues.append(category_issue)
+                review_issue = " ".join(issues)
                 queue_item = ReviewQueueItem(
                     staging_line_id=line.staging_line_id,
                     queue_status="open",
                     priority="normal",
-                    review_reason=classification_reason
-                    or "Auto-classifier left one or more fields as General.",
+                    review_reason=review_issue,
                 )
                 db.add(queue_item)
                 queue_items_inserted += 1
+                review_issues[item.row_number] = review_issue
 
     # ─── 6. If nothing needs review, batch is ready to commit straight ────
     if queue_items_inserted == 0:
@@ -408,6 +680,7 @@ def persist_upload_to_db(
         "lines_inserted": lines_inserted,
         "queue_items_inserted": queue_items_inserted,
         "status_regression_rows": status_regression_rows,
+        "review_issues": review_issues,
     }
 
 
@@ -537,32 +810,35 @@ def _detect_labs_in_line(
 ) -> list[Lab]:
     """
     Detect labs referenced on a PR line strictly from that row's own fields:
-      1. Checks explicit location/purpose fields (`lab`, `purpose`, `instruction_to_vendor`).
-         If >= 2 labs are found there, returns them directly.
+      1. Checks explicit location/purpose fields (`lab`, `purpose`, `instruction_to_vendor`)
+         individually. If any single field mentions >= 2 labs (e.g. 'E2-02-01/02/03'),
+         returns those labs for multi-lab splitting.
       2. Checks `item_details` for collective multi-lab purchases. If `item_details`
          itself references >= 2 labs, merges them with any location field lab.
+      3. Otherwise returns the first single lab matched in priority order.
     """
     _ = header_item
-    loc_text = " | ".join(
-        part
-        for part in (item.lab, item.purpose, item.instruction_to_vendor)
-        if part and str(part).strip()
-    )
-    loc_labs = _find_labs_in_text(loc_text, lab_patterns)
-    if len(loc_labs) >= 2:
-        return loc_labs
+    first_single_match: list[Lab] = []
+    for raw_field in (item.lab, item.purpose, item.instruction_to_vendor):
+        if not raw_field or not str(raw_field).strip():
+            continue
+        field_labs = _find_labs_in_text(str(raw_field), lab_patterns)
+        if len(field_labs) >= 2:
+            return field_labs
+        if len(field_labs) == 1 and not first_single_match:
+            first_single_match = field_labs
 
     details_labs = _find_labs_in_text(item.item_details or "", lab_patterns)
     if len(details_labs) >= 2:
-        seen = {lab.lab_id for lab in loc_labs}
-        merged = list(loc_labs)
+        seen = {lab.lab_id for lab in first_single_match}
+        merged = list(first_single_match)
         for lab in details_labs:
             if lab.lab_id not in seen:
                 seen.add(lab.lab_id)
                 merged.append(lab)
         return merged
 
-    return loc_labs or details_labs
+    return first_single_match or details_labs
 
 
 def _resolve_line_amount(item: PRLineItem) -> Decimal:
@@ -601,35 +877,9 @@ def _resolve_category_id(
          Purpose caused the single-lab classifier to bail out), and step 1 found
          exactly 1 unambiguous category with no upstream conflict reason, use it.
     """
-    combined = " | ".join(
-        str(v).strip()
-        for v in (item_pr_category, item_req_type)
-        if v and str(v).strip()
+    matched_names, matched_ids = _find_named_categories(
+        item_pr_category, item_req_type, categories_by_name, general_cat_id
     )
-
-    matched_names: list[str] = []
-    matched_ids: list[int] = []
-    seen_ids: set[int] = set()
-
-    if combined:
-        sorted_cats = sorted(
-            (
-                (name, cid)
-                for name, cid in categories_by_name.items()
-                if cid != general_cat_id
-            ),
-            key=lambda pair: len(pair[0]),
-            reverse=True,
-        )
-        for cat_name, cat_id in sorted_cats:
-            pattern = re.compile(
-                rf"(?<![A-Za-z0-9]){re.escape(cat_name)}(?![A-Za-z0-9])",
-                re.IGNORECASE,
-            )
-            if pattern.search(combined) and cat_id not in seen_ids:
-                seen_ids.add(cat_id)
-                matched_ids.append(cat_id)
-                matched_names.append(cat_name.title())
 
     # Explicit conflict: 2+ categories found in Req Type / PR Category
     if len(matched_ids) > 1:
@@ -661,6 +911,72 @@ def _resolve_category_id(
         return matched_ids[0], classifier_reason
 
     return None, classifier_reason
+
+
+def _find_named_categories(
+    item_pr_category: str | None,
+    item_req_type: str | None,
+    categories_by_name: dict[str, int],
+    general_cat_id: int,
+) -> tuple[list[str], list[int]]:
+    """Names and ids of the non-General categories named in the source fields."""
+    combined = " | ".join(
+        str(v).strip()
+        for v in (item_pr_category, item_req_type)
+        if v and str(v).strip()
+    )
+
+    matched_names: list[str] = []
+    matched_ids: list[int] = []
+    seen_ids: set[int] = set()
+
+    if combined:
+        sorted_cats = sorted(
+            (
+                (name, cid)
+                for name, cid in categories_by_name.items()
+                if cid != general_cat_id
+            ),
+            key=lambda pair: len(pair[0]),
+            reverse=True,
+        )
+        for cat_name, cat_id in sorted_cats:
+            pattern = re.compile(
+                rf"(?<![A-Za-z0-9]){re.escape(cat_name)}(?![A-Za-z0-9])",
+                re.IGNORECASE,
+            )
+            if pattern.search(combined) and cat_id not in seen_ids:
+                seen_ids.add(cat_id)
+                matched_ids.append(cat_id)
+                matched_names.append(cat_name.title())
+
+    return matched_names, matched_ids
+
+
+def _lab_issue(wbs: str | None, group_name: str | None, *, wbs_matched: bool) -> str:
+    """Tell the reviewer what to pick when a line has no specific lab."""
+    if group_name:
+        return (
+            "Choose a lab. The file doesn't say which "
+            f"{group_name} lab this line is for."
+        )
+    wbs_text = (wbs or "").strip()
+    if not wbs_text:
+        return "Choose a lab group and lab. This line has no WBS."
+    if not wbs_matched:
+        return (
+            f'Choose a lab group and lab. The WBS code "{wbs_text}" '
+            "doesn't match any lab group."
+        )
+    return "Choose a lab group and lab. This line isn't linked to a specific lab group."
+
+
+def _category_issue(named: list[str], classifier_named: list[str]) -> str | None:
+    """Tell the reviewer to pick one when the file names 2+ categories."""
+    names = named if len(named) > 1 else classifier_named
+    if len(names) < 2:
+        return None
+    return f"Choose one category. The file lists more than one: {', '.join(sorted(names))}."
 
 
 def _split_amount_equally(total: Any, count: int) -> list[Decimal]:

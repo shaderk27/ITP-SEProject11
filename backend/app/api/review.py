@@ -6,6 +6,8 @@ auto-classifications. Frontend's Review Queue page reads from here.
 """
 
 from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -53,6 +55,26 @@ class BatchSummary(BaseModel):
     open_queue_count: int
 
 
+class WBSAllocationItem(BaseModel):
+    """One WBS allocation portion inside a multi-WBS purchase line."""
+
+    allocation_index: int
+    row_number: int | None = None
+    wbs_code: str
+    mca: str | None = None
+    amount_gst: str | None = None
+    amount_missing: bool = False
+    suggested_lab_group_id: int | None = None
+    suggested_lab_id: int | None = None
+    suggested_category_id: int | None = None
+    current_lab_group: str = "General"
+    current_lab: str = "General"
+    current_category: str = "General"
+    is_lab_group_general: bool = True
+    is_lab_general: bool = True
+    is_category_general: bool = True
+
+
 class ReviewQueueLine(BaseModel):
     """One line error inside a PR group."""
 
@@ -70,6 +92,9 @@ class ReviewQueueLine(BaseModel):
     is_category_general: bool
     review_reason: str
     queue_status: str
+    wbs_allocations: list[WBSAllocationItem] = []
+    allocations_reconciled: bool = True
+    allocated_total_gst: str | None = None
 
 
 class ReviewPRGroup(BaseModel):
@@ -161,17 +186,30 @@ class QueueItemDetail(BaseModel):
     is_lab_group_general: bool
     is_lab_general: bool
     is_category_general: bool
+    # Multi-WBS allocations (empty for ordinary single-WBS lines)
+    wbs_allocations: list[WBSAllocationItem] = []
+    allocations_reconciled: bool = True
+    allocated_total_gst: str | None = None
     # Dropdown options for the form
     available_lab_groups: list[LabGroupOption]
     available_labs: list[LabOption]
     available_categories: list[CategoryOption]
 
 
-class CorrectionRequest(BaseModel):
+class AllocationCorrectionItem(BaseModel):
+    wbs_code: str
+    amount_gst: Decimal
     lab_group_id: int
     lab_id: int
     category_id: int
+
+
+class CorrectionRequest(BaseModel):
+    lab_group_id: int | None = None
+    lab_id: int | None = None
+    category_id: int | None = None
     comment: str | None = None
+    allocations: list[AllocationCorrectionItem] | None = None
 
 
 class CorrectionResponse(BaseModel):
@@ -208,8 +246,8 @@ def list_batches(
     if role_name == "teamlead" and not current_user.lab_group_id:
         return []
 
-    open_batches_query = (
-        db.query(UploadBatch.batch_id)
+    open_rows = (
+        db.query(UploadBatch.batch_id, StagingPRLine)
         .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
         .join(
             StagingPRLine,
@@ -220,30 +258,33 @@ def list_batches(
             ReviewQueueItem.staging_line_id == StagingPRLine.staging_line_id,
         )
         .filter(ReviewQueueItem.queue_status == "open")
+        .all()
     )
-    if role_name == "teamlead":
-        open_batches_query = open_batches_query.filter(
-            StagingPRLine.suggested_lab_group_id == current_user.lab_group_id
-        )
-
-    ready_batches_query = db.query(UploadBatch.batch_id).filter(
-        UploadBatch.upload_status == "ready_to_commit"
-    )
-    if role_name == "teamlead":
-        ready_batches_query = (
-            ready_batches_query.join(
-                StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id
-            )
-            .join(
-                StagingPRLine,
-                StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id,
-            )
-            .filter(StagingPRLine.suggested_lab_group_id == current_user.lab_group_id)
-        )
-
-    relevant_ids = {row[0] for row in open_batches_query.distinct().all()} | {
-        row[0] for row in ready_batches_query.distinct().all()
+    open_batch_ids = {
+        b_id
+        for b_id, s_line in open_rows
+        if role_name != "teamlead"
+        or _line_in_teamlead_scope(s_line, current_user.lab_group_id)
     }
+
+    ready_rows = (
+        db.query(UploadBatch.batch_id, StagingPRLine)
+        .join(StagingPRHeader, StagingPRHeader.batch_id == UploadBatch.batch_id)
+        .join(
+            StagingPRLine,
+            StagingPRLine.staging_header_id == StagingPRHeader.staging_header_id,
+        )
+        .filter(UploadBatch.upload_status == "ready_to_commit")
+        .all()
+    )
+    ready_batch_ids = {
+        b_id
+        for b_id, s_line in ready_rows
+        if role_name != "teamlead"
+        or _line_in_teamlead_scope(s_line, current_user.lab_group_id)
+    }
+
+    relevant_ids = open_batch_ids | ready_batch_ids
     if not relevant_ids:
         return []
 
@@ -297,7 +338,7 @@ def get_batch_detail(
 
     pr_groups: list[ReviewPRGroup] = []
     for header in headers:
-        line_query = (
+        line_rows = (
             db.query(StagingPRLine, ReviewQueueItem)
             .join(
                 ReviewQueueItem,
@@ -305,13 +346,15 @@ def get_batch_detail(
             )
             .filter(StagingPRLine.staging_header_id == header.staging_header_id)
             .filter(ReviewQueueItem.queue_status.in_(["open", "resolved"]))
+            .order_by(StagingPRLine.source_line_no)
+            .all()
         )
         if role_name == "teamlead" and current_user.lab_group_id is not None:
-            line_query = line_query.filter(
-                StagingPRLine.suggested_lab_group_id == current_user.lab_group_id
-            )
-
-        line_rows = line_query.order_by(StagingPRLine.source_line_no).all()
+            line_rows = [
+                (s_line, q_item)
+                for s_line, q_item in line_rows
+                if _line_in_teamlead_scope(s_line, current_user.lab_group_id)
+            ]
         if not line_rows:
             continue
 
@@ -320,6 +363,14 @@ def get_batch_detail(
             lg_name = lab_group_names.get(line.suggested_lab_group_id, "General")
             lab_name = lab_names.get(line.suggested_lab_id, "General")
             cat_name = category_names.get(line.suggested_category_id, "General")
+            alloc_items, reconciles, alloc_total_str = _build_wbs_allocation_items(
+                line, lab_group_names, lab_names, category_names
+            )
+            display_wbs = (
+                ", ".join(dict.fromkeys(a.wbs_code for a in alloc_items if a.wbs_code))
+                if alloc_items
+                else (_raw_line_value(line, "wbs") or header.wbs_code or "")
+            )
             lines.append(
                 ReviewQueueLine(
                     review_queue_id=queue_item.review_queue_id,
@@ -329,7 +380,7 @@ def get_batch_detail(
                     amount_gst=str(line.amount_gst)
                     if line.amount_gst is not None
                     else "0",
-                    wbs_code=header.wbs_code or "",
+                    wbs_code=display_wbs,
                     current_lab_group=lg_name,
                     current_lab=lab_name,
                     current_category=cat_name,
@@ -338,6 +389,9 @@ def get_batch_detail(
                     is_category_general=cat_name.lower() == "general",
                     review_reason=queue_item.review_reason or "",
                     queue_status=queue_item.queue_status,
+                    wbs_allocations=alloc_items,
+                    allocations_reconciled=reconciles,
+                    allocated_total_gst=alloc_total_str,
                 )
             )
 
@@ -394,9 +448,30 @@ def get_queue_item(
     lab_name_by_id = {lab.lab_id: lab.lab_name for lab in labs}
     cat_name_by_id = {c.category_id: c.category_name for c in categories}
 
+    # Restrict selectable Lab Groups and Labs to the Team Lead's permitted budget scope
+    if role_name == "teamlead" and current_user.lab_group_id is not None:
+        scoped_lab_groups = [
+            g for g in lab_groups if g.lab_group_id == current_user.lab_group_id
+        ]
+        scoped_labs = [
+            lab for lab in labs if lab.lab_group_id == current_user.lab_group_id
+        ]
+    else:
+        scoped_lab_groups = lab_groups
+        scoped_labs = labs
+
     current_lab_group = lg_name_by_id.get(line.suggested_lab_group_id, "General")
     current_lab = lab_name_by_id.get(line.suggested_lab_id, "General")
     current_category = cat_name_by_id.get(line.suggested_category_id, "General")
+
+    alloc_items, reconciles, alloc_total_str = _build_wbs_allocation_items(
+        line, lg_name_by_id, lab_name_by_id, cat_name_by_id
+    )
+    display_wbs = (
+        ", ".join(dict.fromkeys(a.wbs_code for a in alloc_items if a.wbs_code))
+        if alloc_items
+        else (_raw_line_value(line, "wbs") or header.wbs_code or "")
+    )
 
     latest_action_row = (
         db.query(ReviewAction, User)
@@ -431,7 +506,7 @@ def get_queue_item(
         source_pr_number=header.source_pr_number,
         requestor_name=header.requestor_name or "",
         purpose=header.purpose or "",
-        wbs_code=header.wbs_code or "",
+        wbs_code=display_wbs,
         instruction_to_vendor=header.instruction_to_vendor or "",
         pr_sub_date=header.pr_sub_date.isoformat() if header.pr_sub_date else None,
         batch_id=batch.batch_id,
@@ -445,13 +520,16 @@ def get_queue_item(
         is_lab_group_general=current_lab_group.lower() == "general",
         is_lab_general=current_lab.lower() == "general",
         is_category_general=current_category.lower() == "general",
+        wbs_allocations=alloc_items,
+        allocations_reconciled=reconciles,
+        allocated_total_gst=alloc_total_str,
         available_lab_groups=[
             LabGroupOption(
                 lab_group_id=g.lab_group_id,
                 lab_group_name=g.lab_group_name,
                 wbs_code=g.wbs_code or "",
             )
-            for g in lab_groups
+            for g in scoped_lab_groups
         ],
         available_labs=[
             LabOption(
@@ -461,7 +539,7 @@ def get_queue_item(
                 lab_group_id=lab.lab_group_id,
                 is_general=bool(lab.is_general),
             )
-            for lab in labs
+            for lab in scoped_labs
         ],
         available_categories=[
             CategoryOption(category_id=c.category_id, category_name=c.category_name)
@@ -501,51 +579,191 @@ def correct_queue_item(
             "This review item is not in your assigned lab group.",
         )
 
-    lab_group = (
-        db.query(LabGroup).filter(LabGroup.lab_group_id == body.lab_group_id).first()
-    )
-    if not lab_group:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"Unknown lab_group_id={body.lab_group_id}."
-        )
-    lab = db.query(Lab).filter(Lab.lab_id == body.lab_id).first()
-    if not lab:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"Unknown lab_id={body.lab_id}."
-        )
-    if lab.lab_group_id != body.lab_group_id:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"Lab '{lab.lab_name}' does not belong to lab_group '{lab_group.lab_group_name}'.",
-        )
-    category = (
-        db.query(SpendingCategory)
-        .filter(SpendingCategory.category_id == body.category_id)
-        .first()
-    )
-    if not category:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, f"Unknown category_id={body.category_id}."
-        )
+    raw_json = dict(line.raw_line_json) if isinstance(line.raw_line_json, dict) else {}
+    existing_allocs = list(raw_json.get("wbs_allocations") or [])
+    line_amount = Decimal(str(line.amount_gst or 0)).quantize(Decimal("0.01"))
 
-    old_values = {
+    old_values: dict[str, Any] = {
         "suggested_lab_group_id": line.suggested_lab_group_id,
         "suggested_lab_id": line.suggested_lab_id,
         "suggested_category_id": line.suggested_category_id,
         "review_status": line.review_status,
     }
-    new_values = {
-        "suggested_lab_group_id": body.lab_group_id,
-        "suggested_lab_id": body.lab_id,
-        "suggested_category_id": body.category_id,
-        "review_status": "resolved",
-    }
+    if existing_allocs:
+        old_values["wbs_allocations"] = existing_allocs
 
-    line.suggested_lab_group_id = body.lab_group_id
-    line.suggested_lab_id = body.lab_id
-    line.suggested_category_id = body.category_id
-    line.review_status = "resolved"
-    line.classification_status = "confident"
+    # ─── Path A: Explicit Multi-WBS Allocation Confirmation / Correction ──
+    if body.allocations is not None and len(body.allocations) > 0:
+        validated_allocs: list[dict[str, Any]] = []
+        alloc_sum = Decimal("0.00")
+        parent_identity_key = str(
+            raw_json.get("line_identity_key")
+            or f"{header.source_pr_number}::{line.source_line_no}"
+        )
+
+        for idx, alloc_in in enumerate(body.allocations, start=1):
+            if (
+                role_name == "teamlead"
+                and alloc_in.lab_group_id != current_user.lab_group_id
+            ):
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    "Team Leads can only assign allocations within their own assigned Lab Group.",
+                )
+
+            wbs_clean = (alloc_in.wbs_code or "").strip()
+            if not wbs_clean:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Allocation #{idx} must have a WBS code.",
+                )
+
+            amt = Decimal(str(alloc_in.amount_gst)).quantize(Decimal("0.01"))
+            if amt <= Decimal("0.00"):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    f"Allocation #{idx} ({wbs_clean}) amount must be greater than $0.00.",
+                )
+
+            lg, lab, cat = _validate_classification_ids(
+                db, alloc_in.lab_group_id, alloc_in.lab_id, alloc_in.category_id
+            )
+            alloc_sum += amt
+
+            prev_entry = (
+                existing_allocs[idx - 1] if idx - 1 < len(existing_allocs) else {}
+            )
+            portion_key = prev_entry.get(
+                "line_identity_key", f"{parent_identity_key}::alloc_{idx}"
+            )
+            validated_allocs.append(
+                {
+                    "allocation_index": idx,
+                    "row_number": prev_entry.get("row_number", line.source_line_no),
+                    "wbs": wbs_clean,
+                    "mca": prev_entry.get("mca") or "Amount",
+                    "raw_allocation": str(amt),
+                    "quantity": prev_entry.get("quantity"),
+                    "amount_gst": str(amt),
+                    "amount_missing": False,
+                    "suggested_lab_group_id": lg.lab_group_id,
+                    "suggested_lab_id": lab.lab_id,
+                    "suggested_category_id": cat.category_id,
+                    "line_identity_key": portion_key,
+                    "confirmed": True,
+                }
+            )
+
+        if abs(alloc_sum - line_amount) > Decimal("0.01"):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                (
+                    f"WBS allocation portions sum to ${alloc_sum:,.2f}, which does not "
+                    f"reconcile with the original purchase line amount of ${line_amount:,.2f}."
+                ),
+            )
+
+        raw_json["wbs_allocations"] = validated_allocs
+        raw_json["allocations_reconciled"] = True
+        raw_json["allocated_total_gst"] = str(alloc_sum)
+        line.raw_line_json = raw_json
+
+        primary_group_id = validated_allocs[0]["suggested_lab_group_id"]
+        primary_lab_id = validated_allocs[0]["suggested_lab_id"]
+        primary_cat_id = validated_allocs[0]["suggested_category_id"]
+
+        line.suggested_lab_group_id = primary_group_id
+        line.suggested_lab_id = primary_lab_id
+        line.suggested_category_id = primary_cat_id
+        line.review_status = "resolved"
+        line.classification_status = "confident"
+
+        new_values: dict[str, Any] = {
+            "suggested_lab_group_id": primary_group_id,
+            "suggested_lab_id": primary_lab_id,
+            "suggested_category_id": primary_cat_id,
+            "review_status": "resolved",
+            "wbs_allocations": validated_allocs,
+        }
+    else:
+        # ─── Path B: Top-Level Classification Correction ──────────────────
+        if body.lab_group_id is None or body.lab_id is None or body.category_id is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "lab_group_id, lab_id, and category_id are required.",
+            )
+
+        if role_name == "teamlead" and body.lab_group_id != current_user.lab_group_id:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Team Leads can only assign lines within their own assigned Lab Group.",
+            )
+
+        lg, lab, cat = _validate_classification_ids(
+            db, body.lab_group_id, body.lab_id, body.category_id
+        )
+
+        # If this line has multi-WBS allocations, ensure their amounts reconcile before allowing resolution
+        if len(existing_allocs) > 1:
+            any_missing = any(
+                bool(a.get("amount_missing")) or a.get("amount_gst") is None
+                for a in existing_allocs
+            )
+            if any_missing:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    (
+                        "Cannot resolve multi-WBS line with missing allocation amounts. "
+                        f"Provide exact allocation amounts summing to ${line_amount:,.2f}."
+                    ),
+                )
+            alloc_sum = sum(
+                (Decimal(str(a["amount_gst"])) for a in existing_allocs),
+                Decimal("0.00"),
+            ).quantize(Decimal("0.01"))
+            if abs(alloc_sum - line_amount) > Decimal("0.01"):
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    (
+                        f"WBS allocation portions sum to ${alloc_sum:,.2f}, which does not "
+                        f"reconcile with the original purchase line amount of ${line_amount:,.2f}."
+                    ),
+                )
+            general_group = (
+                db.query(LabGroup).filter(LabGroup.lab_group_name == "General").first()
+            )
+            general_group_id = general_group.lab_group_id if general_group else None
+            updated_allocs: list[dict[str, Any]] = []
+            for a in existing_allocs:
+                a_copy = dict(a)
+                if (
+                    a_copy.get("suggested_lab_group_id") in (None, general_group_id)
+                    or a_copy.get("suggested_lab_group_id") == lg.lab_group_id
+                ):
+                    a_copy["suggested_lab_group_id"] = lg.lab_group_id
+                    a_copy["suggested_lab_id"] = lab.lab_id
+                a_copy["suggested_category_id"] = cat.category_id
+                a_copy["confirmed"] = True
+                updated_allocs.append(a_copy)
+            raw_json["wbs_allocations"] = updated_allocs
+            raw_json["allocations_reconciled"] = True
+            raw_json["allocated_total_gst"] = str(alloc_sum)
+            line.raw_line_json = raw_json
+
+        line.suggested_lab_group_id = lg.lab_group_id
+        line.suggested_lab_id = lab.lab_id
+        line.suggested_category_id = cat.category_id
+        line.review_status = "resolved"
+        line.classification_status = "confident"
+
+        new_values = {
+            "suggested_lab_group_id": lg.lab_group_id,
+            "suggested_lab_id": lab.lab_id,
+            "suggested_category_id": cat.category_id,
+            "review_status": "resolved",
+        }
+        if len(existing_allocs) > 1:
+            new_values["wbs_allocations"] = raw_json["wbs_allocations"]
 
     item.queue_status = "resolved"
     item.resolved_at = func.now()
@@ -554,9 +772,9 @@ def correct_queue_item(
         ReviewAction(
             review_queue_id=item.review_queue_id,
             reviewed_by=current_user.user_id,
-            final_lab_group_id=body.lab_group_id,
-            final_lab_id=body.lab_id,
-            final_category_id=body.category_id,
+            final_lab_group_id=line.suggested_lab_group_id,
+            final_lab_id=line.suggested_lab_id,
+            final_category_id=line.suggested_category_id,
             action_type="corrected",
             review_comment=body.comment,
         )
@@ -646,27 +864,6 @@ def commit_batch(
             f"Batch {batch_id} still has {open_count} open review item(s). Resolve them first.",
         )
 
-    if role_name == "teamlead":
-        if current_user.lab_group_id is None:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, "Team Lead is not assigned to a lab group."
-            )
-        owns_any = (
-            db.query(StagingPRLine.staging_line_id)
-            .join(
-                StagingPRHeader,
-                StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
-            )
-            .filter(StagingPRHeader.batch_id == batch_id)
-            .filter(StagingPRLine.suggested_lab_group_id == current_user.lab_group_id)
-            .first()
-        )
-        if not owns_any:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                "This batch has no lines in your assigned lab group.",
-            )
-
     headers = (
         db.query(StagingPRHeader)
         .filter(StagingPRHeader.batch_id == batch_id)
@@ -679,20 +876,125 @@ def commit_batch(
             f"Batch {batch_id} has no staging headers to commit.",
         )
 
-    # Pre-scan staging lines to sync pre-commit notification flags before adding new spend
+    if role_name == "teamlead":
+        if current_user.lab_group_id is None:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, "Team Lead is not assigned to a lab group."
+            )
+        all_batch_lines = (
+            db.query(StagingPRLine)
+            .join(
+                StagingPRHeader,
+                StagingPRHeader.staging_header_id == StagingPRLine.staging_header_id,
+            )
+            .filter(StagingPRHeader.batch_id == batch_id)
+            .all()
+        )
+        if not any(
+            _line_in_teamlead_scope(s_line, current_user.lab_group_id)
+            for s_line in all_batch_lines
+        ):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "This batch has no lines in your assigned lab group.",
+            )
+
+    # ─── Pre-Commit Multi-WBS Reconciliation Validation ───────────────────
     pre_lab_ids: set[int] = set()
     pre_group_ids: set[int] = set()
+
     for header in headers:
         staging_lines = (
             db.query(StagingPRLine)
             .filter(StagingPRLine.staging_header_id == header.staging_header_id)
+            .order_by(StagingPRLine.source_line_no)
             .all()
         )
+        pr_has_multi_wbs = False
+        pr_lines_sum = Decimal("0.00")
+        staged_base_keys: set[str] = set()
+
         for s_line in staging_lines:
             if s_line.suggested_lab_id:
                 pre_lab_ids.add(s_line.suggested_lab_id)
             if s_line.suggested_lab_group_id:
                 pre_group_ids.add(s_line.suggested_lab_group_id)
+
+            parent_key = _raw_line_value(s_line, "line_identity_key")
+            if parent_key:
+                staged_base_keys.add(_base_identity_key(parent_key))
+
+            line_amt = Decimal(str(s_line.amount_gst or 0)).quantize(Decimal("0.01"))
+            pr_lines_sum += line_amt
+
+            allocs = _raw_wbs_allocations(s_line)
+            if len(allocs) > 1:
+                pr_has_multi_wbs = True
+                for alloc in allocs:
+                    if alloc.get("suggested_lab_id"):
+                        pre_lab_ids.add(int(alloc["suggested_lab_id"]))
+                    if alloc.get("suggested_lab_group_id"):
+                        pre_group_ids.add(int(alloc["suggested_lab_group_id"]))
+
+                any_missing = any(
+                    bool(a.get("amount_missing")) or a.get("amount_gst") is None
+                    for a in allocs
+                )
+                if any_missing:
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        (
+                            f"Cannot commit batch {batch_id}: PR {header.source_pr_number} "
+                            f"line {s_line.source_line_no} has missing WBS allocation amounts."
+                        ),
+                    )
+
+                alloc_sum = sum(
+                    (Decimal(str(a["amount_gst"])) for a in allocs),
+                    Decimal("0.00"),
+                ).quantize(Decimal("0.01"))
+                if abs(alloc_sum - line_amt) > Decimal("0.01"):
+                    raise HTTPException(
+                        status.HTTP_409_CONFLICT,
+                        (
+                            f"Cannot commit batch {batch_id}: PR {header.source_pr_number} "
+                            f"line {s_line.source_line_no} WBS allocations (${alloc_sum:,.2f}) "
+                            f"do not reconcile with purchase line amount (${line_amt:,.2f})."
+                        ),
+                    )
+
+        if pr_has_multi_wbs and header.grand_total_sgd is not None:
+            # Include any unchanged already-committed lines on this PR that were skipped as duplicates on re-upload
+            existing_pr_check = (
+                db.query(PurchaseRequest)
+                .filter(PurchaseRequest.source_pr_number == header.source_pr_number)
+                .first()
+            )
+            if existing_pr_check is not None:
+                existing_map = _existing_committed_lines_by_identity(
+                    db, existing_pr_check
+                )
+                for ex_key, ex_line in existing_map.items():
+                    if _base_identity_key(ex_key) not in staged_base_keys:
+                        pr_lines_sum += Decimal(str(ex_line.amount_gst or 0)).quantize(
+                            Decimal("0.01")
+                        )
+
+            header_grand = Decimal(str(header.grand_total_sgd)).quantize(
+                Decimal("0.01")
+            )
+            if header_grand > Decimal("0.00") and abs(
+                pr_lines_sum - header_grand
+            ) > Decimal("0.01"):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    (
+                        f"Cannot commit batch {batch_id}: PR {header.source_pr_number} "
+                        f"committed line totals (${pr_lines_sum:,.2f}) do not reconcile "
+                        f"with PR grand total (${header_grand:,.2f})."
+                    ),
+                )
+
     _sync_pre_commit_threshold_flags(db, pre_lab_ids, pre_group_ids)
 
     pr_ids: list[int] = []
@@ -782,15 +1084,163 @@ def commit_batch(
 
         existing_lines_by_identity = _existing_committed_lines_by_identity(db, pr)
         status_updates: list[dict] = []
+        allocation_updates: list[dict] = []
+        amount_updates: list[dict] = []
         regressions_skipped: list[dict] = []
+        committed_line_units = 0
 
         for line in lines:
-            line_identity_key = _raw_line_value(line, "line_identity_key")
+            allocs = _raw_wbs_allocations(line)
+            parent_identity_key = _raw_line_value(line, "line_identity_key")
+            incoming_status = _raw_line_value(line, "pr_status")
+
+            # ─── Commit Multi-WBS Exact Allocation Portions ───────────────
+            if len(allocs) > 1:
+                prefix = f"{parent_identity_key}::alloc_"
+                existing_portion_map: dict[str, PurchaseRequestLine] = {
+                    k: v
+                    for k, v in existing_lines_by_identity.items()
+                    if k.startswith(prefix)
+                }
+                if (
+                    not existing_portion_map
+                    and parent_identity_key in existing_lines_by_identity
+                ):
+                    existing_portion_map[f"{parent_identity_key}::alloc_1"] = (
+                        existing_lines_by_identity[parent_identity_key]
+                    )
+
+                # Check status regression against any existing committed portion
+                regressed_existing = next(
+                    (
+                        ex_line
+                        for ex_line in existing_portion_map.values()
+                        if is_status_regression(ex_line.pr_status, incoming_status)
+                    ),
+                    None,
+                )
+                if regressed_existing is not None:
+                    line.duplicate_status = "status_regression"
+                    regressions_skipped.append(
+                        {
+                            "line_identity_key": parent_identity_key,
+                            "line_no": line.source_line_no,
+                            "staging_line_id": line.staging_line_id,
+                            "accepted_status": regressed_existing.pr_status,
+                            "attempted_status": incoming_status,
+                        }
+                    )
+                    if line is lines[0]:
+                        pr.pr_status = regressed_existing.pr_status
+                    continue
+
+                used_keys: set[str] = set()
+                base_desc = (line.item_details or "Purchase Item").strip()
+
+                for idx, alloc in enumerate(allocs, start=1):
+                    portion_key = str(
+                        alloc.get("line_identity_key")
+                        or f"{parent_identity_key}::alloc_{idx}"
+                    )
+                    used_keys.add(portion_key)
+
+                    alloc_wbs = str(alloc.get("wbs") or "").strip()
+                    alloc_amt = Decimal(str(alloc["amount_gst"])).quantize(
+                        Decimal("0.01")
+                    )
+                    alloc_lab_id = (
+                        alloc.get("suggested_lab_id") or line.suggested_lab_id
+                    )
+                    alloc_group_id = (
+                        alloc.get("suggested_lab_group_id")
+                        or line.suggested_lab_group_id
+                    )
+                    alloc_cat_id = (
+                        alloc.get("suggested_category_id") or line.suggested_category_id
+                    )
+                    alloc_qty = (
+                        Decimal(str(alloc["quantity"]))
+                        if alloc.get("quantity") is not None
+                        else line.qty
+                    )
+
+                    if alloc_lab_id:
+                        affected_lab_ids.add(int(alloc_lab_id))
+                    if alloc_group_id:
+                        affected_lab_group_ids.add(int(alloc_group_id))
+
+                    portion_desc = (
+                        f"{base_desc} [WBS: {alloc_wbs}]"
+                        if alloc_wbs and f"[WBS: {alloc_wbs}]" not in base_desc
+                        else base_desc
+                    )
+
+                    existing_portion = existing_portion_map.get(portion_key)
+                    if existing_portion is not None:
+                        old_snapshot = {
+                            "wbs": alloc_wbs,
+                            "amount_gst": str(existing_portion.amount_gst),
+                            "lab_id": existing_portion.lab_id,
+                            "category_id": existing_portion.category_id,
+                            "pr_status": existing_portion.pr_status,
+                        }
+                        existing_portion.line_no = line.source_line_no
+                        existing_portion.item_description = portion_desc
+                        existing_portion.qty = alloc_qty
+                        existing_portion.unit_rate = line.unit_rate
+                        existing_portion.amount_gst = alloc_amt
+                        existing_portion.lab_id = alloc_lab_id
+                        existing_portion.category_id = alloc_cat_id
+                        existing_portion.source_staging_line_id = line.staging_line_id
+                        existing_portion.pr_status = incoming_status or None
+                        lines_updated += 1
+                        new_snapshot = {
+                            "wbs": alloc_wbs,
+                            "amount_gst": str(alloc_amt),
+                            "lab_id": alloc_lab_id,
+                            "category_id": alloc_cat_id,
+                            "pr_status": incoming_status or None,
+                        }
+                        if old_snapshot != new_snapshot:
+                            allocation_updates.append(
+                                {
+                                    "line_identity_key": portion_key,
+                                    "old": old_snapshot,
+                                    "new": new_snapshot,
+                                }
+                            )
+                    else:
+                        db.add(
+                            PurchaseRequestLine(
+                                pr_id=pr.pr_id,
+                                line_no=line.source_line_no,
+                                item_description=portion_desc,
+                                qty=alloc_qty,
+                                unit_rate=line.unit_rate,
+                                amount_gst=alloc_amt,
+                                currency_code="SGD",
+                                lab_id=alloc_lab_id,
+                                category_id=alloc_cat_id,
+                                source_staging_line_id=line.staging_line_id,
+                                pr_status=incoming_status or None,
+                            )
+                        )
+                        lines_created += 1
+
+                # Remove any obsolete extra allocation rows if portion count shrunk on re-upload
+                for old_key, old_portion_line in existing_portion_map.items():
+                    if old_key not in used_keys:
+                        db.delete(old_portion_line)
+
+                committed_line_units += 1
+                continue
+
+            # ─── Standard Single-Line Commit ──────────────────────────────
+            line_identity_key = parent_identity_key
             existing_line = existing_lines_by_identity.get(line_identity_key)
 
             # W17: approval is final; an upload cannot move an Approved line
             # to any non-Approved status.
-            incoming_status = _raw_line_value(line, "pr_status")
             if existing_line and is_status_regression(
                 existing_line.pr_status, incoming_status
             ):
@@ -820,7 +1270,26 @@ def commit_batch(
                 new_status = _source_status_snapshot(line)
 
                 existing_line.source_staging_line_id = line.staging_line_id
-                existing_line.pr_status = _raw_line_value(line, "pr_status") or None
+                existing_line.pr_status = incoming_status or None
+                # Procurement can revise a PR after it is saved, so the latest
+                # file's money replaces the old figures. Lab and category stay
+                # as reviewed.
+                if (
+                    line.amount_gst is not None
+                    and line.amount_gst != existing_line.amount_gst
+                ):
+                    amount_updates.append(
+                        {
+                            "line_no": line.source_line_no,
+                            "old_amount": str(existing_line.amount_gst),
+                            "new_amount": str(line.amount_gst),
+                        }
+                    )
+                    existing_line.amount_gst = line.amount_gst
+                if line.qty is not None:
+                    existing_line.qty = line.qty
+                if line.unit_rate is not None:
+                    existing_line.unit_rate = line.unit_rate
                 lines_updated += 1
                 if old_status != new_status:
                     status_updates.append(
@@ -831,6 +1300,7 @@ def commit_batch(
                             "new_status": new_status,
                         }
                     )
+                committed_line_units += 1
                 continue
 
             db.add(
@@ -845,12 +1315,22 @@ def commit_batch(
                     lab_id=line.suggested_lab_id,
                     category_id=line.suggested_category_id,
                     source_staging_line_id=line.staging_line_id,
-                    pr_status=_raw_line_value(line, "pr_status") or None,
+                    pr_status=incoming_status or None,
                 )
             )
             lines_created += 1
+            committed_line_units += 1
 
         db.flush()
+        # A blocked line keeps its old amount, so the file's total no longer
+        # matches. Rebuild the PR total from the saved lines instead.
+        if regressions_skipped:
+            pr.grand_total_sgd = (
+                db.query(func.sum(PurchaseRequestLine.amount_gst))
+                .filter(PurchaseRequestLine.pr_id == pr.pr_id)
+                .scalar()
+            )
+            db.flush()
         final_line_count = (
             db.query(func.count(PurchaseRequestLine.pr_line_id))
             .filter(PurchaseRequestLine.pr_id == pr.pr_id)
@@ -874,12 +1354,19 @@ def commit_batch(
             if old_data is None:
                 old_data = {}
             old_data["status_updates"] = [u["old_status"] for u in status_updates]
+        if allocation_updates:
+            new_data["allocation_updates"] = [u["new"] for u in allocation_updates]
+            if old_data is None:
+                old_data = {}
+            old_data["allocation_updates"] = [u["old"] for u in allocation_updates]
+        if amount_updates:
+            new_data["amount_updates"] = amount_updates
         if regressions_skipped:
             new_data["status_regressions_skipped"] = regressions_skipped
             status_regressions_skipped += len(regressions_skipped)
 
         # Skipped lines trigger no threshold or vector refresh work.
-        if len(regressions_skipped) < len(lines):
+        if committed_line_units > 0:
             pr_ids.append(pr.pr_id)
             if pr_lab_group_id:
                 affected_lab_group_ids.add(pr_lab_group_id)
@@ -954,6 +1441,133 @@ def commit_batch(
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
+def _base_identity_key(raw_key: str) -> str:
+    for sep in ("::alloc_", "::lab_"):
+        if sep in raw_key:
+            return raw_key.split(sep, 1)[0]
+    return raw_key
+
+
+def _validate_classification_ids(
+    db: Session, lab_group_id: int, lab_id: int, category_id: int
+) -> tuple[LabGroup, Lab, SpendingCategory]:
+    lab_group = db.query(LabGroup).filter(LabGroup.lab_group_id == lab_group_id).first()
+    if not lab_group:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown lab_group_id={lab_group_id}."
+        )
+    lab = db.query(Lab).filter(Lab.lab_id == lab_id).first()
+    if not lab:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown lab_id={lab_id}.")
+    if lab.lab_group_id != lab_group_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Lab '{lab.lab_name}' does not belong to lab_group '{lab_group.lab_group_name}'.",
+        )
+    category = (
+        db.query(SpendingCategory)
+        .filter(SpendingCategory.category_id == category_id)
+        .first()
+    )
+    if not category:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"Unknown category_id={category_id}."
+        )
+    return lab_group, lab, category
+
+
+def _raw_wbs_allocations(line: StagingPRLine | None) -> list[dict[str, Any]]:
+    if line is None or not isinstance(line.raw_line_json, dict):
+        return []
+    allocs = line.raw_line_json.get("wbs_allocations")
+    if not isinstance(allocs, list):
+        return []
+    return [a for a in allocs if isinstance(a, dict)]
+
+
+def _line_in_teamlead_scope(line: StagingPRLine, user_lab_group_id: int | None) -> bool:
+    """
+    A Team Lead may review or edit a line only when it falls entirely within
+    that Team Lead's assigned Lab Group:
+      - For a multi-WBS line, EVERY allocation portion must belong to `user_lab_group_id`.
+        Lines spanning multiple Lab Groups (or containing any portion outside the Team
+        Lead's Lab Group) require Admin review.
+      - For a single-WBS line, `line.suggested_lab_group_id` must match `user_lab_group_id`.
+    """
+    if user_lab_group_id is None:
+        return False
+    allocs = _raw_wbs_allocations(line)
+    if len(allocs) > 1:
+        return all(
+            (alloc.get("suggested_lab_group_id") or line.suggested_lab_group_id)
+            == user_lab_group_id
+            for alloc in allocs
+        )
+    return line.suggested_lab_group_id == user_lab_group_id
+
+
+def _build_wbs_allocation_items(
+    line: StagingPRLine,
+    lg_name_by_id: dict[int, str],
+    lab_name_by_id: dict[int, str],
+    cat_name_by_id: dict[int, str],
+) -> tuple[list[WBSAllocationItem], bool, str | None]:
+    raw_allocs = _raw_wbs_allocations(line)
+    if len(raw_allocs) <= 1:
+        return [], True, None
+
+    items: list[WBSAllocationItem] = []
+    any_missing = False
+    alloc_sum = Decimal("0.00")
+
+    for idx, alloc in enumerate(raw_allocs, start=1):
+        lg_id = alloc.get("suggested_lab_group_id") or line.suggested_lab_group_id
+        l_id = alloc.get("suggested_lab_id") or line.suggested_lab_id
+        c_id = alloc.get("suggested_category_id") or line.suggested_category_id
+
+        lg_name = lg_name_by_id.get(lg_id, "General") if lg_id else "General"
+        l_name = lab_name_by_id.get(l_id, "General") if l_id else "General"
+        c_name = cat_name_by_id.get(c_id, "General") if c_id else "General"
+
+        raw_amt = alloc.get("amount_gst")
+        amt_missing = bool(alloc.get("amount_missing")) or raw_amt is None
+        amt_str: str | None = None
+        if not amt_missing:
+            try:
+                dec = Decimal(str(raw_amt)).quantize(Decimal("0.01"))
+                alloc_sum += dec
+                amt_str = str(dec)
+            except Exception:
+                amt_missing = True
+
+        if amt_missing:
+            any_missing = True
+
+        items.append(
+            WBSAllocationItem(
+                allocation_index=int(alloc.get("allocation_index") or idx),
+                row_number=alloc.get("row_number"),
+                wbs_code=str(alloc.get("wbs") or ""),
+                mca=alloc.get("mca"),
+                amount_gst=amt_str,
+                amount_missing=amt_missing,
+                suggested_lab_group_id=lg_id,
+                suggested_lab_id=l_id,
+                suggested_category_id=c_id,
+                current_lab_group=lg_name,
+                current_lab=l_name,
+                current_category=c_name,
+                is_lab_group_general=lg_name.lower() == "general",
+                is_lab_general=l_name.lower() == "general",
+                is_category_general=c_name.lower() == "general",
+            )
+        )
+
+    line_amt = Decimal(str(line.amount_gst or 0)).quantize(Decimal("0.01"))
+    reconciles = not any_missing and abs(alloc_sum - line_amt) <= Decimal("0.01")
+    return items, reconciles, str(alloc_sum)
+
+
 def _sync_pre_commit_threshold_flags(
     db: Session, lab_ids: set[int], group_ids: set[int]
 ) -> None:
@@ -1112,11 +1726,32 @@ def _existing_committed_lines_by_identity(
     db: Session, pr: PurchaseRequest
 ) -> dict[str, PurchaseRequestLine]:
     lines_by_identity: dict[str, PurchaseRequestLine] = {}
-    for line in pr.lines:
-        staging_line = _staging_line_for_committed_line(db, line)
-        line_identity_key = _raw_line_value(staging_line, "line_identity_key")
-        if line_identity_key:
-            lines_by_identity[line_identity_key] = line
+    all_lines = sorted(pr.lines, key=lambda item: item.pr_line_id or 0)
+    by_staging_id: dict[int, list[PurchaseRequestLine]] = {}
+    for line in all_lines:
+        if line.source_staging_line_id is not None:
+            by_staging_id.setdefault(line.source_staging_line_id, []).append(line)
+
+    for staging_id, grouped_lines in by_staging_id.items():
+        staging_line = (
+            db.query(StagingPRLine)
+            .filter(StagingPRLine.staging_line_id == staging_id)
+            .first()
+        )
+        if staging_line is None or not isinstance(staging_line.raw_line_json, dict):
+            continue
+        allocs = _raw_wbs_allocations(staging_line)
+        parent_key = _raw_line_value(staging_line, "line_identity_key")
+        if len(allocs) > 1 and len(grouped_lines) > 1:
+            for idx, final_line in enumerate(grouped_lines, start=1):
+                alloc_entry = allocs[idx - 1] if idx - 1 < len(allocs) else {}
+                portion_key = str(
+                    alloc_entry.get("line_identity_key") or f"{parent_key}::alloc_{idx}"
+                )
+                lines_by_identity[portion_key] = final_line
+        else:
+            if parent_key:
+                lines_by_identity[parent_key] = grouped_lines[0]
     return lines_by_identity
 
 
@@ -1164,8 +1799,8 @@ def _build_summary(
         or 0
     )
 
-    open_count_query = (
-        db.query(func.count(ReviewQueueItem.review_queue_id))
+    open_rows = (
+        db.query(ReviewQueueItem, StagingPRLine)
         .join(
             StagingPRLine,
             StagingPRLine.staging_line_id == ReviewQueueItem.staging_line_id,
@@ -1176,12 +1811,15 @@ def _build_summary(
         )
         .filter(StagingPRHeader.batch_id == batch.batch_id)
         .filter(ReviewQueueItem.queue_status == "open")
+        .all()
     )
     if role_name == "teamlead" and user_lab_group_id is not None:
-        open_count_query = open_count_query.filter(
-            StagingPRLine.suggested_lab_group_id == user_lab_group_id
-        )
-    open_count = open_count_query.scalar() or 0
+        open_rows = [
+            (q_item, s_line)
+            for q_item, s_line in open_rows
+            if _line_in_teamlead_scope(s_line, user_lab_group_id)
+        ]
+    open_count = len(open_rows)
 
     return BatchSummary(
         batch_id=batch.batch_id,

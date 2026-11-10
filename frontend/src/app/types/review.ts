@@ -7,10 +7,28 @@ export interface ReviewBatchSummary {
   batch_id: number;
   filename: string;
   upload_status: string;
-  uploaded_at: string;   // ISO timestamp
+  uploaded_at: string; // ISO timestamp
   uploader_name: string;
   total_lines: number;
   open_queue_count: number;
+}
+
+export interface WBSAllocationItem {
+  allocation_index: number;
+  row_number?: number | null;
+  wbs_code: string;
+  mca?: string | null;
+  amount_gst: string | null;
+  amount_missing: boolean;
+  suggested_lab_group_id: number | null;
+  suggested_lab_id: number | null;
+  suggested_category_id: number | null;
+  current_lab_group: string;
+  current_lab: string;
+  current_category: string;
+  is_lab_group_general: boolean;
+  is_lab_general: boolean;
+  is_category_general: boolean;
 }
 
 export interface ReviewQueueLine {
@@ -18,7 +36,7 @@ export interface ReviewQueueLine {
   staging_line_id: number;
   source_line_no: number | null;
   item_details: string;
-  amount_gst: string;        // Decimal as string for safe transport
+  amount_gst: string; // Decimal as string for safe transport
   wbs_code: string;
   current_lab_group: string;
   current_lab: string;
@@ -28,6 +46,9 @@ export interface ReviewQueueLine {
   is_category_general: boolean;
   review_reason: string;
   queue_status: string;
+  wbs_allocations?: WBSAllocationItem[];
+  allocations_reconciled?: boolean;
+  allocated_total_gst?: string | null;
 }
 
 export interface ReviewPRGroup {
@@ -103,16 +124,28 @@ export interface QueueItemDetail {
   is_lab_group_general: boolean;
   is_lab_general: boolean;
   is_category_general: boolean;
+  wbs_allocations?: WBSAllocationItem[];
+  allocations_reconciled?: boolean;
+  allocated_total_gst?: string | null;
   available_lab_groups: LabGroupOption[];
   available_labs: LabOption[];
   available_categories: CategoryOption[];
 }
 
-export interface CorrectionRequest {
+export interface AllocationCorrectionItem {
+  wbs_code: string;
+  amount_gst: string | number;
   lab_group_id: number;
   lab_id: number;
   category_id: number;
+}
+
+export interface CorrectionRequest {
+  lab_group_id?: number;
+  lab_id?: number;
+  category_id?: number;
   comment?: string;
+  allocations?: AllocationCorrectionItem[];
 }
 
 export interface CorrectionResponse {

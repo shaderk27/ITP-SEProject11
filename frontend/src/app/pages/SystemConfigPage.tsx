@@ -9,6 +9,7 @@ import {
 import { Button } from "../components/ui/button";
 import { UserManagement } from "../components/config/UserManagement";
 import { useAuth } from "../context/AuthContext";
+import { findCurrentPeriod } from "../services/dashboardService";
 import {
   Plus,
   Trash2,
@@ -204,7 +205,8 @@ export function SystemConfigPage() {
         });
         const data = await res.json();
         setPeriods(data);
-        if (data.length) setSelectedPeriodId(data[0].id);
+        const current = findCurrentPeriod(data) ?? data[0];
+        if (current) setSelectedPeriodId(current.id);
       } catch (err) {
         console.error(err);
       }
@@ -228,12 +230,10 @@ export function SystemConfigPage() {
         body: JSON.stringify({ year }),
       });
       if (res.ok) {
-        const created = await res.json();
         const listRes = await fetch(`${API_BASE_URL}/api/config/periods`, {
           credentials: "include",
         });
         setPeriods(await listRes.json());
-        setSelectedPeriodId(created.id);
         setIsPeriodModalOpen(false);
         setNewPeriodYear("");
       } else {
