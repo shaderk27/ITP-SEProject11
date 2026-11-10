@@ -598,7 +598,7 @@ def correct_queue_item(
         alloc_sum = Decimal("0.00")
         parent_identity_key = str(
             raw_json.get("line_identity_key")
-            or f"{header.source_pr_number}::{line.source_line_no}"
+            or f"{_header.source_pr_number}::{line.source_line_no}"
         )
 
         for idx, alloc_in in enumerate(body.allocations, start=1):
