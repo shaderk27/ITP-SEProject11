@@ -35,6 +35,16 @@ const ROLES: Role[] = [
   { role_id: 3, role_name: "labic" },
 ];
 
+// Display labels only. The underlying role_name values ("admin", "teamlead",
+// "labic") are still used for API calls and logic.
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  teamlead: "Team Lead",
+  labic: "Lab IC",
+};
+const formatRoleName = (name: string) =>
+  ROLE_LABELS[name.toLowerCase()] ?? name;
+
 async function fetchUsersByRole(role: string): Promise<any[]> {
   try {
     const r = await fetch(`${API}/auth/users?role=${role}`, { credentials: "include" });
@@ -376,7 +386,7 @@ export function CreateUserPage() {
               <option value="">Select a role...</option>
               {assignableRoles.map((r) => (
                 <option key={r.role_id} value={r.role_id}>
-                  {r.role_name}
+                  {formatRoleName(r.role_name)}
                 </option>
               ))}
             </select>
